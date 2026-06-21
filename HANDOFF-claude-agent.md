@@ -96,16 +96,53 @@ Nothing committed yet.
 via the `get_source` tool; only *semantic vector search* is missing. The "failed" badge = the embedding
 sub-job only.
 
-**Chosen fix direction (free, no API key): local Ollama.** Steps when the user is ready:
-1. Install + run Ollama (`brew install ollama` then `ollama serve`), or the user installs it.
-2. `ollama pull nomic-embed-text` (embeddings) and `ollama pull llama3.2` (small LLM for transformations).
-3. In Open Notebook: add an Ollama **credential**, register an **embedding** model (`nomic-embed-text`)
-   and set it as `default_embedding_model`; register `llama3.2` and set `default_transformation_model`
-   (so transformations stop routing to `claude-agent`). Ollama base URL defaults to
-   `http://localhost:11434` (env `OLLAMA_BASE_URL` / `OLLAMA_API_BASE` if needed). The Credentials/Models
-   UI or `/api/credentials` + `/api/models` endpoints can do this.
-4. Re-run processing: `POST /api/sources/source:vi1zlntfr5c3yvrdswim/retry` (or re-upload). Verify
-   embedded chunks > 0 and status = done.
+**Chosen fix direction — DECIDED 2026-06-21 (free, no API key): Ollama on the user's NVIDIA DGX Spark.**
+Hybrid: **keep Claude Agent as `default_chat_model`** (agentic chat, the built feature); route **all
+non-chat work to a local Ollama model on the Spark**. This single config change fixes BOTH failures at
+once (the transformation/summary crash AND embeddings) with **zero code** — no BaseChatModel adapter
+needed. The Spark has **128 GB unified memory**, so the box is not memory-constrained — run a top-tier
+embedder, not a tiny one.
+
+**Model choices (researched 2026-06-21, see Sources):**
+- **Embeddings → `qwen3-embedding:8b`** — #1 open-source on MTEB (70.58), Apache-2.0, 32K context, 4.7 GB
+  (trivial on the Spark). Use it at **1024 dims** (Matryoshka-truncate + renormalize) for a good
+  storage/speed/quality balance in SurrealDB; 4096 if max quality is wanted. (Chosen over the old
+  `nomic-embed-text` pick — nomic only wins on size/CPU, irrelevant on a Spark.)
+- **Transformations + large-context → `qwen2.5:32b-instruct`** — 128K context, strong, fast enough.
+  (Replaces the old `llama3.2` pick.) `qwen2.5:72b` / `llama3.3:70b` if more muscle is wanted.
+
+**Steps when the user is ready (Spark must be running Ollama and reachable first — BLOCKING prereq):**
+1. On the Spark: `ollama pull qwen3-embedding:8b` and `ollama pull qwen2.5:32b-instruct`; expose Ollama on
+   the network (`OLLAMA_HOST=0.0.0.0:11434`, restart). Confirm `curl http://<spark>:11434/api/tags`.
+2. In `.env`: set `OLLAMA_API_BASE=http://<spark-address>:11434`.
+3. Add an Ollama **credential**; register an **embedding** model (`qwen3-embedding:8b`) and a **language**
+   model (`qwen2.5:32b-instruct`) via the Credentials/Models UI or `/api/credentials` + `/api/models`.
+4. Repoint defaults (`/api/models/defaults`), keeping chat on Claude:
+   - `default_chat_model` = `claude_agent` (UNCHANGED)
+   - `default_embedding_model` = qwen3-embedding model
+   - `default_transformation_model` = qwen2.5 model  ← stops the summary crash
+   - `large_context_model` = qwen2.5 model  ← ⚠️ a >105k-token transformation routes here and would
+     otherwise hit the `claude_agent` sentinel and crash again (provision.py:23)
+   - `default_tools_model` = qwen2.5 model
+5. Re-run processing: `POST /api/sources/source:vi1zlntfr5c3yvrdswim/retry` (or re-upload). Verify
+   embedded chunks > 0 and status = done; then run a semantic search and generate a source summary.
+
+**Implementation footguns to verify when wiring up (do NOT skip):**
+- **Query/passage asymmetry:** Qwen3 (like bge/e5/nomic) expects an instruction prefix on the QUERY but
+  not on stored documents. Check `open_notebook/utils/embedding.py` embeds query vs. passage correctly;
+  getting this wrong silently tanks retrieval quality.
+- **Dimension lock-in:** pick the embedding dimension ONCE. Changing the dim (or the model) requires
+  re-embedding the ENTIRE corpus — vectors must share one space. SurrealDB stores `array<float>` so the
+  dim isn't schema-fixed, but it must be consistent across all docs + queries.
+
+**Phase-2 / future (documented, not now):** `bge-m3` if native dense+sparse hybrid is wanted (pairs with
+ON's existing full-text + vector search, but the sparse half needs code); add a **Qwen3-Reranker** stage
+on top of `vector_search` (highest-ROI retrieval upgrade after embeddings; stays local).
+
+**Sources (embedding research, 2026-06-21):** Morph "Best Ollama Embedding Models 2026"
+(morphllm.com/ollama-embedding-models); Ollama library (ollama.com/library/qwen3-embedding); MTEB
+leaderboard Mar 2026 (awesomeagents.ai); Milvus "Best Embedding Model for RAG 2026"; BentoML
+open-source embeddings guide.
 
 Alternative the user is also considering: just accept the subscription-only limitation (chat works;
 ingestion needs a real provider) and document it in `docs/claude-agent.md`.

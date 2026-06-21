@@ -5,7 +5,7 @@
 [![Stargazers][stars-shield]][stars-url]
 [![Issues][issues-shield]][issues-url]
 [![MIT License][license-shield]][license-url]
-<!-- [![LinkedIn][linkedin-shield]][linkedin-url] -->
+<!-- [![LinkedIn][linkedin-shield]][linke$$din-url] -->
 
 ## Note: This is a fork from an original project https://github.com/lfnovo/open-notebook
 # This project just integrates the claude agent sdk, so you can utilize your claude max plan
@@ -179,7 +179,6 @@ Done! You're ready to create your first notebook.
 - **[With Ollama (Free Local AI)](examples/docker-compose-ollama.yml)** - Run models locally without API costs
 - **[From Source (Developers)](docs/1-INSTALLATION/from-source.md)** - For development and contributions
 - **[Complete Installation Guide](docs/1-INSTALLATION/index.md)** - All deployment scenarios
-- **[Claude Agent chat (subscription, no API key)](docs/claude-agent.md)** - Chat with Claude via your Pro/Max subscription, with full agent tools + Open Notebook data access (run from source)
 
 ---
 
