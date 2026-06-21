@@ -10,6 +10,10 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 
+from open_notebook.ai.claude_agent import (
+    generate_with_claude_agent,
+    is_claude_agent_selected,
+)
 from open_notebook.ai.provision import provision_langchain_model
 from open_notebook.config import LANGGRAPH_CHECKPOINT_FILE
 from open_notebook.domain.notebook import Notebook
@@ -27,6 +31,23 @@ class ThreadState(TypedDict):
     model_override: Optional[str]
 
 
+async def _generate_ai_message(model_id, payload, config: RunnableConfig) -> AIMessage:
+    """Produce the chat AIMessage for the selected model.
+
+    Routes to the Claude Agent SDK when the selected/default model is the
+    ``claude_agent`` sentinel; otherwise uses the standard Esperanto/LangChain
+    provisioning path (unchanged behavior).
+    """
+    if await is_claude_agent_selected(model_id):
+        thread_id = config.get("configurable", {}).get("thread_id")
+        return await generate_with_claude_agent(payload, thread_id=thread_id)
+
+    model = await provision_langchain_model(
+        str(payload), model_id, "chat", max_tokens=8192
+    )
+    return model.invoke(payload)
+
+
 def call_model_with_messages(state: ThreadState, config: RunnableConfig) -> dict:
     try:
         system_prompt = Prompter(prompt_template="chat/system").render(data=state)  # type: ignore[arg-type]
@@ -35,16 +56,14 @@ def call_model_with_messages(state: ThreadState, config: RunnableConfig) -> dict
             "model_override"
         )
 
-        # Handle async model provisioning from sync context
+        # Handle async generation from sync context (reused event-loop bridging)
         def run_in_new_loop():
             """Run the async function in a new event loop"""
             new_loop = asyncio.new_event_loop()
             try:
                 asyncio.set_event_loop(new_loop)
                 return new_loop.run_until_complete(
-                    provision_langchain_model(
-                        str(payload), model_id, "chat", max_tokens=8192
-                    )
+                    _generate_ai_message(model_id, payload, config)
                 )
             finally:
                 new_loop.close()
@@ -58,19 +77,10 @@ def call_model_with_messages(state: ThreadState, config: RunnableConfig) -> dict
 
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(run_in_new_loop)
-                model = future.result()
+                ai_message = future.result()
         except RuntimeError:
             # No event loop running, safe to use asyncio.run()
-            model = asyncio.run(
-                provision_langchain_model(
-                    str(payload),
-                    model_id,
-                    "chat",
-                    max_tokens=8192,
-                )
-            )
-
-        ai_message = model.invoke(payload)
+            ai_message = asyncio.run(_generate_ai_message(model_id, payload, config))
 
         # Clean thinking content from AI response (e.g., <think>...</think> tags)
         content = extract_text_content(ai_message.content)
