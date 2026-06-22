@@ -2,6 +2,7 @@
 
 import { ArrowLeftToLine, X, Quote } from 'lucide-react'
 import { ChatPanel } from '@/components/source/ChatPanel'
+import { ChatModelPicker } from '@/components/notebooks/ChatModelPicker'
 import { deriveChatTitle } from '@/components/notebooks/ChatDock'
 import { useChatWorkspaceStore } from '@/lib/stores/chat-workspace-store'
 import { useTranslation } from '@/lib/hooks/use-translation'
@@ -58,7 +59,7 @@ export function PoppedChatPanel({
   }
 
   return (
-    <div className="flex flex-col h-full min-h-0 bg-card border border-border rounded-xl shadow-[var(--shadow)] overflow-hidden">
+    <div className="sidechat-body flex flex-col h-full min-h-0 bg-sidechat border border-sidechat-border rounded-xl shadow-[var(--shadow)] overflow-hidden">
       {/* Header: title + dock-back / close */}
       <div className="flex-shrink-0 flex items-center justify-between gap-2 px-3 py-2.5 border-b border-border">
         <span className="truncate text-[13px] font-semibold text-foreground">
@@ -87,7 +88,7 @@ export function PoppedChatPanel({
 
       {/* Sub-chat: "discussing this passage" banner (Plan D / Chunk 11) */}
       {quote && (
-        <div className="flex-shrink-0 flex gap-2 mx-3 mt-3 px-3 py-2 rounded-lg bg-accent-soft border-l-[3px] border-primary">
+        <div className="flex-shrink-0 flex gap-2 mx-3 mt-3 px-3 py-2 rounded-lg bg-accent-soft border-l-[3px] border-primary-soft-border">
           <Quote className="h-3.5 w-3.5 text-primary flex-shrink-0 mt-0.5" />
           <div className="min-w-0">
             <p className="text-[10px] font-semibold uppercase tracking-[0.07em] text-primary">
@@ -109,6 +110,16 @@ export function PoppedChatPanel({
         chatScopeId={session.id}
         autoFocus={autoFocus}
         composerMaxHeight={120}
+        // Per-chat model picker sits in the input box's toolbar row (mirrors the
+        // dock); each popped panel runs its own model and surfaces the active one.
+        composerToolbar={
+          <ChatModelPicker
+            compact
+            value={session.model_override ?? null}
+            onChange={(model) => chat.setSessionModelOverride(session.id, model)}
+            disabled={chat.getIsSending(session.id)}
+          />
+        }
         emptyStateTitle={quote ? t('chat.passageEmptyTitle') : t('chat.emptyTitle')}
         emptyStateHelper={quote ? t('chat.passageEmptyHelper') : t('chat.emptyHelper')}
         draft={workspaceChat?.draft ?? ''}

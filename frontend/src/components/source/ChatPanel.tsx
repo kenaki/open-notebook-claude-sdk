@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect, useId } from 'react'
+import { useState, useRef, useEffect, useId, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -77,6 +77,14 @@ interface ChatPanelProps {
   onDraftChange?: (value: string) => void
   // Composer auto-grow cap in px (140 dock / 100 standalone default).
   composerMaxHeight?: number
+  // Slot rendered above the input box (the dock feeds its tabs here so they sit
+  // over the textbox, leaving the conversation the full height of the card).
+  composerHeader?: ReactNode
+  // Slot rendered in the utility toolbar row *inside* the input box, below the
+  // textarea and left of the send button. Panel controls live here — the dock's
+  // model picker + context meter + settings cog, a popped panel's model picker —
+  // so they're cleanly separated from the typing area.
+  composerToolbar?: ReactNode
   // Empty-state copy + preset suggestion prompts (clicking sends immediately).
   emptyStateTitle?: string
   emptyStateHelper?: string
@@ -118,6 +126,8 @@ export function ChatPanel({
   draft,
   onDraftChange,
   composerMaxHeight,
+  composerHeader,
+  composerToolbar,
   emptyStateTitle,
   emptyStateHelper,
   suggestions,
@@ -351,7 +361,10 @@ export function ChatPanel({
                 className={`flex ${isHuman ? 'justify-end' : 'justify-start'}`}
               >
                 <div
-                  className={`flex flex-col gap-1.5 max-w-[82%] ${isHuman ? 'items-end' : 'items-start'}`}
+                  // Human turns stay a right-aligned bubble (capped width); AI
+                  // turns render full-width as a document — no bubble, no wasted
+                  // right margin (Claude/ChatGPT convention).
+                  className={`flex flex-col gap-1.5 ${isHuman ? 'max-w-[82%] items-end' : 'w-full items-start'}`}
                   // Tag AI bodies with the originating chat id so a passage
                   // selection resolves its parent (Chunk 11); human turns aren't
                   // selectable into sub-chats.
@@ -368,8 +381,12 @@ export function ChatPanel({
                     <ToolUseDisclosure toolUses={message.tool_uses} />
                   )}
                   <div
-                    className={`px-3.5 py-2.5 ${isHuman ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground'}`}
-                    style={{ borderRadius: isHuman ? USER_BUBBLE_RADIUS : AI_BUBBLE_RADIUS }}
+                    className={
+                      isHuman
+                        ? 'px-3.5 py-2.5 bg-primary-soft text-primary-foreground'
+                        : 'w-full text-foreground'
+                    }
+                    style={isHuman ? { borderRadius: USER_BUBBLE_RADIUS } : undefined}
                   >
                     {isHuman ? (
                       <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p>
@@ -432,62 +449,44 @@ export function ChatPanel({
 
   // Shared composer.
   const composer = (
-    <div className="flex-shrink-0 p-4 space-y-2 border-t">
-      {/* Staged attachments (Plan D / Chunk 12): monospace filename + remove ✕. */}
-      {mediaEnabled && pendingMedia.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {pendingMedia.map((item, index) => (
-            <span
-              key={`${item.url}-${index}`}
-              className="inline-flex items-center gap-1 rounded-md bg-panel-2 border border-border pl-2 pr-1 py-1 text-[11px]"
-            >
-              {item.type === 'video' ? (
-                <VideoIcon className="h-3 w-3 text-text-3 flex-shrink-0" />
-              ) : (
-                <ImageIcon className="h-3 w-3 text-text-3 flex-shrink-0" />
-              )}
-              <span className="font-mono truncate max-w-[140px] text-foreground">{item.label}</span>
-              <button
-                type="button"
-                title={t('chat.removeAttachment')}
-                onClick={() => onRemovePending?.(index)}
-                className="p-0.5 rounded hover:bg-background text-text-3"
+    <div className="flex-shrink-0 p-3 border-t">
+      {/* Above the input box: dock tabs (composerHeader). */}
+      {composerHeader && <div className="mb-2.5">{composerHeader}</div>}
+
+      {/* The input box: an inset surface a touch lighter than the panel with a
+          subtle border that eases into a soft purple glow on focus. Wraps the
+          textarea + a utility toolbar so typing area and controls read as one
+          clean unit. */}
+      <div className="rounded-xl border border-border bg-composer transition-[border-color,box-shadow] duration-200 focus-within:border-primary-soft-border focus-within:ring-2 focus-within:ring-accent-soft">
+        {/* Staged attachments (Plan D / Chunk 12): monospace filename + remove ✕. */}
+        {mediaEnabled && pendingMedia.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 px-3 pt-3">
+            {pendingMedia.map((item, index) => (
+              <span
+                key={`${item.url}-${index}`}
+                className="inline-flex items-center gap-1 rounded-md bg-panel-2 border border-border pl-2 pr-1 py-1 text-[11px]"
               >
-                <X className="h-3 w-3" />
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
-      <div className="flex gap-2 items-end min-w-0">
-        {mediaEnabled && (
-          <div className="flex items-center gap-0.5 flex-shrink-0">
-            <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={handleAttach} />
-            <input ref={videoInputRef} type="file" accept="video/*" className="hidden" onChange={handleAttach} />
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-[40px] w-[34px] text-text-3"
-              title={t('chat.attachImage')}
-              disabled={isStreaming || uploading}
-              onClick={() => imageInputRef.current?.click()}
-            >
-              <ImageIcon className="h-4 w-4" />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-[40px] w-[34px] text-text-3"
-              title={t('chat.attachVideo')}
-              disabled={isStreaming || uploading}
-              onClick={() => videoInputRef.current?.click()}
-            >
-              {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <VideoIcon className="h-4 w-4" />}
-            </Button>
+                {item.type === 'video' ? (
+                  <VideoIcon className="h-3 w-3 text-text-3 flex-shrink-0" />
+                ) : (
+                  <ImageIcon className="h-3 w-3 text-text-3 flex-shrink-0" />
+                )}
+                <span className="font-mono truncate max-w-[140px] text-foreground">{item.label}</span>
+                <button
+                  type="button"
+                  title={t('chat.removeAttachment')}
+                  onClick={() => onRemovePending?.(index)}
+                  className="p-0.5 rounded hover:bg-background text-text-3"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
           </div>
         )}
+
+        {/* Roomy typing area — transparent (the box owns the surface/border), with
+            generous vertical padding and a substantial min-height. */}
         <Textarea
           ref={textareaRef}
           id={chatInputId}
@@ -500,25 +499,65 @@ export function ChatPanel({
             ? t('chat.sendPlaceholder')
             : `${t('chat.sendPlaceholder')} (${t('chat.pressToSend').replace('{key}', keyHint)})`}
           disabled={isStreaming}
-          className="flex-1 min-h-[40px] resize-none overflow-y-auto py-2 px-3 min-w-0"
+          className="w-full min-h-[56px] resize-none overflow-y-auto border-0 bg-transparent dark:bg-transparent px-3.5 py-3 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
           style={{ maxHeight }}
           rows={1}
         />
-        <Button
-          onClick={handleSend}
-          disabled={!canSend}
-          size="icon"
-          className="h-[40px] w-[40px] flex-shrink-0"
-        >
-          {isStreaming ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Send className="h-4 w-4" />
+
+        {/* Utility toolbar row: attach icons + panel controls on the left, send on
+            the right — separated from the typing area above. */}
+        <div className="flex items-center gap-1.5 px-2 pb-2 pt-0.5 min-w-0">
+          {mediaEnabled && (
+            <div className="flex items-center gap-0.5 flex-shrink-0">
+              <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={handleAttach} />
+              <input ref={videoInputRef} type="file" accept="video/*" className="hidden" onChange={handleAttach} />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-text-3"
+                title={t('chat.attachImage')}
+                disabled={isStreaming || uploading}
+                onClick={() => imageInputRef.current?.click()}
+              >
+                <ImageIcon className="h-4 w-4" />
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-text-3"
+                title={t('chat.attachVideo')}
+                disabled={isStreaming || uploading}
+                onClick={() => videoInputRef.current?.click()}
+              >
+                {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <VideoIcon className="h-4 w-4" />}
+              </Button>
+            </div>
           )}
-        </Button>
+          {composerToolbar && (
+            <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
+              {composerToolbar}
+            </div>
+          )}
+          <div className="flex-1" />
+          <Button
+            onClick={handleSend}
+            disabled={!canSend}
+            size="icon"
+            className="h-8 w-8 flex-shrink-0 rounded-lg bg-[var(--primary-soft)] hover:bg-[var(--primary-soft)]"
+          >
+            {isStreaming ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Send className="h-4 w-4" />
+            )}
+          </Button>
+        </div>
       </div>
+
       {isDock && (
-        <p className="text-[11px] text-text-3">
+        <p className="mt-2 text-[11px] text-text-3">
           {t('chat.pressToSend').replace('{key}', keyHint)}
         </p>
       )}

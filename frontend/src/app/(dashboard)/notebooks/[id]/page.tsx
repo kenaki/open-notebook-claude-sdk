@@ -36,7 +36,7 @@ import { TAB_DND_PREFIX } from '@/components/notebooks/ChatDock'
 import { useIsDesktop } from '@/lib/hooks/use-media-query'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { FileText, StickyNote, MessageSquare } from 'lucide-react'
+import { FileText, StickyNote, MessageSquare, Plus } from 'lucide-react'
 import {
   applyBulkSourceContext,
   applyBulkNoteContext,
@@ -102,6 +102,10 @@ export default function NotebookPage() {
   // Sub-chats (Chunk 11): id of a freshly-spawned sub-chat whose composer should
   // grab focus once its popped panel mounts (after the session list refetches).
   const [pendingFocusId, setPendingFocusId] = useState<string | null>(null)
+
+  // A freshly-created standalone side chat (track "+") that must be popped out as
+  // soon as the workspace store registers it (new sessions default to docked).
+  const [pendingPopId, setPendingPopId] = useState<string | null>(null)
 
   // Context selection state
   const [contextSelections, setContextSelections] = useState<ContextSelections>({
@@ -275,6 +279,26 @@ export default function NotebookPage() {
     if (session) setPendingFocusId(session.id)
   }
 
+  // Track "+" button: spawn a new standalone side chat. Create it, then mark it
+  // to be popped out + focused once syncChats registers it in the store.
+  const handleNewSidePanel = async () => {
+    const session = await chat.createSidePanel(t('chat.newChat'))
+    if (session) {
+      setPendingPopId(session.id)
+      setPendingFocusId(session.id)
+    }
+  }
+
+  // Pop the freshly-created side chat out of the dock the moment it appears in
+  // the workspace store (new sessions land docked by default), then clear the flag.
+  useEffect(() => {
+    if (!pendingPopId) return
+    if (wsChats[pendingPopId]) {
+      if (wsChats[pendingPopId].docked !== false) setDocked(pendingPopId, false)
+      setPendingPopId(null)
+    }
+  }, [pendingPopId, wsChats, setDocked])
+
   // Clear the pending-focus marker shortly after a sub-chat spawns so a later
   // re-mount (e.g. maximize toggle) doesn't re-steal focus.
   useEffect(() => {
@@ -405,6 +429,7 @@ export default function NotebookPage() {
         onWidthChange={(w) => setChatWidth(token, w)}
         maximized={effectiveMax === token}
         onToggleMaximize={() => toggleMaximized(token)}
+        scrollIntoViewOnMount={pendingFocusId === token}
       >
         <PoppedChatPanel
           notebookId={notebookId}
@@ -441,7 +466,7 @@ export default function NotebookPage() {
   return (
     <AppShell>
       <div className="flex flex-col flex-1 min-h-0">
-        <div className="flex-shrink-0 p-6 pb-0">
+        <div className="flex-shrink-0 px-6 py-3 border-b border-border">
           <NotebookHeader notebook={notebook} />
         </div>
 
@@ -523,6 +548,18 @@ export default function NotebookPage() {
                     {visibleTokens.map(renderCard)}
                   </SortableContext>
                   {draggingTab && !effectiveMax && <PopZone />}
+                  {/* Spawn a new side chat to the right of the last panel. */}
+                  {!effectiveMax && (
+                    <button
+                      type="button"
+                      onClick={handleNewSidePanel}
+                      title={t('chat.newChat')}
+                      aria-label={t('chat.newChat')}
+                      className="flex-shrink-0 self-stretch w-12 flex items-center justify-center rounded-xl border border-dashed border-border text-muted-foreground transition-colors hover:border-primary hover:bg-accent-soft hover:text-primary"
+                    >
+                      <Plus className="h-5 w-5" />
+                    </button>
+                  )}
                 </PanelTrack>
                 {/* Floating "Chat about this" pill for AI-passage selections */}
                 <PassageSelectionMenu onChatAboutPassage={handleCreateSubChat} />

@@ -279,6 +279,11 @@ export interface CreateNotebookChatSessionRequest {
 export interface UpdateNotebookChatSessionRequest {
   title?: string
   model_override?: string | null
+  // Promote a side chat to a main chat by clearing its parent/quote (Sidebar
+  // redesign / Chunk 1). Backend update_session applies these via exclude_unset
+  // and they're in ChatSession.nullable_fields, so PUT-ing null clears them.
+  parent_session_id?: string | null
+  quote?: string | null
 }
 
 export interface SendNotebookChatMessageRequest {

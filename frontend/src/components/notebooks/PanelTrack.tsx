@@ -20,11 +20,15 @@ export function PanelTrack({ children, className }: PanelTrackProps) {
   return (
     <div
       className={cn(
-        'flex flex-row items-stretch gap-4 h-full min-h-0 overflow-x-auto',
+        'flex flex-row items-stretch gap-4 h-full min-h-0 overflow-x-auto overscroll-x-none snap-x snap-mandatory',
         className
       )}
     >
       {children}
+      {/* Trailing spacer: gives the track scrollable room past the last panel so
+          the row can be scrolled leftward even when the panels don't overflow.
+          Invisible and non-interactive so it never intercepts drags/clicks. */}
+      <div aria-hidden className="flex-shrink-0 w-[min(80vw,900px)] pointer-events-none" />
     </div>
   )
 }

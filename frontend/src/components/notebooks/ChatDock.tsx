@@ -4,19 +4,12 @@ import { useEffect, useMemo } from 'react'
 import { SortableContext, horizontalListSortingStrategy, useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { ChatPanel } from '@/components/source/ChatPanel'
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import { ChatModelPicker } from '@/components/notebooks/ChatModelPicker'
+import { SideChatDefaultMenu } from '@/components/notebooks/SideChatDefaultMenu'
 import { Button } from '@/components/ui/button'
 import { Plus, X, ArrowUpRight } from 'lucide-react'
 import { useChatWorkspaceStore } from '@/lib/stores/chat-workspace-store'
-import { useClaudeAgentModel, useModels } from '@/lib/hooks/use-models'
+import { useChatDefaultsStore } from '@/lib/stores/chat-defaults-store'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { BaseChatSession, NotebookChatSession, MediaItem } from '@/lib/types/api'
 import type { useNotebookChat } from '@/lib/hooks/useNotebookChat'
@@ -38,16 +31,6 @@ export function deriveChatTitle(
   }
   return text
 }
-
-// Radix Select forbids an empty-string item value; the claude-agent "follow
-// Claude Code default" option uses '' on the wire, so we map it to this sentinel.
-const FOLLOW_DEFAULT = '__default__'
-
-// Per-chat Claude Agent override marker; mirrors CLAUDE_AGENT_OVERRIDE_PREFIX in
-// open_notebook/ai/claude_agent.py (and ModelSelector.tsx). A value of
-// "claude_agent::<model>" pins that Claude model for this chat only; a bare
-// registered model id (e.g. "model:...") routes the chat through Esperanto.
-const CLAUDE_AGENT_OVERRIDE_PREFIX = 'claude_agent::'
 
 // Sortable id prefix for dock tabs — lets the page's single DndContext tell a
 // tab drag (reorder / pop-out) apart from a panel drag.
@@ -92,8 +75,10 @@ export function ChatDock({ notebookId, chat, contextStats, enablePopOut = true }
   const removePending = useChatWorkspaceStore((s) => s.removePending)
   const clearPending = useChatWorkspaceStore((s) => s.clearPending)
 
-  const { data: claudeConfig } = useClaudeAgentModel()
-  const { data: models } = useModels()
+  // Per-notebook default model for side chats (annotative sub-chats), set via
+  // the dock header's settings cog and applied at sub-chat creation time.
+  const sideChatModel = useChatDefaultsStore((s) => s.sideChatModel[notebookId] ?? null)
+  const setSideChatModel = useChatDefaultsStore((s) => s.setSideChatModel)
 
   const { sessions, currentSessionId } = chat
   const newChatLabel = t('chat.newChat')
@@ -168,39 +153,15 @@ export function ChatDock({ notebookId, chat, contextStats, enablePopOut = true }
     t('chat.meterTokens').replace('{count}', tokenLabel),
   ].join(' · ')
 
-  // The dock picker drives the *active chat's* per-session model override, so
-  // each tab can talk to a different model. The Claude Agent group writes
-  // ``claude_agent::<model>`` markers (Claude SDK path); the local group writes
-  // a bare registered model id (Esperanto path); "follow default" clears it.
-  // The global Claude Agent default still lives in Settings (ClaudeAgentModelCard).
+  // The dock header's ChatModelPicker drives the *active chat's* per-session
+  // model override, so each tab can talk to a different model (popped panels
+  // carry their own picker). The global Claude Agent default still lives in
+  // Settings (ClaudeAgentModelCard). See ChatModelPicker for the value scheme.
   const activeSession = useMemo(
     () => sessions.find((s) => s.id === activeDockedId),
     [sessions, activeDockedId]
   )
   const activeOverride = activeSession?.model_override ?? chat.pendingModelOverride ?? null
-  const modelValue = activeOverride ?? FOLLOW_DEFAULT
-
-  // Claude Agent sub-models as per-chat overrides (skip the empty follow-default
-  // entry — it's rendered separately as the sentinel item).
-  const claudeSubmodels = (claudeConfig?.options ?? [])
-    .filter((opt) => opt.value)
-    .map((opt) => ({ value: `${CLAUDE_AGENT_OVERRIDE_PREFIX}${opt.value}`, label: opt.label }))
-  const followDefaultLabel =
-    (claudeConfig?.options ?? []).find((opt) => !opt.value)?.label ?? t('chat.model')
-
-  // Registered language models (e.g. local Ollama qwen), excluding the
-  // claude_agent sentinel record which the Claude group already covers.
-  const localModels = useMemo(
-    () =>
-      [...(models ?? [])]
-        .filter((m) => m.type === 'language' && m.provider !== 'claude_agent')
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    [models]
-  )
-
-  const handleModelChange = (value: string) => {
-    chat.setModelOverride(value === FOLLOW_DEFAULT ? null : value)
-  }
 
   const draftProps = activeChat
     ? { draft: activeChat.draft, onDraftChange: (v: string) => setDraft(activeChat.id, v) }
@@ -209,81 +170,61 @@ export function ChatDock({ notebookId, chat, contextStats, enablePopOut = true }
   const tabItemIds = dockedSessions.map((s) => `${TAB_DND_PREFIX}${s.id}`)
   const canClose = sessions.length > 1
 
+  // Tab strip sits *above* the input box (composerHeader); the active-chat model
+  // picker + context meter + settings cog drop into the input box's utility
+  // toolbar row (composerToolbar), separated from the typing area.
+  const dockTabs = (
+    <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+      {dockedSessions.length === 0 ? (
+        <div className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs bg-accent-soft text-foreground">
+          <span className="truncate max-w-[140px]">{newChatLabel}</span>
+        </div>
+      ) : (
+        <SortableContext items={tabItemIds} strategy={horizontalListSortingStrategy}>
+          {dockedSessions.map((session) => (
+            <SortableTab
+              key={session.id}
+              session={session}
+              isActive={session.id === activeDockedId}
+              canClose={canClose}
+              newChatLabel={newChatLabel}
+              onSwitch={() => handleSwitch(session.id)}
+              onPopOut={() => handlePopOut(session.id)}
+              onClose={() => chat.deleteSession(session.id)}
+              enablePopOut={enablePopOut}
+              popOutLabel={t('chat.popOut')}
+              closeLabel={t('chat.closeChat')}
+            />
+          ))}
+        </SortableContext>
+      )}
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="h-7 w-7 flex-shrink-0 rounded-full"
+        title={t('chat.newChat')}
+        onClick={() => chat.createSession(newChatLabel)}
+      >
+        <Plus className="h-4 w-4" />
+      </Button>
+    </div>
+  )
+
+  const dockControls = (
+    <>
+      <ChatModelPicker compact value={activeOverride} onChange={chat.setModelOverride} />
+      <span className="text-[11px] text-text-3 truncate">{meterText}</span>
+      <SideChatDefaultMenu
+        value={sideChatModel}
+        onChange={(model) => setSideChatModel(notebookId, model)}
+      />
+    </>
+  )
+
   return (
     <div className="flex flex-col h-full min-h-0 bg-card border border-border rounded-xl shadow-[var(--shadow)] overflow-hidden">
-      {/* Dock header: model picker + context meter */}
-      <div className="flex-shrink-0 flex items-center justify-between gap-2 px-3 py-2.5 border-b border-border">
-        <Select value={modelValue} onValueChange={handleModelChange}>
-          <SelectTrigger size="sm" className="h-8 max-w-[60%] text-xs">
-            <SelectValue placeholder={t('chat.model')} />
-          </SelectTrigger>
-          {/* Dropdown rise-in tuned to the handoff's .14s (onb-up) — the shadcn
-              Select already ships the slide+fade entrance. */}
-          <SelectContent className="duration-150">
-            <SelectGroup>
-              <SelectLabel>{t('chat.modelGroupClaude')}</SelectLabel>
-              <SelectItem value={FOLLOW_DEFAULT}>{followDefaultLabel}</SelectItem>
-              {claudeSubmodels.map((opt) => (
-                <SelectItem key={opt.value} value={opt.value}>
-                  {opt.label}
-                </SelectItem>
-              ))}
-            </SelectGroup>
-            {localModels.length > 0 && (
-              <SelectGroup>
-                <SelectLabel>{t('chat.modelGroupLocal')}</SelectLabel>
-                {localModels.map((model) => (
-                  <SelectItem key={model.id} value={model.id}>
-                    {model.name}
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            )}
-          </SelectContent>
-        </Select>
-        <span className="flex-shrink-0 text-[11px] text-text-3 bg-panel-2 rounded-full px-2.5 py-1 whitespace-nowrap">
-          {meterText}
-        </span>
-      </div>
-
-      {/* Tab strip (drag to reorder; drag onto the track to pop out) */}
-      <div className="flex-shrink-0 flex items-center gap-1 px-2 py-1.5 border-b border-border overflow-x-auto">
-        {dockedSessions.length === 0 ? (
-          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs bg-accent text-foreground">
-            <span className="truncate max-w-[140px]">{newChatLabel}</span>
-          </div>
-        ) : (
-          <SortableContext items={tabItemIds} strategy={horizontalListSortingStrategy}>
-            {dockedSessions.map((session) => (
-              <SortableTab
-                key={session.id}
-                session={session}
-                isActive={session.id === activeDockedId}
-                canClose={canClose}
-                newChatLabel={newChatLabel}
-                onSwitch={() => handleSwitch(session.id)}
-                onPopOut={() => handlePopOut(session.id)}
-                onClose={() => chat.deleteSession(session.id)}
-                enablePopOut={enablePopOut}
-                popOutLabel={t('chat.popOut')}
-                closeLabel={t('chat.closeChat')}
-              />
-            ))}
-          </SortableContext>
-        )}
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7 flex-shrink-0"
-          title={t('chat.newChat')}
-          onClick={() => chat.createSession(newChatLabel)}
-        >
-          <Plus className="h-4 w-4" />
-        </Button>
-      </div>
-
-      {/* Active conversation + composer */}
+      {/* Conversation fills the card; tabs sit above the box, controls inside it. */}
       <ChatPanel
         variant="dock"
         contextType="notebook"
@@ -299,6 +240,8 @@ export function ChatDock({ notebookId, chat, contextStats, enablePopOut = true }
         // traced back to its parent chat for sub-chat creation (Chunk 11).
         chatScopeId={activeDockedId ?? undefined}
         composerMaxHeight={140}
+        composerHeader={dockTabs}
+        composerToolbar={dockControls}
         emptyStateTitle={t('chat.emptyTitle')}
         emptyStateHelper={t('chat.emptyHelper')}
         suggestions={[
@@ -366,8 +309,8 @@ function SortableTab({
           onSwitch()
         }
       }}
-      className={`group flex items-center gap-1 pl-3 pr-1 py-1 rounded-lg text-xs cursor-pointer transition-colors flex-shrink-0 touch-none ${
-        isActive ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/60'
+      className={`group flex items-center gap-1.5 pl-3.5 pr-2 py-1.5 rounded-full text-xs cursor-pointer transition-colors flex-shrink-0 touch-none ${
+        isActive ? 'bg-accent-soft text-foreground' : 'text-muted-foreground hover:bg-accent'
       }`}
     >
       <span className="truncate max-w-[140px]">{session.title || newChatLabel}</span>

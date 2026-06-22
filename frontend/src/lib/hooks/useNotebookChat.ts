@@ -7,6 +7,7 @@ import { getApiErrorMessage } from '@/lib/utils/error-handler'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { chatApi } from '@/lib/api/chat'
 import { QUERY_KEYS } from '@/lib/api/query-client'
+import { getSideChatModel } from '@/lib/stores/chat-defaults-store'
 import {
   NotebookChatMessage,
   NotebookChatSessionWithMessages,
@@ -311,11 +312,16 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections,
     setCurrentSessionId(sessionId)
   }, [])
 
-  // Create session
+  // Create session. New chats spun up from the dock's "+" are treated as side
+  // chats, so they adopt the notebook's configured side-chat default model (the
+  // dock header cog). The main chat is auto-created on first send (sendMessageTo)
+  // and keeps the dock picker's override instead. null → omit (follow default).
   const createSession = useCallback((title?: string) => {
+    const sideModel = getSideChatModel(notebookId)
     return createSessionMutation.mutate({
       notebook_id: notebookId,
-      title
+      title,
+      model_override: sideModel ?? undefined
     })
   }, [createSessionMutation, notebookId])
 
@@ -341,11 +347,39 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections,
     const trimmed = quote.trim()
     const derivedTitle = title ?? (trimmed.length > 26 ? `${trimmed.slice(0, 26)}…` : trimmed)
     try {
+      // Side chats inherit the notebook's configured side-chat default model
+      // (dock header cog). null → omit, so the chat follows the global default.
+      const sideModel = getSideChatModel(notebookId)
       const newSession = await chatApi.createSession({
         notebook_id: notebookId,
         title: derivedTitle,
         parent_session_id: parentId,
         quote: trimmed,
+        model_override: sideModel ?? undefined,
+      })
+      queryClient.invalidateQueries({
+        queryKey: QUERY_KEYS.notebookChatSessions(notebookId),
+      })
+      return newSession
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { detail?: string } }, message?: string }
+      toast.error(getApiErrorMessage(error.response?.data?.detail || error.message, (key) => t(key), 'apiErrors.failedToCreateSession'))
+      return null
+    }
+  }, [notebookId, queryClient, t])
+
+  // Spawn a standalone side chat that opens directly as a popped panel (the
+  // track's "+" button). Like createSubChat but with no parent/quote — it's an
+  // empty side conversation. Returns the new session (or null) so the caller can
+  // pop it out (setDocked) and focus/scroll to it; the title defaults to the
+  // caller's "New chat" label so the first-message auto-rename still fires.
+  const createSidePanel = useCallback(async (title?: string) => {
+    try {
+      const sideModel = getSideChatModel(notebookId)
+      const newSession = await chatApi.createSession({
+        notebook_id: notebookId,
+        title,
+        model_override: sideModel ?? undefined,
       })
       queryClient.invalidateQueries({
         queryKey: QUERY_KEYS.notebookChatSessions(notebookId),
@@ -384,6 +418,57 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections,
     }
   }, [currentSessionId, updateSessionMutation])
 
+  // Silent per-session model override (popped chat panels each target their own
+  // session, not the dock's active tab). Mirrors renameSession: hits the API
+  // directly to skip the "Session updated" toast and the active-session-scoped
+  // invalidation that updateSessionMutation fires, then refreshes the right keys
+  // so the new model surfaces in every view of this session.
+  const setSessionModelOverride = useCallback(async (sessionId: string, model: string | null) => {
+    try {
+      await chatApi.updateSession(sessionId, { model_override: model })
+      queryClient.invalidateQueries({
+        queryKey: QUERY_KEYS.notebookChatSessions(notebookId)
+      })
+      queryClient.invalidateQueries({
+        queryKey: QUERY_KEYS.notebookChatSession(sessionId)
+      })
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { detail?: string } }, message?: string }
+      toast.error(getApiErrorMessage(error.response?.data?.detail || error.message, (key) => t(key), 'apiErrors.failedToUpdateSession'))
+    }
+  }, [notebookId, queryClient, t])
+
+  // Promote a side chat to a main chat (Sidebar redesign / Chunk 1). Silent —
+  // mirrors renameSession: PUTs parent_session_id/quote = null to clear them, so
+  // the session detaches from its parent and surfaces in the sidebar's main list.
+  const promoteToMain = useCallback(async (sessionId: string) => {
+    try {
+      await chatApi.updateSession(sessionId, { parent_session_id: null, quote: null })
+      queryClient.invalidateQueries({
+        queryKey: QUERY_KEYS.notebookChatSessions(notebookId)
+      })
+      queryClient.invalidateQueries({
+        queryKey: QUERY_KEYS.notebookChatSession(sessionId)
+      })
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { detail?: string } }, message?: string }
+      toast.error(getApiErrorMessage(error.response?.data?.detail || error.message, (key) => t(key), 'apiErrors.failedToUpdateSession'))
+    }
+  }, [notebookId, queryClient, t])
+
+  // Derived session views for the sidebar (Sidebar redesign / Chunk 1). Main
+  // chats (no parent) drive the sidebar list; sideSessionsOf lists a main's side
+  // chats (incl. hidden) for its "side chats (n)" control. Sessions arrive from
+  // the API ordered `updated desc`, so these inherit that recency order.
+  const mainSessions = useMemo(
+    () => sessions.filter((s) => !s.parent_session_id),
+    [sessions]
+  )
+  const sideSessionsOf = useCallback(
+    (parentId: string) => sessions.filter((s) => s.parent_session_id === parentId),
+    [sessions]
+  )
+
   // Update token/char counts when context selections change
   useEffect(() => {
     const updateContextCounts = async () => {
@@ -414,15 +499,22 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections,
     getIsSending,
     sendMessageTo,
 
+    // Sidebar redesign (Chunk 1): main/side session views.
+    mainSessions,
+    sideSessionsOf,
+
     // Actions
     createSession,
     createSubChat,
+    createSidePanel,
     updateSession,
     deleteSession,
     renameSession,
+    promoteToMain,
     switchSession,
     sendMessage,
     setModelOverride,
+    setSessionModelOverride,
     refetchSessions
   }
 }

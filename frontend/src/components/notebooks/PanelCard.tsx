@@ -1,7 +1,7 @@
 'use client'
 
-import { ReactNode, useRef } from 'react'
-import { GripVertical } from 'lucide-react'
+import { ReactNode, useRef, useEffect, useCallback } from 'react'
+import { GripHorizontal } from 'lucide-react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { cn } from '@/lib/utils'
@@ -25,6 +25,8 @@ interface PanelCardProps {
   resizable?: boolean
   /** Enable the left-edge drag-to-reorder grip (default true). */
   draggable?: boolean
+  /** Smoothly scroll this panel into view on mount (e.g. a freshly-spawned side chat). */
+  scrollIntoViewOnMount?: boolean
   className?: string
   children: ReactNode
 }
@@ -51,11 +53,30 @@ export function PanelCard({
   onToggleMaximize,
   resizable = true,
   draggable = true,
+  scrollIntoViewOnMount = false,
   className,
   children,
 }: PanelCardProps) {
   const drag = useRef<{ startX: number; startWidth: number } | null>(null)
   const { setNodeRef, attributes, listeners, transform, transition, isDragging } = useSortable({ id })
+
+  // Combine dnd-kit's node ref with our own so we can scroll the panel into view.
+  const nodeRef = useRef<HTMLDivElement | null>(null)
+  const setRefs = useCallback(
+    (el: HTMLDivElement | null) => {
+      setNodeRef(el)
+      nodeRef.current = el
+    },
+    [setNodeRef]
+  )
+
+  // Bring a freshly-spawned panel (e.g. a new side chat) into view, snapping it
+  // to the left edge of the track with the same smooth animation as a manual scroll.
+  useEffect(() => {
+    if (scrollIntoViewOnMount) {
+      nodeRef.current?.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' })
+    }
+  }, [scrollIntoViewOnMount])
 
   const handlePointerDown = (e: React.PointerEvent) => {
     if (!onWidthChange) return
@@ -115,8 +136,8 @@ export function PanelCard({
 
   return (
     <div
-      ref={setNodeRef}
-      className={cn('group relative h-full min-h-0 flex flex-col', className)}
+      ref={setRefs}
+      className={cn('group relative h-full min-h-0 flex flex-col snap-start snap-always', className)}
       style={style}
       onDoubleClick={handleDoubleClick}
     >
@@ -127,9 +148,9 @@ export function PanelCard({
           {...attributes}
           {...listeners}
           aria-label="Reorder panel"
-          className="absolute top-0 left-0 z-20 flex h-full w-3 cursor-grab touch-none items-center justify-center opacity-0 transition-opacity group-hover:opacity-100 active:cursor-grabbing"
+          className="absolute top-0 left-0 z-20 flex h-4 w-full cursor-grab touch-none items-center justify-center opacity-0 transition-opacity group-hover:opacity-100 active:cursor-grabbing"
         >
-          <GripVertical className="h-4 w-4 text-text-3" />
+          <GripHorizontal className="h-4 w-4 text-text-3" />
         </button>
       )}
       {showResize && (

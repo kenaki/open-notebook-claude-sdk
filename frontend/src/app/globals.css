@@ -41,6 +41,11 @@
   --color-border-2: var(--border-2);
   --color-accent-soft: var(--accent-soft);
   --color-accent-soft-2: var(--accent-soft-2);
+  --color-primary-soft: var(--primary-soft);
+  --color-primary-soft-border: var(--primary-soft-border);
+  --color-sidechat: var(--sidechat);
+  --color-sidechat-border: var(--sidechat-border);
+  --color-composer: var(--composer-bg);
   --color-ready: var(--ready);
   --color-processing: var(--processing);
   --color-failed: var(--failed);
@@ -90,6 +95,15 @@
   --border-2: #efeae0;
   --accent-soft: rgba(91, 84, 214, 0.1);
   --accent-soft-2: rgba(91, 84, 214, 0.16);
+  /* Softened brand accents — bubbles/banners/buttons blend instead of glare.
+     Light theme is already gentle on paper, so keep the filled CTA at full strength. */
+  --primary-soft: var(--primary);
+  --primary-soft-border: color-mix(in srgb, var(--primary) 40%, transparent);
+  /* Right side-chat surface: a hair of indigo over the panel + a soft border. */
+  --sidechat: color-mix(in srgb, var(--card) 94%, var(--primary));
+  --sidechat-border: color-mix(in srgb, var(--border) 55%, var(--primary) 22%);
+  /* Composer input box: a touch cleaner/lighter than the panel for inset depth. */
+  --composer-bg: #ffffff;
   --ready: #3f9d6b;
   --processing: #c08a2d;
   --failed: #c0524a;
@@ -135,6 +149,16 @@
   --border-2: rgba(255, 255, 255, 0.05);
   --accent-soft: rgba(139, 132, 240, 0.16);
   --accent-soft-2: rgba(139, 132, 240, 0.26);
+  /* Softened brand accents (dark): desaturate the indigo toward the panel and
+     drop the banner border to ~45% so accents blend with the dark theme. */
+  --primary-soft: color-mix(in srgb, var(--primary) 68%, var(--card));
+  --primary-soft-border: color-mix(in srgb, var(--primary) 45%, transparent);
+  /* Right side-chat surface: subtly lighter, faint indigo tint + soft border. */
+  --sidechat: color-mix(in srgb, var(--card) 92%, var(--primary));
+  --sidechat-border: color-mix(in srgb, var(--border) 50%, var(--primary) 30%);
+  /* Composer input box (dark): a translucent white lift so it reads slightly
+     lighter than whichever panel it sits on (card or the tinted side-chat). */
+  --composer-bg: rgba(255, 255, 255, 0.045);
   --ready: #5cc28c;
   --processing: #d9a94e;
   --failed: #e0726a;
@@ -261,4 +285,14 @@
 .source-flash {
   animation: onb-flash 1.7s ease-out;
   border-radius: var(--radius);
+}
+
+/* Right side-chat (popped panel): looser, more readable body text so long
+   deep-context passages are easier on the eyes. Scoped to .sidechat-body so the
+   main chat is unaffected; beats the prose utilities via the descendant rule. */
+.sidechat-body .prose :where(p, li) {
+  line-height: 1.6;
+}
+.sidechat-body .prose p {
+  margin-bottom: 12px;
 }
