@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
+import { Input } from '@/components/ui/input'
 import {
   Dialog,
   DialogContent,
@@ -39,7 +40,7 @@ import {
   Bot,
 } from 'lucide-react'
 import { useTranslation } from '@/lib/hooks/use-translation'
-import { useModels, useDeleteModel, useModelDefaults, useUpdateModelDefaults, useAutoAssignDefaults, useTestModel } from '@/lib/hooks/use-models'
+import { useModels, useDeleteModel, useModelDefaults, useUpdateModelDefaults, useAutoAssignDefaults, useTestModel, useClaudeAgentModel, useUpdateClaudeAgentModel } from '@/lib/hooks/use-models'
 import {
   useCredentials,
   useCredential,
@@ -1318,6 +1319,113 @@ function DefaultModelSelectors({
 }
 
 // =============================================================================
+// Claude Agent Model Section
+// =============================================================================
+
+const CLAUDE_AGENT_CUSTOM = '__custom__'
+// Radix <Select.Item> disallows empty-string values, so the "follow default"
+// option (backend value '') is represented by this sentinel in the UI only.
+const CLAUDE_AGENT_DEFAULT = '__default__'
+
+// Map between the backend model value ('' = follow default) and the UI value.
+const toUiValue = (v: string) => (v === '' ? CLAUDE_AGENT_DEFAULT : v)
+const fromUiValue = (v: string) => (v === CLAUDE_AGENT_DEFAULT ? '' : v)
+
+function ClaudeAgentModelCard() {
+  const { t } = useTranslation()
+  const { data: config, isLoading } = useClaudeAgentModel()
+  const update = useUpdateClaudeAgentModel()
+
+  // UI value: CLAUDE_AGENT_DEFAULT = follow CC default, CLAUDE_AGENT_CUSTOM = free-text.
+  const [selectValue, setSelectValue] = useState<string>(CLAUDE_AGENT_DEFAULT)
+  const [customValue, setCustomValue] = useState<string>('')
+
+  useEffect(() => {
+    if (!config) return
+    const current = config.model ?? ''
+    const presets = config.options.map(o => o.value)
+    if (current && !presets.includes(current)) {
+      setSelectValue(CLAUDE_AGENT_CUSTOM)
+      setCustomValue(current)
+    } else {
+      setSelectValue(toUiValue(current))
+      setCustomValue('')
+    }
+  }, [config])
+
+  if (isLoading || !config) return null
+
+  const isCustom = selectValue === CLAUDE_AGENT_CUSTOM
+
+  const handleSelect = (value: string) => {
+    setSelectValue(value)
+    if (value === CLAUDE_AGENT_CUSTOM) return  // wait for the Save button
+    update.mutate({ model: fromUiValue(value) || null })
+  }
+
+  const handleSaveCustom = () => {
+    update.mutate({ model: customValue.trim() || null })
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t('models.claudeAgentTitle')}</CardTitle>
+        <CardDescription>{t('models.claudeAgentDesc')}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="grid gap-3 sm:grid-cols-2 max-w-xl">
+          <div className="space-y-1">
+            <Label className="text-xs">{t('models.claudeAgentModelLabel')}</Label>
+            <Select value={selectValue} onValueChange={handleSelect}>
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue placeholder={t('models.selectModelPlaceholder')} />
+              </SelectTrigger>
+              <SelectContent>
+                {config.options.map(opt => (
+                  <SelectItem key={opt.value || 'default'} value={toUiValue(opt.value)}>
+                    {opt.label}
+                  </SelectItem>
+                ))}
+                <SelectItem value={CLAUDE_AGENT_CUSTOM}>{t('models.claudeAgentCustom')}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {isCustom && (
+            <div className="space-y-1">
+              <Label className="text-xs">{t('models.claudeAgentCustom')}</Label>
+              <div className="flex gap-1">
+                <Input
+                  value={customValue}
+                  onChange={e => setCustomValue(e.target.value)}
+                  placeholder={t('models.claudeAgentCustomPlaceholder')}
+                  className="h-8 text-xs"
+                />
+                <Button
+                  size="sm"
+                  className="h-8 shrink-0"
+                  onClick={handleSaveCustom}
+                  disabled={update.isPending}
+                >
+                  {update.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : t('common.save')}
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {config.env_override && (
+          <p className="text-[10px] text-muted-foreground leading-tight">
+            {t('models.claudeAgentEnvNote').replace('{model}', config.env_override)}
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// =============================================================================
 // Main Page
 // =============================================================================
 
@@ -1413,6 +1521,11 @@ export default function ApiKeysPage() {
           {/* Default Model Selectors */}
           {models && defaults && (
             <DefaultModelSelectors models={models} defaults={defaults} />
+          )}
+
+          {/* Claude Agent model (subscription chat) */}
+          {models?.some(m => m.provider === 'claude_agent') && (
+            <ClaudeAgentModelCard />
           )}
 
           {/* Provider Cards */}

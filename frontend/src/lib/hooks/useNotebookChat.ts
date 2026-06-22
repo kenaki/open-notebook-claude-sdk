@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useState, useCallback, useEffect, useMemo } from 'react'
+import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { getApiErrorMessage } from '@/lib/utils/error-handler'
 import { useTranslation } from '@/lib/hooks/use-translation'
@@ -9,10 +9,12 @@ import { chatApi } from '@/lib/api/chat'
 import { QUERY_KEYS } from '@/lib/api/query-client'
 import {
   NotebookChatMessage,
+  NotebookChatSessionWithMessages,
   CreateNotebookChatSessionRequest,
   UpdateNotebookChatSessionRequest,
   SourceListResponse,
-  NoteResponse
+  NoteResponse,
+  MediaItem
 } from '@/lib/types/api'
 import { ContextSelections } from '@/app/(dashboard)/notebooks/[id]/page'
 
@@ -21,14 +23,19 @@ interface UseNotebookChatParams {
   sources: SourceListResponse[]
   notes: NoteResponse[]
   contextSelections: ContextSelections
+  // Sessions whose message streams must be live simultaneously: the dock's
+  // active tab plus every popped-out chat panel (Plan C / Chunk 8). The hook
+  // fetches each one independently so popped chats render side-by-side. The
+  // current dock session is always included implicitly.
+  visibleSessionIds?: string[]
 }
 
-export function useNotebookChat({ notebookId, sources, notes, contextSelections }: UseNotebookChatParams) {
+export function useNotebookChat({ notebookId, sources, notes, contextSelections, visibleSessionIds }: UseNotebookChatParams) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
-  const [messages, setMessages] = useState<NotebookChatMessage[]>([])
-  const [isSending, setIsSending] = useState(false)
+  // Per-session in-flight flag (multiple popped chats can send concurrently).
+  const [sendingBySession, setSendingBySession] = useState<Record<string, boolean>>({})
   const [tokenCount, setTokenCount] = useState<number>(0)
   const [charCount, setCharCount] = useState<number>(0)
   // Pending model override for when user changes model before a session exists
@@ -45,22 +52,45 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections 
     enabled: !!notebookId
   })
 
-  // Fetch current session with messages
-  const {
-    data: currentSession,
-    refetch: refetchCurrentSession
-  } = useQuery({
-    queryKey: QUERY_KEYS.notebookChatSession(currentSessionId!),
-    queryFn: () => chatApi.getSession(currentSessionId!),
-    enabled: !!notebookId && !!currentSessionId
+  // The set of sessions that need live messages: dock-active + all popped.
+  const liveSessionIds = useMemo(() => {
+    const set = new Set<string>()
+    if (currentSessionId) set.add(currentSessionId)
+    for (const id of visibleSessionIds ?? []) if (id) set.add(id)
+    return [...set]
+  }, [currentSessionId, visibleSessionIds])
+
+  // One message-stream query per live session (multiplexed — Chunk 8).
+  const sessionQueries = useQueries({
+    queries: liveSessionIds.map((id) => ({
+      queryKey: QUERY_KEYS.notebookChatSession(id),
+      queryFn: () => chatApi.getSession(id),
+      enabled: !!notebookId && !!id,
+    })),
   })
 
-  // Update messages when current session changes
-  useEffect(() => {
-    if (currentSession?.messages) {
-      setMessages(currentSession.messages)
-    }
-  }, [currentSession])
+  // Map each live session id → its fetched session (incl. messages).
+  const sessionDataById = useMemo(() => {
+    const map: Record<string, NotebookChatSessionWithMessages> = {}
+    liveSessionIds.forEach((id, i) => {
+      const data = sessionQueries[i]?.data
+      if (data) map[id] = data
+    })
+    return map
+  }, [liveSessionIds, sessionQueries])
+
+  const currentSession = currentSessionId ? sessionDataById[currentSessionId] : undefined
+
+  // Read the live messages for any session (empty until its query resolves).
+  const getMessages = useCallback(
+    (sessionId: string | null): NotebookChatMessage[] =>
+      sessionId ? (sessionDataById[sessionId]?.messages ?? []) : [],
+    [sessionDataById]
+  )
+  const getIsSending = useCallback(
+    (sessionId: string | null): boolean => (sessionId ? !!sendingBySession[sessionId] : false),
+    [sendingBySession]
+  )
 
   // Auto-select most recent session when sessions are loaded
   useEffect(() => {
@@ -117,9 +147,11 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections 
       queryClient.invalidateQueries({
         queryKey: QUERY_KEYS.notebookChatSessions(notebookId)
       })
+      queryClient.removeQueries({
+        queryKey: QUERY_KEYS.notebookChatSession(deletedId)
+      })
       if (currentSessionId === deletedId) {
         setCurrentSessionId(null)
-        setMessages([])
       }
       toast.success(t('chat.sessionDeleted'))
     },
@@ -172,11 +204,27 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections 
     return response.context
   }, [notebookId, sources, notes, contextSelections])
 
-  // Send message (synchronous, no streaming)
-  const sendMessage = useCallback(async (message: string, modelOverride?: string) => {
-    let sessionId = currentSessionId
+  // Patch a single session's cached message list (optimistic + reconcile).
+  const patchSessionMessages = useCallback(
+    (sessionId: string, update: (prev: NotebookChatMessage[]) => NotebookChatMessage[]) => {
+      queryClient.setQueryData<NotebookChatSessionWithMessages>(
+        QUERY_KEYS.notebookChatSession(sessionId),
+        (old) =>
+          old
+            ? { ...old, messages: update(old.messages ?? []) }
+            : ({ messages: update([]) } as NotebookChatSessionWithMessages)
+      )
+    },
+    [queryClient]
+  )
 
-    // Auto-create session if none exists
+  // Send a message to a specific session (multiplexed — popped chats send to
+  // their own session independently). Auto-creates a session only when targeting
+  // the dock with none selected yet.
+  const sendMessageTo = useCallback(async (targetSessionId: string | null, message: string, modelOverride?: string, media?: MediaItem[]) => {
+    let sessionId = targetSessionId
+
+    // Auto-create session if none exists (dock-only path)
     if (!sessionId) {
       try {
         const defaultTitle = message.length > 30
@@ -202,15 +250,21 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections 
       }
     }
 
-    // Add user message optimistically
+    // Resolve this session's stored model override from cache (if loaded).
+    const cachedSession = queryClient.getQueryData<NotebookChatSessionWithMessages>(
+      QUERY_KEYS.notebookChatSession(sessionId)
+    )
+
+    // Add user message optimistically to this session's cached stream.
     const userMessage: NotebookChatMessage = {
       id: `temp-${Date.now()}`,
       type: 'human',
       content: message,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      media: media && media.length ? media : undefined
     }
-    setMessages(prev => [...prev, userMessage])
-    setIsSending(true)
+    patchSessionMessages(sessionId, (prev) => [...prev, userMessage])
+    setSendingBySession(prev => ({ ...prev, [sessionId!]: true }))
 
     try {
       // Build context and send message
@@ -219,33 +273,38 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections 
         session_id: sessionId,
         message,
         context,
-        model_override: modelOverride ?? (currentSession?.model_override ?? undefined)
+        model_override: modelOverride ?? (cachedSession?.model_override ?? undefined),
+        media: media && media.length ? media : undefined
       })
 
-      // Update messages with API response
-      setMessages(response.messages)
-
-      // Refetch current session to get updated data
-      await refetchCurrentSession()
+      // Replace the stream with the authoritative server messages.
+      patchSessionMessages(sessionId, () => response.messages)
+      queryClient.invalidateQueries({
+        queryKey: QUERY_KEYS.notebookChatSession(sessionId)
+      })
     } catch (err: unknown) {
       const error = err as { response?: { data?: { detail?: string } }, message?: string };
       console.error('Error sending message:', error)
       toast.error(getApiErrorMessage(error.response?.data?.detail || error.message, (key) => t(key), 'apiErrors.failedToSendMessage'))
       // Remove optimistic message on error
-      setMessages(prev => prev.filter(msg => !msg.id.startsWith('temp-')))
+      patchSessionMessages(sessionId, (prev) => prev.filter(msg => !msg.id.startsWith('temp-')))
     } finally {
-      setIsSending(false)
+      setSendingBySession(prev => ({ ...prev, [sessionId!]: false }))
     }
   }, [
     notebookId,
-    currentSessionId,
-    currentSession,
     pendingModelOverride,
     buildContext,
-    refetchCurrentSession,
+    patchSessionMessages,
     queryClient,
     t
   ])
+
+  // Back-compat: send to the dock's active session (auto-creates if none).
+  const sendMessage = useCallback(
+    (message: string, modelOverride?: string) => sendMessageTo(currentSessionId, message, modelOverride),
+    [sendMessageTo, currentSessionId]
+  )
 
   // Switch session
   const switchSession = useCallback((sessionId: string) => {
@@ -272,6 +331,44 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections 
   const deleteSession = useCallback((sessionId: string) => {
     return deleteSessionMutation.mutate(sessionId)
   }, [deleteSessionMutation])
+
+  // Spin a sub-chat off a highlighted passage (Plan D / Chunk 11). Creates a
+  // session carrying `parent_session_id` + `quote`; the title defaults to the
+  // truncated quote. Invalidating the session list triggers ChatDock's syncChats,
+  // which hydrates the new sub-chat as a popped, anchored panel. Returns the new
+  // session (or null on error) so the caller can focus its composer.
+  const createSubChat = useCallback(async (parentId: string, quote: string, title?: string) => {
+    const trimmed = quote.trim()
+    const derivedTitle = title ?? (trimmed.length > 26 ? `${trimmed.slice(0, 26)}…` : trimmed)
+    try {
+      const newSession = await chatApi.createSession({
+        notebook_id: notebookId,
+        title: derivedTitle,
+        parent_session_id: parentId,
+        quote: trimmed,
+      })
+      queryClient.invalidateQueries({
+        queryKey: QUERY_KEYS.notebookChatSessions(notebookId),
+      })
+      return newSession
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { detail?: string } }, message?: string }
+      toast.error(getApiErrorMessage(error.response?.data?.detail || error.message, (key) => t(key), 'apiErrors.failedToCreateSession'))
+      return null
+    }
+  }, [notebookId, queryClient, t])
+
+  // Silent rename — used by the dock to auto-derive a chat title from its first
+  // message without the "Session updated" toast the mutation hook fires.
+  const renameSession = useCallback(async (sessionId: string, title: string) => {
+    await chatApi.updateSession(sessionId, { title })
+    queryClient.invalidateQueries({
+      queryKey: QUERY_KEYS.notebookChatSessions(notebookId)
+    })
+    queryClient.invalidateQueries({
+      queryKey: QUERY_KEYS.notebookChatSession(sessionId)
+    })
+  }, [notebookId, queryClient])
 
   // Set model override - handles both existing sessions and pending state
   const setModelOverride = useCallback((model: string | null) => {
@@ -304,17 +401,25 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections 
     sessions,
     currentSession: currentSession || sessions.find(s => s.id === currentSessionId),
     currentSessionId,
-    messages,
-    isSending,
+    // Back-compat single-session view (the dock's active tab).
+    messages: getMessages(currentSessionId),
+    isSending: getIsSending(currentSessionId),
     loadingSessions,
     tokenCount,
     charCount,
     pendingModelOverride,
 
+    // Multiplexed per-session accessors (popped chats — Chunk 8).
+    getMessages,
+    getIsSending,
+    sendMessageTo,
+
     // Actions
     createSession,
+    createSubChat,
     updateSession,
     deleteSession,
+    renameSession,
     switchSession,
     sendMessage,
     setModelOverride,

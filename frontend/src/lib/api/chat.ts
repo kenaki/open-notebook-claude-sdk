@@ -8,6 +8,7 @@ import {
   NotebookChatMessage,
   BuildContextRequest,
   BuildContextResponse,
+  MediaItem,
 } from '@/lib/types/api'
 
 export const chatApi = {
@@ -64,6 +65,16 @@ export const chatApi = {
       `/chat/context`,
       data
     )
+    return response.data
+  },
+
+  // Upload an image/video to attach to a chat message (Plan D / Chunk 12).
+  // The client.ts interceptor strips Content-Type so the browser sets the
+  // multipart boundary. Returns the MediaItem the composer stages in `pending[]`.
+  uploadMedia: async (file: File) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    const response = await apiClient.post<MediaItem>(`/chat/media`, formData)
     return response.data
   },
 }

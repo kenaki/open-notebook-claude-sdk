@@ -69,3 +69,18 @@ export interface ModelTestResult {
   message: string
   details?: string
 }
+
+export interface ClaudeAgentModelOption {
+  value: string  // '' = follow Claude Code default
+  label: string
+}
+
+export interface ClaudeAgentModelConfig {
+  model?: string | null         // pinned model id (null = follow CC default)
+  env_override?: string | null  // CLAUDE_AGENT_MODEL env value (read-only)
+  options: ClaudeAgentModelOption[]
+}
+
+export interface UpdateClaudeAgentModelRequest {
+  model?: string | null  // empty/null follows the Claude Code default
+}

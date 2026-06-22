@@ -1,0 +1,8 @@
+-- Migration 16: Document the sub-chat fields on chat_session.
+-- `parent_session_id` links a sub-chat back to the session it was spun off
+-- from; `quote` stores the highlighted passage that seeded the sub-chat.
+-- The chat_session table is SCHEMALESS (see migration 3), so these fields
+-- auto-persist without a DEFINE FIELD. This migration exists for versioning
+-- and to provide a clean rollback target (16_down removes the fields).
+
+DEFINE TABLE IF NOT EXISTS chat_session SCHEMALESS;

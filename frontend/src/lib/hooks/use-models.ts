@@ -4,13 +4,14 @@ import { modelsApi } from '@/lib/api/models'
 import { useToast } from '@/lib/hooks/use-toast'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { getApiErrorKey } from '@/lib/utils/error-handler'
-import { CreateModelRequest, ModelDefaults, ModelTestResult } from '@/lib/types/models'
+import { CreateModelRequest, ModelDefaults, ModelTestResult, UpdateClaudeAgentModelRequest } from '@/lib/types/models'
 
 export const MODEL_QUERY_KEYS = {
   models: ['models'] as const,
   model: (id: string) => ['models', id] as const,
   defaults: ['models', 'defaults'] as const,
   providers: ['models', 'providers'] as const,
+  claudeAgent: ['models', 'claude-agent'] as const,
 }
 
 export function useModels() {
@@ -113,6 +114,38 @@ export function useProviders() {
   return useQuery({
     queryKey: MODEL_QUERY_KEYS.providers,
     queryFn: () => modelsApi.getProviders(),
+  })
+}
+
+export function useClaudeAgentModel(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: MODEL_QUERY_KEYS.claudeAgent,
+    queryFn: () => modelsApi.getClaudeAgentModel(),
+    enabled: options?.enabled ?? true,
+  })
+}
+
+export function useUpdateClaudeAgentModel() {
+  const queryClient = useQueryClient()
+  const { toast } = useToast()
+  const { t } = useTranslation()
+
+  return useMutation({
+    mutationFn: (data: UpdateClaudeAgentModelRequest) => modelsApi.updateClaudeAgentModel(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: MODEL_QUERY_KEYS.claudeAgent })
+      toast({
+        title: t('common.success'),
+        description: t('models.saveSuccess'),
+      })
+    },
+    onError: (error: unknown) => {
+      toast({
+        title: t('common.error'),
+        description: getApiErrorKey(error, t('common.error')),
+        variant: 'destructive',
+      })
+    },
   })
 }
 

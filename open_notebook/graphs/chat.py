@@ -1,9 +1,13 @@
 import asyncio
+import base64
+import mimetypes
+import os
 import sqlite3
 from typing import Annotated, Optional
 
 from ai_prompter import Prompter
-from langchain_core.messages import AIMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from loguru import logger
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
@@ -12,10 +16,11 @@ from typing_extensions import TypedDict
 
 from open_notebook.ai.claude_agent import (
     generate_with_claude_agent,
+    get_claude_agent_model,
     is_claude_agent_selected,
 )
 from open_notebook.ai.provision import provision_langchain_model
-from open_notebook.config import LANGGRAPH_CHECKPOINT_FILE
+from open_notebook.config import CHAT_MEDIA_FOLDER, LANGGRAPH_CHECKPOINT_FILE
 from open_notebook.domain.notebook import Notebook
 from open_notebook.exceptions import OpenNotebookError
 from open_notebook.utils import clean_thinking_content
@@ -29,6 +34,75 @@ class ThreadState(TypedDict):
     context: Optional[str]
     context_config: Optional[dict]
     model_override: Optional[str]
+    quote: Optional[str]
+
+
+def _media_to_data_uri(item: dict) -> Optional[str]:
+    """Read an attached image off disk and return a base64 ``data:`` URI.
+
+    The MediaItem ``url`` is ``/api/chat/media/<filename>``; the file lives under
+    ``CHAT_MEDIA_FOLDER``. We resolve by basename (path-traversal guarded) and
+    inline the bytes as a data URI so the model provider does not need to reach
+    back to this server. Returns ``None`` if the file can't be read.
+    """
+    url = item.get("url") or ""
+    safe_name = os.path.basename(url)
+    if not safe_name:
+        return None
+    safe_root = os.path.realpath(CHAT_MEDIA_FOLDER)
+    resolved = os.path.realpath(os.path.join(safe_root, safe_name))
+    if resolved != safe_root and not resolved.startswith(safe_root + os.sep):
+        logger.warning(f"Blocked chat-media path traversal: {url}")
+        return None
+    if not os.path.exists(resolved):
+        logger.warning(f"Chat-media file missing on disk: {resolved}")
+        return None
+    mime = mimetypes.guess_type(resolved)[0] or "image/png"
+    try:
+        with open(resolved, "rb") as f:
+            encoded = base64.b64encode(f.read()).decode("ascii")
+    except Exception as e:
+        logger.warning(f"Could not read chat-media file {resolved}: {e}")
+        return None
+    return f"data:{mime};base64,{encoded}"
+
+
+def _attach_media_blocks(payload: list) -> list:
+    """Rebuild HumanMessages carrying media into multimodal content blocks.
+
+    For the Esperanto/LangChain (vision) path only: each HumanMessage whose
+    ``additional_kwargs['media']`` is set becomes ``content=[{text}, {image_url},
+    …]``. Images are inlined as data URIs; videos (no inline support) are referenced
+    as text. Messages without media pass through untouched. Called only at invoke
+    time so token-count provisioning still sees the original text payload.
+    """
+    new_payload: list = []
+    for message in payload:
+        extra = getattr(message, "additional_kwargs", None) or {}
+        media = extra.get("media") if isinstance(extra, dict) else None
+        if not (media and isinstance(message, HumanMessage)):
+            new_payload.append(message)
+            continue
+
+        blocks: list = []
+        text = extract_text_content(message.content)
+        if text:
+            blocks.append({"type": "text", "text": text})
+        for item in media:
+            if item.get("type") == "image":
+                data_uri = _media_to_data_uri(item)
+                if data_uri:
+                    blocks.append(
+                        {"type": "image_url", "image_url": {"url": data_uri}}
+                    )
+                    continue
+            # Video (or an image we couldn't inline) → textual reference.
+            label = item.get("label") or item.get("url") or "attachment"
+            blocks.append(
+                {"type": "text", "text": f"[Attached {item.get('type')}: {label}]"}
+            )
+        new_payload.append(message.model_copy(update={"content": blocks}))
+    return new_payload
 
 
 async def _generate_ai_message(model_id, payload, config: RunnableConfig) -> AIMessage:
@@ -40,17 +114,33 @@ async def _generate_ai_message(model_id, payload, config: RunnableConfig) -> AIM
     """
     if await is_claude_agent_selected(model_id):
         thread_id = config.get("configurable", {}).get("thread_id")
-        return await generate_with_claude_agent(payload, thread_id=thread_id)
+        agent_model = await get_claude_agent_model(model_id)
+        logger.info(
+            f"Chat model routing -> Claude Agent SDK | pinned_model="
+            f"{agent_model or 'Claude Code default'} | override={model_id!r}"
+        )
+        return await generate_with_claude_agent(
+            payload, thread_id=thread_id, model=agent_model
+        )
 
+    logger.info(
+        f"Chat model routing -> Esperanto/LangChain | model_id={model_id!r}"
+    )
     model = await provision_langchain_model(
         str(payload), model_id, "chat", max_tokens=8192
     )
-    return model.invoke(payload)
+    # Provision on the text payload (above) so token counting is unaffected by
+    # large base64 blobs; inline media only for the actual invoke.
+    return model.invoke(_attach_media_blocks(payload))
 
 
 def call_model_with_messages(state: ThreadState, config: RunnableConfig) -> dict:
     try:
         system_prompt = Prompter(prompt_template="chat/system").render(data=state)  # type: ignore[arg-type]
+        if state.get("quote"):
+            logger.debug(
+                f"Chat system prompt rendered with SEED PASSAGE block:\n{system_prompt}"
+            )
         payload = [SystemMessage(content=system_prompt)] + state.get("messages", [])
         model_id = config.get("configurable", {}).get("model_id") or state.get(
             "model_override"

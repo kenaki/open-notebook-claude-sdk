@@ -12,6 +12,11 @@ LANGGRAPH_CHECKPOINT_FILE = f"{sqlite_folder}/checkpoints.sqlite"
 UPLOADS_FOLDER = f"{DATA_FOLDER}/uploads"
 os.makedirs(UPLOADS_FOLDER, exist_ok=True)
 
+# CHAT MEDIA FOLDER (image/video attachments on chat messages; files only, no DB
+# record in v1 — see coordinator Q-mediastore)
+CHAT_MEDIA_FOLDER = f"{UPLOADS_FOLDER}/chat-media"
+os.makedirs(CHAT_MEDIA_FOLDER, exist_ok=True)
+
 # TIKTOKEN CACHE FOLDER
 # Reads TIKTOKEN_CACHE_DIR from the environment so Docker can redirect the cache
 # to a path outside /data/ (which is typically volume-mounted and would hide the

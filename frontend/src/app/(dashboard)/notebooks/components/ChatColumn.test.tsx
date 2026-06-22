@@ -1,63 +1,46 @@
 import { render, screen } from '@testing-library/react'
 import { describe, it, expect, vi } from 'vitest'
 import { ChatColumn } from './ChatColumn'
-import { useNotes } from '@/lib/hooks/use-notes'
 import { useNotebookChat } from '@/lib/hooks/useNotebookChat'
 
-// Mock the hooks
-vi.mock('@/lib/hooks/use-notes')
-vi.mock('@/lib/hooks/useNotebookChat')
-vi.mock('@/components/source/ChatPanel', () => ({
-  ChatPanel: () => <div data-testid="chat-panel" />
+// ChatColumn is now presentational: the multiplexed chat hook is created by the
+// notebook page and passed in (Plan C / Chunk 8). The dock is stubbed.
+vi.mock('@/components/notebooks/ChatDock', () => ({
+  ChatDock: () => <div data-testid="chat-panel" />
 }))
 
-// Type-safe mock factory for useNotes hook
-function createNotesMock(overrides: { isLoading?: boolean } = {}) {
-  return {
-    data: [],
-    isLoading: overrides.isLoading ?? false,
-  } as unknown as ReturnType<typeof useNotes>
-}
-
-// Type-safe mock factory for useNotebookChat hook
+// Minimal stand-in for the lifted useNotebookChat return value.
 function createChatMock() {
   return {
-    messages: [],
-    isSending: false,
-    tokenCount: 0,
-    charCount: 0,
     sessions: [],
     currentSessionId: null,
+    getMessages: () => [],
+    getIsSending: () => false,
   } as unknown as ReturnType<typeof useNotebookChat>
+}
+
+const baseStats = {
+  sourcesInsights: 0,
+  sourcesFull: 0,
+  notesCount: 0,
+  tokenCount: 0,
+  charCount: 0,
 }
 
 describe('ChatColumn', () => {
   const baseProps = {
     notebookId: 'test-notebook',
-    contextSelections: {
-      sources: {},
-      notes: {}
-    },
-    sources: [],
+    chat: createChatMock(),
+    contextStats: baseStats,
   }
 
   it('shows loading spinner when fetching data', () => {
-    vi.mocked(useNotes).mockReturnValue(createNotesMock({ isLoading: true }))
-    vi.mocked(useNotebookChat).mockReturnValue(createChatMock())
-
-    render(<ChatColumn {...baseProps} sourcesLoading={true} />)
-
-    // Should show loading spinner
+    render(<ChatColumn {...baseProps} loading={true} />)
     expect(screen.getByTestId('loading-spinner')).toBeInTheDocument()
   })
 
   it('renders chat panel when data is loaded', () => {
-    vi.mocked(useNotes).mockReturnValue(createNotesMock({ isLoading: false }))
-    vi.mocked(useNotebookChat).mockReturnValue(createChatMock())
-
-    render(<ChatColumn {...baseProps} sourcesLoading={false} />)
-
-    // Should show chat panel
+    render(<ChatColumn {...baseProps} loading={false} />)
     expect(screen.getByTestId('chat-panel')).toBeInTheDocument()
   })
 })

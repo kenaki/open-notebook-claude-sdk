@@ -101,6 +101,32 @@ class ProviderAvailabilityResponse(BaseModel):
     )
 
 
+class ClaudeAgentModelOption(BaseModel):
+    value: str = Field(..., description="Model id/alias ('' = follow Claude Code default)")
+    label: str = Field(..., description="Human-readable label for the dropdown")
+
+
+class ClaudeAgentModelResponse(BaseModel):
+    model: Optional[str] = Field(
+        None,
+        description="Pinned Claude model id (null = follow the Claude Code default)",
+    )
+    env_override: Optional[str] = Field(
+        None,
+        description="CLAUDE_AGENT_MODEL env value; applies only when model follows default",
+    )
+    options: List[ClaudeAgentModelOption] = Field(
+        ..., description="Curated selectable models for the dropdown"
+    )
+
+
+class ClaudeAgentModelUpdate(BaseModel):
+    model: Optional[str] = Field(
+        None,
+        description="Claude model id/alias to pin; empty/null follows the Claude Code default",
+    )
+
+
 # Transformations API models
 class TransformationCreate(BaseModel):
     name: str = Field(..., description="Transformation name")

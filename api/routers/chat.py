@@ -1,14 +1,25 @@
 import asyncio
+import os
+import re
 import traceback
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 from langchain_core.runnables import RunnableConfig
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from api.upload_utils import resolve_within, save_uploaded_file
+from open_notebook.config import CHAT_MEDIA_FOLDER
 from open_notebook.database.repository import ensure_record_id, repo_query
-from open_notebook.domain.notebook import ChatSession, Note, Notebook, Source
+from open_notebook.domain.notebook import (
+    ChatSession,
+    Note,
+    Notebook,
+    Source,
+    SourceInsight,
+)
 from open_notebook.exceptions import (
     NotFoundError,
 )
@@ -25,12 +36,62 @@ class CreateSessionRequest(BaseModel):
     model_override: Optional[str] = Field(
         None, description="Optional model override for this session"
     )
+    parent_session_id: Optional[str] = Field(
+        None, description="Parent session ID if this is a sub-chat"
+    )
+    quote: Optional[str] = Field(
+        None, description="Highlighted passage that seeded this sub-chat"
+    )
 
 
 class UpdateSessionRequest(BaseModel):
     title: Optional[str] = Field(None, description="New session title")
     model_override: Optional[str] = Field(
         None, description="Model override for this session"
+    )
+    parent_session_id: Optional[str] = Field(
+        None, description="Parent session ID if this is a sub-chat"
+    )
+    quote: Optional[str] = Field(
+        None, description="Highlighted passage that seeded this sub-chat"
+    )
+
+
+class Citation(BaseModel):
+    id: str = Field(..., description="Full document id including type prefix")
+    type: Literal["source", "note", "source_insight"] = Field(
+        ..., description="Cited document type"
+    )
+    number: int = Field(..., description="First-appearance citation number")
+    title: Optional[str] = Field(None, description="Resolved document title")
+    snippet: Optional[str] = Field(None, description="Short content excerpt")
+    page: Optional[int] = Field(
+        None, description="Optional page anchor (pdf-viewer-citations hook)"
+    )
+
+
+class ToolUseDisclosure(BaseModel):
+    id: str = Field(..., description="Tool-use block id from the agent run")
+    tool_name: str = Field(
+        ..., description="Raw MCP tool name (e.g. mcp__open_notebook__search)"
+    )
+    tool_input: Dict[str, Any] = Field(
+        default_factory=dict, description="Arguments the agent passed to the tool"
+    )
+    tool_result: Optional[str] = Field(
+        None, description="Stringified tool result, if captured"
+    )
+    is_error: Optional[bool] = Field(
+        None, description="Whether the tool reported an error"
+    )
+
+
+class MediaItem(BaseModel):
+    type: Literal["image", "video"] = Field(..., description="Attachment kind")
+    url: str = Field(..., description="Fetchable URL served by GET /chat/media/{file}")
+    label: str = Field(..., description="Display label (original filename)")
+    duration: Optional[str] = Field(
+        None, description="Optional media duration (e.g. video length)"
     )
 
 
@@ -39,6 +100,18 @@ class ChatMessage(BaseModel):
     type: str = Field(..., description="Message type (human|ai)")
     content: str = Field(..., description="Message content")
     timestamp: Optional[str] = Field(None, description="Message timestamp")
+    citations: List[Citation] = Field(
+        default_factory=list, description="Resolved citation markers in this message"
+    )
+    followups: List[str] = Field(
+        default_factory=list, description="Suggested follow-up questions"
+    )
+    tool_uses: Optional[List[ToolUseDisclosure]] = Field(
+        None, description="MCP tools the Claude Agent invoked for this message"
+    )
+    media: List[MediaItem] = Field(
+        default_factory=list, description="Image/video attachments on this message"
+    )
 
 
 class ChatSessionResponse(BaseModel):
@@ -52,6 +125,12 @@ class ChatSessionResponse(BaseModel):
     )
     model_override: Optional[str] = Field(
         None, description="Model override for this session"
+    )
+    parent_session_id: Optional[str] = Field(
+        None, description="Parent session ID if this is a sub-chat"
+    )
+    quote: Optional[str] = Field(
+        None, description="Highlighted passage that seeded this sub-chat"
     )
 
 
@@ -69,6 +148,9 @@ class ExecuteChatRequest(BaseModel):
     )
     model_override: Optional[str] = Field(
         None, description="Optional model override for this message"
+    )
+    media: List[MediaItem] = Field(
+        default_factory=list, description="Image/video attachments for this message"
     )
 
 
@@ -91,6 +173,137 @@ class BuildContextResponse(BaseModel):
 class SuccessResponse(BaseModel):
     success: bool = Field(True, description="Operation success status")
     message: str = Field(..., description="Success message")
+
+
+# Citation / followups resolution ------------------------------------------------
+
+# Inline marker form: [source:id] / [note:id] / [source_insight:id], tolerating an
+# optional #p=<n> page anchor (see pdf-viewer-citations plan). The literal type
+# prefix matches the actual SurrealDB record ids returned by the search tool.
+FOLLOWUPS_SENTINEL = "---FOLLOWUPS---"
+_CITATION_PATTERN = re.compile(
+    r"(source_insight|note|source):([a-zA-Z0-9_]+)(?:#p=(\d+))?"
+)
+_BULLET_PATTERN = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s*")
+
+
+def _make_snippet(text: Optional[str], limit: int = 160) -> Optional[str]:
+    """Collapse whitespace and clip to a short preview snippet."""
+    if not text:
+        return None
+    collapsed = " ".join(text.split())
+    if not collapsed:
+        return None
+    if len(collapsed) <= limit:
+        return collapsed
+    return collapsed[:limit].rstrip() + "…"
+
+
+async def _fetch_citation_meta(
+    ctype: str, full_id: str
+) -> Tuple[Optional[str], Optional[str]]:
+    """Resolve a (title, snippet) pair for a cited document, defensively."""
+    try:
+        if ctype == "source":
+            src = await Source.get(full_id)
+            if src:
+                return src.title, _make_snippet(getattr(src, "full_text", None))
+        elif ctype == "note":
+            note = await Note.get(full_id)
+            if note:
+                return note.title, _make_snippet(getattr(note, "content", None))
+        elif ctype == "source_insight":
+            insight = await SourceInsight.get(full_id)
+            if insight:
+                return (
+                    getattr(insight, "insight_type", None),
+                    _make_snippet(getattr(insight, "content", None)),
+                )
+    except Exception as e:
+        logger.warning(f"Could not resolve citation {full_id}: {str(e)}")
+    return None, None
+
+
+async def _resolve_citations(
+    content: str,
+) -> Tuple[str, List[Citation], List[str]]:
+    """Parse inline citation markers + a trailing ---FOLLOWUPS--- block.
+
+    Returns (clean_content, citations, followups). Inline markers are KEPT in
+    clean_content for frontend back-compat; only the followups block is stripped.
+    Citations are deduplicated and numbered by first appearance.
+    """
+    if not content:
+        return content, [], []
+
+    # Split off the followups block (everything after the sentinel)
+    clean = content
+    followups: List[str] = []
+    if FOLLOWUPS_SENTINEL in content:
+        head, _, tail = content.partition(FOLLOWUPS_SENTINEL)
+        clean = head.rstrip()
+        for line in tail.splitlines():
+            stripped = _BULLET_PATTERN.sub("", line).strip()
+            if stripped:
+                followups.append(stripped)
+
+    # Extract + number citations by first appearance (dedup on full id)
+    citations: List[Citation] = []
+    seen: Dict[str, int] = {}
+    for match in _CITATION_PATTERN.finditer(clean):
+        ctype, cid, page = match.group(1), match.group(2), match.group(3)
+        full_id = f"{ctype}:{cid}"
+        if full_id in seen:
+            continue
+        number = len(seen) + 1
+        seen[full_id] = number
+        title, snippet = await _fetch_citation_meta(ctype, full_id)
+        citations.append(
+            Citation(
+                id=full_id,
+                type=ctype,  # type: ignore[arg-type]
+                number=number,
+                title=title,
+                snippet=snippet,
+                page=int(page) if page else None,
+            )
+        )
+
+    return clean, citations, followups
+
+
+async def _build_chat_message(msg: Any, fallback_index: int) -> ChatMessage:
+    """Convert a LangChain message into a ChatMessage, resolving AI citations."""
+    mtype = msg.type if hasattr(msg, "type") else "unknown"
+    mcontent = msg.content if hasattr(msg, "content") else str(msg)
+
+    if mtype == "ai" and isinstance(mcontent, str):
+        clean, citations, followups = await _resolve_citations(mcontent)
+    else:
+        clean = mcontent if isinstance(mcontent, str) else str(mcontent)
+        citations, followups = [], []
+
+    # Tool-use disclosures + media attachments ride on the message's
+    # additional_kwargs (tool_uses: Claude Agent path / AI only; media: the human
+    # turn). Absent/empty on the other paths.
+    extra = getattr(msg, "additional_kwargs", None) or {}
+    raw_tool_uses = extra.get("tool_uses") if isinstance(extra, dict) else None
+    tool_uses = (
+        [ToolUseDisclosure(**t) for t in raw_tool_uses] if raw_tool_uses else None
+    )
+    raw_media = extra.get("media") if isinstance(extra, dict) else None
+    media = [MediaItem(**m) for m in raw_media] if raw_media else []
+
+    return ChatMessage(
+        id=getattr(msg, "id", f"msg_{fallback_index}"),
+        type=mtype,
+        content=clean,
+        timestamp=None,
+        citations=citations,
+        followups=followups,
+        tool_uses=tool_uses,
+        media=media,
+    )
 
 
 @router.get("/chat/sessions", response_model=List[ChatSessionResponse])
@@ -121,6 +334,8 @@ async def get_sessions(notebook_id: str = Query(..., description="Notebook ID"))
                     updated=str(session.updated),
                     message_count=msg_count,
                     model_override=getattr(session, "model_override", None),
+                    parent_session_id=getattr(session, "parent_session_id", None),
+                    quote=getattr(session, "quote", None),
                 )
             )
 
@@ -148,6 +363,8 @@ async def create_session(request: CreateSessionRequest):
             title=request.title
             or f"Chat Session {asyncio.get_event_loop().time():.0f}",
             model_override=request.model_override,
+            parent_session_id=request.parent_session_id,
+            quote=request.quote,
         )
         await session.save()
 
@@ -162,6 +379,8 @@ async def create_session(request: CreateSessionRequest):
             updated=str(session.updated),
             message_count=0,
             model_override=session.model_override,
+            parent_session_id=session.parent_session_id,
+            quote=session.quote,
         )
     except NotFoundError:
         raise HTTPException(status_code=404, detail="Notebook not found")
@@ -200,14 +419,7 @@ async def get_session(session_id: str):
         messages: list[ChatMessage] = []
         if thread_state and thread_state.values and "messages" in thread_state.values:
             for msg in thread_state.values["messages"]:
-                messages.append(
-                    ChatMessage(
-                        id=getattr(msg, "id", f"msg_{len(messages)}"),
-                        type=msg.type if hasattr(msg, "type") else "unknown",
-                        content=msg.content if hasattr(msg, "content") else str(msg),
-                        timestamp=None,  # LangChain messages don't have timestamps by default
-                    )
-                )
+                messages.append(await _build_chat_message(msg, len(messages)))
 
         # Find notebook_id (we need to query the relationship)
         # Ensure session_id has proper table prefix
@@ -239,6 +451,8 @@ async def get_session(session_id: str):
             message_count=len(messages),
             messages=messages,
             model_override=getattr(session, "model_override", None),
+            parent_session_id=getattr(session, "parent_session_id", None),
+            quote=getattr(session, "quote", None),
         )
     except NotFoundError:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -269,6 +483,12 @@ async def update_session(session_id: str, request: UpdateSessionRequest):
         if "model_override" in update_data:
             session.model_override = update_data["model_override"]
 
+        if "parent_session_id" in update_data:
+            session.parent_session_id = update_data["parent_session_id"]
+
+        if "quote" in update_data:
+            session.quote = update_data["quote"]
+
         await session.save()
 
         # Find notebook_id
@@ -295,6 +515,8 @@ async def update_session(session_id: str, request: UpdateSessionRequest):
             updated=str(session.updated),
             message_count=msg_count,
             model_override=session.model_override,
+            parent_session_id=getattr(session, "parent_session_id", None),
+            quote=getattr(session, "quote", None),
         )
     except NotFoundError:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -371,11 +593,20 @@ async def execute_chat(request: ExecuteChatRequest):
         state_values["context"] = request.context
         state_values["notebook"] = notebook
         state_values["model_override"] = model_override
+        state_values["quote"] = getattr(session, "quote", None)
 
-        # Add user message to state
+        # Add user message to state. Media attachments ride on additional_kwargs
+        # so they (a) round-trip through the LangGraph checkpoint and (b) reach the
+        # model: the Esperanto path inlines images as multimodal blocks, the agent
+        # path references them as files (see graphs/chat.py + claude_agent.py).
         from langchain_core.messages import HumanMessage
 
-        user_message = HumanMessage(content=request.message)
+        additional_kwargs = {}
+        if request.media:
+            additional_kwargs["media"] = [m.model_dump() for m in request.media]
+        user_message = HumanMessage(
+            content=request.message, additional_kwargs=additional_kwargs
+        )
         state_values["messages"].append(user_message)
 
         # Execute chat graph
@@ -395,14 +626,7 @@ async def execute_chat(request: ExecuteChatRequest):
         # Convert messages to response format
         messages: list[ChatMessage] = []
         for msg in result.get("messages", []):
-            messages.append(
-                ChatMessage(
-                    id=getattr(msg, "id", f"msg_{len(messages)}"),
-                    type=msg.type if hasattr(msg, "type") else "unknown",
-                    content=msg.content if hasattr(msg, "content") else str(msg),
-                    timestamp=None,
-                )
-            )
+            messages.append(await _build_chat_message(msg, len(messages)))
 
         return ExecuteChatResponse(session_id=request.session_id, messages=messages)
     except NotFoundError:
@@ -524,3 +748,61 @@ async def build_context(request: BuildContextRequest):
     except Exception as e:
         logger.error(f"Error building context: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error building context: {str(e)}")
+
+
+# Media attachments ---------------------------------------------------------------
+
+
+def _classify_media(content_type: Optional[str]) -> Literal["image", "video"]:
+    """Map an upload's MIME type to the MediaItem kind (image|video)."""
+    ctype = (content_type or "").lower()
+    if ctype.startswith("video/"):
+        return "video"
+    if ctype.startswith("image/"):
+        return "image"
+    raise HTTPException(
+        status_code=400,
+        detail="Unsupported media type: only image/* and video/* are accepted",
+    )
+
+
+@router.post("/chat/media", response_model=MediaItem)
+async def upload_chat_media(file: UploadFile = File(...)):
+    """Upload an image/video to attach to a chat message.
+
+    Stored as a standalone file under ``data/uploads/chat-media/`` (no DB record in
+    v1 — see coordinator Q-mediastore). Returns the MediaItem the composer attaches
+    to the next ``POST /chat/execute`` call.
+    """
+    media_type = _classify_media(file.content_type)
+    try:
+        saved_path = await save_uploaded_file(file, CHAT_MEDIA_FOLDER)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error saving chat media: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error saving chat media: {str(e)}")
+
+    filename = os.path.basename(saved_path)
+    return MediaItem(
+        type=media_type,
+        url=f"/api/chat/media/{filename}",
+        label=file.filename or filename,
+        duration=None,
+    )
+
+
+@router.get("/chat/media/{filename}")
+async def get_chat_media(filename: str):
+    """Serve a previously uploaded chat-media file (path-traversal guarded)."""
+    try:
+        resolved_path = resolve_within(CHAT_MEDIA_FOLDER, filename)
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access to file denied")
+
+    if not os.path.exists(resolved_path):
+        raise HTTPException(status_code=404, detail="Media not found")
+
+    return FileResponse(
+        path=resolved_path, filename=os.path.basename(resolved_path)
+    )

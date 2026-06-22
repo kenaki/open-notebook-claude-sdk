@@ -17,6 +17,7 @@ from loguru import logger
 from surreal_commands import execute_command_sync, submit_command
 
 from api.command_service import CommandService
+from api.upload_utils import generate_unique_filename, save_uploaded_file
 from api.models import (
     AssetModel,
     CreateSourceInsightRequest,
@@ -36,62 +37,6 @@ from open_notebook.domain.transformation import Transformation
 from open_notebook.exceptions import InvalidInputError, NotFoundError
 
 router = APIRouter()
-
-
-def generate_unique_filename(original_filename: str, upload_folder: str) -> str:
-    """Generate unique filename like Streamlit app (append counter if file exists)."""
-    file_path = Path(upload_folder)
-    file_path.mkdir(parents=True, exist_ok=True)
-
-    # Strip directory components to prevent path traversal
-    safe_filename = os.path.basename(original_filename)
-    if not safe_filename:
-        raise ValueError("Invalid filename")
-
-    # Split filename and extension
-    stem = Path(safe_filename).stem
-    suffix = Path(safe_filename).suffix
-
-    # Check if file exists and generate unique name
-    counter = 0
-    while True:
-        if counter == 0:
-            new_filename = safe_filename
-        else:
-            new_filename = f"{stem} ({counter}){suffix}"
-
-        full_path = file_path / new_filename
-        # Verify resolved path stays within upload folder
-        resolved = full_path.resolve()
-        if not str(resolved).startswith(str(file_path.resolve()) + os.sep):
-            raise ValueError("Invalid filename: path traversal detected")
-        if not resolved.exists():
-            return str(resolved)
-        counter += 1
-
-
-async def save_uploaded_file(upload_file: UploadFile) -> str:
-    """Save uploaded file to uploads folder and return file path."""
-    if not upload_file.filename:
-        raise ValueError("No filename provided")
-
-    # Generate unique filename
-    file_path = generate_unique_filename(upload_file.filename, UPLOADS_FOLDER)
-
-    try:
-        # Save file
-        with open(file_path, "wb") as f:
-            content = await upload_file.read()
-            f.write(content)
-
-        logger.info(f"Saved uploaded file to: {file_path}")
-        return file_path
-    except Exception as e:
-        logger.error(f"Failed to save uploaded file: {e}")
-        # Clean up partial file if it exists
-        if os.path.exists(file_path):
-            os.unlink(file_path)
-        raise
 
 
 def parse_source_form_data(

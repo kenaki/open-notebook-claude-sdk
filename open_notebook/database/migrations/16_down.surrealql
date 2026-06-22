@@ -1,0 +1,5 @@
+-- Migration 16 rollback: remove the sub-chat fields from chat_session.
+-- The table is SCHEMALESS so these only exist on records that set them.
+
+REMOVE FIELD IF EXISTS parent_session_id ON TABLE chat_session;
+REMOVE FIELD IF EXISTS quote ON TABLE chat_session;

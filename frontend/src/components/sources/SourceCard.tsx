@@ -51,44 +51,47 @@ const SOURCE_TYPE_ICONS = {
   text: FileText,
 } as const
 
+// Status colors use the handoff warm-paper/indigo status tokens (--ready /
+// --processing / --failed) on a neutral inset (panel-2), so the indicators read
+// on-theme in both light and dark instead of the old hardcoded blue/green/red.
 const getStatusConfig = (t: TFunction) => ({
   new: {
     icon: Clock,
-    color: 'text-blue-600',
-    bgColor: 'bg-blue-50',
-    borderColor: 'border-blue-200',
+    color: 'text-processing',
+    bgColor: 'bg-panel-2',
+    borderColor: 'border-border-2',
     label: t('sources.statusProcessing'),
     description: t('sources.statusPreparingDesc')
   },
   queued: {
     icon: Clock,
-    color: 'text-blue-600',
-    bgColor: 'bg-blue-50',
-    borderColor: 'border-blue-200',
+    color: 'text-processing',
+    bgColor: 'bg-panel-2',
+    borderColor: 'border-border-2',
     label: t('sources.statusQueued'),
     description: t('sources.statusQueuedDesc')
   },
   running: {
     icon: Loader2,
-    color: 'text-blue-600',
-    bgColor: 'bg-blue-50',
-    borderColor: 'border-blue-200',
+    color: 'text-processing',
+    bgColor: 'bg-panel-2',
+    borderColor: 'border-border-2',
     label: t('sources.statusProcessing'),
     description: t('sources.statusProcessingDesc')
   },
   completed: {
     icon: CheckCircle,
-    color: 'text-green-600',
-    bgColor: 'bg-green-50',
-    borderColor: 'border-green-200',
+    color: 'text-ready',
+    bgColor: 'bg-panel-2',
+    borderColor: 'border-border-2',
     label: t('sources.statusCompleted'),
     description: t('sources.statusCompletedDesc')
   },
   failed: {
     icon: AlertTriangle,
-    color: 'text-red-600',
-    bgColor: 'bg-red-50',
-    borderColor: 'border-red-200',
+    color: 'text-failed',
+    bgColor: 'bg-panel-2',
+    borderColor: 'border-border-2',
     label: t('sources.statusFailed'),
     description: t('sources.statusFailedDesc')
   }
@@ -214,6 +217,10 @@ function SourceCardImpl({
 
   return (
     <Card
+      // Bare record id (no "source:" prefix) so a citation click in the chat
+      // panel can locate and flash this card (Plan E / Chunk 13). The citation
+      // path passes the bare id via handleReferenceClick.
+      data-source-id={source.id.replace(/^[^:]+:/, '')}
       className={cn(
         'transition-all duration-200 hover:shadow-md group relative cursor-pointer border border-border/60 dark:border-border/40',
         className
@@ -232,10 +239,16 @@ function SourceCardImpl({
                   statusConfig.bgColor,
                   statusConfig.color
                 )}>
-                  <StatusIcon className={cn(
-                    'h-3 w-3',
-                    isProcessing && 'animate-spin'
-                  )} />
+                  {isProcessing ? (
+                    // Pulsing dot for a source still being processed (handoff
+                    // §"Sources & Notes panels": Processing [pulsing dot]).
+                    <span
+                      className="onb-pulse inline-block h-1.5 w-1.5 rounded-full bg-processing"
+                      aria-hidden="true"
+                    />
+                  ) : (
+                    <StatusIcon className="h-3 w-3" />
+                  )}
                   {statusLoading && shouldFetchStatus ? t('sources.checking') : statusConfig.label}
                 </div>
 

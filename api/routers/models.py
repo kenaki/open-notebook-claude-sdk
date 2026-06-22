@@ -8,10 +8,20 @@ from loguru import logger
 from pydantic import BaseModel
 
 from api.models import (
+    ClaudeAgentModelOption,
+    ClaudeAgentModelResponse,
+    ClaudeAgentModelUpdate,
     DefaultModelsResponse,
     ModelCreate,
     ModelResponse,
     ProviderAvailabilityResponse,
+)
+from open_notebook.ai.claude_agent import (
+    CLAUDE_AGENT_FOLLOW_DEFAULT,
+    CLAUDE_AGENT_MODEL,
+    CLAUDE_AGENT_MODEL_OPTIONS,
+    get_or_create_claude_agent_record,
+    set_claude_agent_model,
 )
 from open_notebook.ai.connection_tester import test_individual_model
 from open_notebook.ai.key_provider import provision_provider_keys
@@ -359,6 +369,47 @@ async def update_default_models(defaults_data: DefaultModelsResponse):
         logger.error(f"Error updating default models: {str(e)}")
         raise HTTPException(
             status_code=500, detail=f"Error updating default models: {str(e)}"
+        )
+
+
+def _claude_agent_response(record) -> ClaudeAgentModelResponse:
+    """Build the Claude Agent config response from a Model record.
+
+    The stored ``name`` is the pinned model id; the FOLLOW_DEFAULT sentinel maps
+    back to ``None`` ("follow the Claude Code default").
+    """
+    name = (record.name or "").strip()
+    pinned = None if not name or name == CLAUDE_AGENT_FOLLOW_DEFAULT else name
+    return ClaudeAgentModelResponse(
+        model=pinned,
+        env_override=CLAUDE_AGENT_MODEL or None,
+        options=[ClaudeAgentModelOption(**opt) for opt in CLAUDE_AGENT_MODEL_OPTIONS],
+    )
+
+
+@router.get("/models/claude-agent", response_model=ClaudeAgentModelResponse)
+async def get_claude_agent_config():
+    """Get the configured Claude Agent (subscription chat) model and options."""
+    try:
+        record = await get_or_create_claude_agent_record()
+        return _claude_agent_response(record)
+    except Exception as e:
+        logger.error(f"Error fetching Claude Agent model config: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error fetching Claude Agent model config: {str(e)}"
+        )
+
+
+@router.put("/models/claude-agent", response_model=ClaudeAgentModelResponse)
+async def update_claude_agent_config(payload: ClaudeAgentModelUpdate):
+    """Set which Claude model the Claude Agent uses (empty = follow CC default)."""
+    try:
+        record = await set_claude_agent_model(payload.model)
+        return _claude_agent_response(record)
+    except Exception as e:
+        logger.error(f"Error updating Claude Agent model config: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error updating Claude Agent model config: {str(e)}"
         )
 
 

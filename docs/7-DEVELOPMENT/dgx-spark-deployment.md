@@ -119,6 +119,30 @@ systemctl --user restart on-frontend                    # after a code change
 systemctl --user stop on-api on-worker on-frontend      # stop all
 ```
 
+### Viewing logs (incl. source processing)
+
+Because the services run as systemd user units, all their output goes to the **journal**. View it with `journalctl --user`.
+
+> **Source processing runs in the *worker*, not the API.** Adding a source makes the API submit a `process_source` job; the `surreal-commands-worker` (`on-worker`) actually runs the ingestion graph — content extraction → embedding → insights (`commands/source_commands.py`). So **source/embedding/transformation logs are in `on-worker`**, not `on-api`. (loguru runs at DEBUG here, so you get the per-step lines like `Embedding content for vector search` and `Applying transformation …`.)
+
+```bash
+# Watch source processing live (add a source in the UI, watch it flow)
+journalctl --user -u on-worker -f
+
+# Last 200 lines / recent window
+journalctl --user -u on-worker -n 200 --no-pager
+journalctl --user -u on-worker --since "10 min ago"
+
+# Filter to the interesting bits
+journalctl --user -u on-worker -f | grep -iE "error|fail|embed|transform"
+
+# API side (job submission, HTTP errors) and all services together
+journalctl --user -u on-api -f
+journalctl --user -u on-api -u on-worker -u on-frontend -f
+```
+
+**Job status without logs:** `GET /api/commands/{command_id}` reports a job's state; a failed source surfaces there and becomes retryable from the UI.
+
 ### SurrealDB reboot-survival (optional)
 
 The DB runs in Docker, which survives SSH-close on its own. To bring it back automatically after a **full Spark reboot**, give the container a restart policy — add under `surrealdb:` in [`docker-compose.yml`](../../docker-compose.yml):
@@ -139,5 +163,7 @@ then re-create it once: `make database`. (The Docker daemon auto-starts on boot,
 - **`gpt-oss:120b`** (~65 GB) may be present from earlier experiments. Open Notebook does not use it; remove with `ollama rm gpt-oss:120b` to reclaim space.
 - **Unified-memory budget.** The Spark shares 128 GB between CPU and GPU. Ollama auto-unloads idle models (~5 min `keep_alive`), so they aren't all resident at once. The `qwen3.6:35b` Q4 (~23 GB) + `qwen3-embedding:8b` (~5 GB) leave ample headroom once `gpt-oss` is gone.
 - **Embedding dimension is locked in once chosen.** We store 4096 dims. Changing the dimension or embedding model requires re-embedding the entire corpus (all vectors must share one space).
+- **⚠️ Ollama `num_ctx` must be raised for large-context summaries.** Esperanto's Ollama client defaults to `num_ctx=8192` regardless of the model's 256K capability. With the default, any transformation that trips the large-context route (>105k tokens, `provision.py`) is **silently truncated to the last ~8K tokens** — the summary only reflects the document's tail, with no error. Fix: set `num_ctx` on the Ollama **Credential** (Settings → Models → Ollama config, or `Credential.num_ctx`). We use **131072** (128K) — covers the >105k trigger with headroom while keeping the KV cache reasonable; raise to `262144` for the full window. Verify the active window with `ollama ps` (CONTEXT column). Changes are picked up live (defaults and credentials are read fresh per request; Esperanto does not cache model instances) — no API restart needed.
+  - Trade-off: a larger `num_ctx` reserves a bigger KV cache whenever qwen3.6 is loaded (it's the shared model for transformation/large-context/tools), and Open Notebook summarizes large docs in a single pass (no map-reduce), so very long summaries can underweight the middle ("lost in the middle"). Fine for typical docs; map-reduce summarization would be a future code change.
 - **Retrieval polish (future, needs code):** `open_notebook/utils/embedding.py` embeds queries and passages identically. Qwen3 embeddings benefit from an instruction prefix on the *query* only; adding it would modestly improve search quality. Not yet implemented.
 - **Security caveat:** auth is off (`OPEN_NOTEBOOK_PASSWORD` unset) and the API binds `0.0.0.0` for Tailscale access — fine on a trusted network, but reachable beyond Tailscale on an untrusted LAN. See [`docs/5-CONFIGURATION/security.md`](../5-CONFIGURATION/security.md) before exposing it.

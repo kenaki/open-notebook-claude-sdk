@@ -10,6 +10,8 @@ import {
   ProviderModelCount,
   AutoAssignResult,
   ModelTestResult,
+  ClaudeAgentModelConfig,
+  UpdateClaudeAgentModelRequest,
 } from '@/lib/types/models'
 
 export const modelsApi = {
@@ -39,6 +41,22 @@ export const modelsApi = {
 
   updateDefaults: async (data: Partial<ModelDefaults>) => {
     const response = await apiClient.put<ModelDefaults>('/models/defaults', data)
+    return response.data
+  },
+
+  /**
+   * Get the Claude Agent (subscription chat) model configuration and options
+   */
+  getClaudeAgentModel: async () => {
+    const response = await apiClient.get<ClaudeAgentModelConfig>('/models/claude-agent')
+    return response.data
+  },
+
+  /**
+   * Set which Claude model the Claude Agent uses (empty = follow CC default)
+   */
+  updateClaudeAgentModel: async (data: UpdateClaudeAgentModelRequest) => {
+    const response = await apiClient.put<ClaudeAgentModelConfig>('/models/claude-agent', data)
     return response.data
   },
 

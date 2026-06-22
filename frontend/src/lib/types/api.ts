@@ -128,6 +128,43 @@ export interface APIError {
   detail: string
 }
 
+// Structured citations (Plan D / Chunk 9). Mirrors the backend `Citation`
+// (api/routers/chat.py) exactly: `id` is the full record id WITH its type prefix
+// (e.g. "source:abc123"); strip the prefix before passing to openModal/
+// handleReferenceClick, which expect the bare id. `page` is the pdf-viewer hook.
+export interface Citation {
+  id: string
+  type: 'source' | 'note' | 'source_insight'
+  number: number
+  title?: string
+  snippet?: string
+  page?: number
+}
+
+// Tool-use disclosure (Plan D / Chunk 10). Mirrors the backend
+// `ToolUseDisclosure` (api/routers/chat.py) exactly. Present only on AI messages
+// produced by the Claude Agent path; `null`/absent on Esperanto and old sessions
+// → the UI renders nothing in that case.
+export interface ToolUseDisclosure {
+  id: string
+  tool_name: string
+  tool_input: Record<string, unknown>
+  tool_result?: string
+  is_error?: boolean
+}
+
+// Image/video attachment (Plan D / Chunk 12). Mirrors the backend `MediaItem`
+// (api/routers/chat.py) exactly. `url` is the fetchable path served by
+// `GET /chat/media/{file}` (e.g. "/api/chat/media/abc.png"); prefix it with the
+// resolved API base to render. Returned by `POST /chat/media`, staged in the
+// composer (WorkspaceChat.pending), then carried onto a message's `media[]`.
+export interface MediaItem {
+  type: 'image' | 'video'
+  url: string
+  label: string // original filename, shown monospace
+  duration?: string // video only, "m:ss"
+}
+
 // Source Chat Types
 // Base session interface with common fields
 export interface BaseChatSession {
@@ -137,6 +174,13 @@ export interface BaseChatSession {
   updated: string
   message_count?: number
   model_override?: string | null
+  // Sub-chat fields (Plan D / Chunk 11). Persisted on the backend ChatSession;
+  // present on a chat spun off from a highlighted passage. Used to re-hydrate the
+  // popped/anchored sub-chat panel after a reload (the workspace store is
+  // ephemeral). `parent_session_id` is the chat it was spun off from; `quote` is
+  // the highlighted passage.
+  parent_session_id?: string | null
+  quote?: string | null
 }
 
 export interface SourceChatSession extends BaseChatSession {
@@ -149,6 +193,16 @@ export interface SourceChatMessage {
   type: 'human' | 'ai'
   content: string
   timestamp?: string
+  // Structured citations / follow-ups resolved by the backend (AI messages;
+  // absent on old sessions → inline-marker fallback). Plan D / Chunk 9.
+  citations?: Citation[]
+  followups?: string[]
+  // Claude Agent tool-use disclosure (AI messages; null/absent on the Esperanto
+  // path and old sessions). Plan D / Chunk 10.
+  tool_uses?: ToolUseDisclosure[]
+  // Image/video attachments (Plan D / Chunk 12). On human turns these are what the
+  // user attached; AI messages echo `[]`. Absent on old sessions.
+  media?: MediaItem[]
 }
 
 export interface SourceChatContextIndicator {
@@ -196,6 +250,16 @@ export interface NotebookChatMessage {
   type: 'human' | 'ai'
   content: string
   timestamp?: string
+  // Structured citations / follow-ups resolved by the backend (AI messages;
+  // absent on old sessions → inline-marker fallback). Plan D / Chunk 9.
+  citations?: Citation[]
+  followups?: string[]
+  // Claude Agent tool-use disclosure (AI messages; null/absent on the Esperanto
+  // path and old sessions). Plan D / Chunk 10.
+  tool_uses?: ToolUseDisclosure[]
+  // Image/video attachments (Plan D / Chunk 12). On human turns these are what the
+  // user attached; AI messages echo `[]`. Absent on old sessions.
+  media?: MediaItem[]
 }
 
 export interface NotebookChatSessionWithMessages extends NotebookChatSession {
@@ -206,6 +270,10 @@ export interface CreateNotebookChatSessionRequest {
   notebook_id: string
   title?: string
   model_override?: string
+  // Sub-chat creation (Plan D / Chunk 11): set both to spawn a chat anchored to a
+  // highlighted passage of its parent. Mirrors the backend CreateSessionRequest.
+  parent_session_id?: string
+  quote?: string
 }
 
 export interface UpdateNotebookChatSessionRequest {
@@ -221,6 +289,9 @@ export interface SendNotebookChatMessageRequest {
     notes: Array<Record<string, unknown>>
   }
   model_override?: string
+  // Image/video attachments for this turn (Plan D / Chunk 12). Mirrors the
+  // backend ExecuteChatRequest.media.
+  media?: MediaItem[]
 }
 
 export interface BuildContextRequest {
@@ -238,4 +309,20 @@ export interface BuildContextResponse {
   }
   token_count: number
   char_count: number
+}
+
+// Notebook Multi-Chat Workspace (Plan C) — client-only per-chat workspace state.
+// A "chat" maps onto an existing chat session (Decision 5/8): title + messages
+// come from the session/useNotebookChat; these fields live only in Zustand.
+// `parentId`/`quote` mirror the persisted sub-chat fields. `pending` holds media
+// already uploaded via POST /chat/media (Plan D / Chunk 12) and staged in the
+// composer until the next send moves it onto the message's `media[]`.
+export interface WorkspaceChat {
+  id: string // session id
+  docked: boolean // true → tab in the Chat Dock; false → its own popped panel (Chunk 8)
+  width: number // popped panel width in px (Chunk 8)
+  draft: string // current composer text
+  pending: MediaItem[] // uploaded attachments staged in the composer (Chunk 12)
+  parentId: string | null // id of the chat this was spun off from (Plan D sub-chats)
+  quote: string | null // the highlighted passage that seeded this sub-chat (Plan D)
 }

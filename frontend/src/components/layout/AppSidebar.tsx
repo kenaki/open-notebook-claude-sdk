@@ -26,7 +26,6 @@ import { ThemeToggle } from '@/components/common/ThemeToggle'
 import { LanguageToggle } from '@/components/common/LanguageToggle'
 import type { TFunction } from 'i18next'
 import { useTranslation } from '@/lib/hooks/use-translation'
-import { Separator } from '@/components/ui/separator'
 import {
   Book,
   Search,
@@ -45,26 +44,16 @@ import {
 
 const getNavigation = (t: TFunction) => [
   {
-    title: t('navigation.collect'),
+    title: t('navigation.workspace'),
     items: [
       { name: t('navigation.sources'), href: '/sources', icon: FileText },
-    ],
-  },
-  {
-    title: t('navigation.process'),
-    items: [
       { name: t('navigation.notebooks'), href: '/notebooks', icon: Book },
       { name: t('navigation.askAndSearch'), href: '/search', icon: Search },
-    ],
-  },
-  {
-    title: t('navigation.create'),
-    items: [
       { name: t('navigation.podcasts'), href: '/podcasts', icon: Mic },
     ],
   },
   {
-    title: t('navigation.manage'),
+    title: t('navigation.system'),
     items: [
       { name: t('navigation.models'), href: '/settings/api-keys', icon: Bot },
       { name: t('navigation.transformations'), href: '/transformations', icon: Shuffle },
@@ -109,7 +98,7 @@ export function AppSidebar() {
       <div
         className={cn(
           'app-sidebar flex h-full flex-col bg-sidebar border-sidebar-border border-r transition-all duration-300',
-          isCollapsed ? 'w-16' : 'w-64'
+          isCollapsed ? 'w-16' : 'w-[236px]'
         )}
       >
         <div
@@ -241,13 +230,10 @@ export function AppSidebar() {
           </div>
 
           {navigation.map((section, index) => (
-            <div key={section.title}>
-              {index > 0 && (
-                <Separator className="my-3" />
-              )}
-              <div className="space-y-1">
+            <div key={section.title} className={cn(index > 0 && !isCollapsed && 'pt-3')}>
+              <div className="space-y-0.5">
                 {!isCollapsed && (
-                  <h3 className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-sidebar-foreground/60">
+                  <h3 className="mb-1.5 px-2 text-[10.5px] font-semibold uppercase tracking-[0.07em] text-text-3">
                     {section.title}
                   </h3>
                 )}
@@ -256,14 +242,16 @@ export function AppSidebar() {
                   const isActive = pathname?.startsWith(item.href) || false
                   const button = (
                     <Button
-                      variant={isActive ? 'secondary' : 'ghost'}
+                      variant="ghost"
                       className={cn(
-                        'w-full gap-3 text-sidebar-foreground sidebar-menu-item',
-                        isActive && 'bg-sidebar-accent text-sidebar-accent-foreground',
+                        'w-full gap-2.5 font-medium sidebar-menu-item',
+                        isActive
+                          ? 'bg-card text-foreground shadow-[var(--shadow)] hover:bg-card'
+                          : 'text-muted-foreground',
                         isCollapsed ? 'justify-center px-2' : 'justify-start'
                       )}
                     >
-                      <item.icon className="h-4 w-4" />
+                      <item.icon className={cn('h-4 w-4', isActive ? 'text-primary' : 'text-text-3')} />
                       {!isCollapsed && <span>{item.name}</span>}
                     </Button>
                   )

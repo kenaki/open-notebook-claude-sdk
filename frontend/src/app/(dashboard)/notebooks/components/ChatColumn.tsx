@@ -1,83 +1,50 @@
 'use client'
 
-import { useMemo } from 'react'
-import { useNotebookChat } from '@/lib/hooks/useNotebookChat'
-import { useNotes } from '@/lib/hooks/use-notes'
-import { ChatPanel } from '@/components/source/ChatPanel'
+import { ChatDock } from '@/components/notebooks/ChatDock'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { Card, CardContent } from '@/components/ui/card'
 import { AlertCircle } from 'lucide-react'
-import { ContextSelections } from '../[id]/page'
 import { useTranslation } from '@/lib/hooks/use-translation'
-import { SourceListResponse } from '@/lib/types/api'
+import type { useNotebookChat } from '@/lib/hooks/useNotebookChat'
+
+interface ChatColumnContextStats {
+  sourcesInsights: number
+  sourcesFull: number
+  notesCount: number
+  tokenCount?: number
+  charCount?: number
+}
 
 interface ChatColumnProps {
   notebookId: string
-  contextSelections: ContextSelections
-  sources: SourceListResponse[]
-  sourcesLoading: boolean
+  // The multiplexed chat hook is lifted to the notebook page so popped-out chat
+  // panels (track siblings of the dock) can share one instance (Plan C / Chunk 8).
+  chat: ReturnType<typeof useNotebookChat>
+  contextStats: ChatColumnContextStats
+  loading: boolean
+  // True when the notebook's sources/notes failed to load entirely.
+  error?: boolean
+  // Allow popping chats out of the dock (desktop only — see ChatDock).
+  enablePopOut?: boolean
 }
 
-export function ChatColumn({ notebookId, contextSelections, sources, sourcesLoading }: ChatColumnProps) {
+export function ChatColumn({ notebookId, chat, contextStats, loading, error = false, enablePopOut }: ChatColumnProps) {
   const { t } = useTranslation()
 
-  // Fetch notes for this notebook
-  const { data: notes = [], isLoading: notesLoading } = useNotes(notebookId)
-
-  // Initialize notebook chat hook
-  const chat = useNotebookChat({
-    notebookId,
-    sources,
-    notes,
-    contextSelections
-  })
-
-  // Calculate context stats for indicator
-  const contextStats = useMemo(() => {
-    let sourcesInsights = 0
-    let sourcesFull = 0
-    let notesCount = 0
-
-    // Count sources by mode
-    sources.forEach(source => {
-      const mode = contextSelections.sources[source.id]
-      if (mode === 'insights') {
-        sourcesInsights++
-      } else if (mode === 'full') {
-        sourcesFull++
-      }
-    })
-
-    // Count notes that are included (not 'off')
-    notes.forEach(note => {
-      const mode = contextSelections.notes[note.id]
-      if (mode === 'full') {
-        notesCount++
-      }
-    })
-
-    return {
-      sourcesInsights,
-      sourcesFull,
-      notesCount,
-      tokenCount: chat.tokenCount,
-      charCount: chat.charCount
-    }
-  }, [sources, notes, contextSelections, chat.tokenCount, chat.charCount])
-
   // Show loading state while sources/notes are being fetched
-  if (sourcesLoading || notesLoading) {
+  if (loading) {
     return (
       <Card className="h-full flex flex-col">
         <CardContent className="flex-1 flex items-center justify-center">
           <LoadingSpinner size="lg" />
+          <span className="sr-only">{t('common.loading')}</span>
         </CardContent>
       </Card>
     )
   }
 
   // Show error state if data fetch failed (unlikely but good to handle)
-  if (!sources && !notes) {
+  if (error) {
     return (
       <Card className="h-full flex flex-col">
         <CardContent className="flex-1 flex items-center justify-center">
@@ -92,24 +59,11 @@ export function ChatColumn({ notebookId, contextSelections, sources, sourcesLoad
   }
 
   return (
-    <ChatPanel
-      title={t('chat.chatWithNotebook')}
-      contextType="notebook"
-      messages={chat.messages}
-      isStreaming={chat.isSending}
-      contextIndicators={null}
-      onSendMessage={(message, modelOverride) => chat.sendMessage(message, modelOverride)}
-      modelOverride={chat.currentSession?.model_override ?? chat.pendingModelOverride ?? undefined}
-      onModelChange={(model) => chat.setModelOverride(model ?? null)}
-      sessions={chat.sessions}
-      currentSessionId={chat.currentSessionId}
-      onCreateSession={(title) => chat.createSession(title)}
-      onSelectSession={chat.switchSession}
-      onUpdateSession={(sessionId, title) => chat.updateSession(sessionId, { title })}
-      onDeleteSession={chat.deleteSession}
-      loadingSessions={chat.loadingSessions}
-      notebookContextStats={contextStats}
+    <ChatDock
       notebookId={notebookId}
+      chat={chat}
+      contextStats={contextStats}
+      enablePopOut={enablePopOut}
     />
   )
 }

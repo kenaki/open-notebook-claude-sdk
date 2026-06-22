@@ -330,13 +330,16 @@ export function createReferenceLinkComponent(
  *
  * @param text - Original text with references
  * @param referencesLabel - Locales label for "References" title (default: "References")
- * @returns Text with numbered citations and reference list appended
+ * @param appendReferenceList - When false, rewrite inline refs to numbered links
+ *   but skip the appended "References:" list. Used when structured citation cards
+ *   render the list separately (Plan D / Chunk 9), avoiding a duplicate list.
+ * @returns Text with numbered citations and (optionally) reference list appended
  *
  * @example
  * Input: "See [source:abc] and [note:xyz]. Also [source:abc] again."
  * Output: "See [1] and [2]. Also [1] again.\n\nReferences:\n[1] - [source:abc]\n[2] - [note:xyz]"
  */
-export function convertReferencesToCompactMarkdown(text: string, referencesLabel: string = 'References'): string {
+export function convertReferencesToCompactMarkdown(text: string, referencesLabel: string = 'References', appendReferenceList: boolean = true): string {
   // Step 1: Parse all references using existing function
   const references = parseSourceReferences(text)
 
@@ -394,6 +397,11 @@ export function convertReferencesToCompactMarkdown(text: string, referencesLabel
 
     // Replace in the result string
     result = result.substring(0, replaceStart) + citationLink + result.substring(replaceEnd)
+  }
+
+  // Structured citation cards render the list separately — skip the appended one.
+  if (!appendReferenceList) {
+    return result
   }
 
   // Step 5: Build reference list
