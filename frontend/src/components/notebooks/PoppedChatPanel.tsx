@@ -3,6 +3,7 @@
 import { ArrowLeftToLine, X, Quote } from 'lucide-react'
 import { ChatPanel } from '@/components/source/ChatPanel'
 import { ChatModelPicker } from '@/components/notebooks/ChatModelPicker'
+import { DeleteChatButton } from '@/components/notebooks/DeleteChatButton'
 import { deriveChatTitle } from '@/components/notebooks/ChatDock'
 import { useChatWorkspaceStore } from '@/lib/stores/chat-workspace-store'
 import { useTranslation } from '@/lib/hooks/use-translation'
@@ -16,8 +17,11 @@ interface PoppedChatPanelProps {
   // reads/sends to its own session id through it.
   chat: ReturnType<typeof useNotebookChat>
   onDockBack: () => void
+  // X (non-destructive HIDE): stop rendering the panel; the chat stays in the
+  // DB, reachable again via the sidebar / side-chats control (Chunk 3).
   onClose: () => void
-  canClose: boolean
+  // Trash (permanent DELETE): remove the session (gated by a confirm dialog).
+  onDelete: () => void
   // Focus this panel's composer on mount (a freshly-spawned sub-chat).
   autoFocus?: boolean
 }
@@ -36,7 +40,7 @@ export function PoppedChatPanel({
   chat,
   onDockBack,
   onClose,
-  canClose,
+  onDelete,
   autoFocus = false,
 }: PoppedChatPanelProps) {
   const { t } = useTranslation()
@@ -74,12 +78,12 @@ export function PoppedChatPanel({
           >
             <ArrowLeftToLine className="h-3.5 w-3.5" />
           </button>
+          <DeleteChatButton onDelete={onDelete} className="p-1 hover:bg-accent" />
           <button
             type="button"
-            title={t('chat.closeChat')}
-            disabled={!canClose}
-            onClick={() => canClose && onClose()}
-            className="p-1 rounded hover:bg-accent text-muted-foreground disabled:opacity-30 disabled:hover:bg-transparent"
+            title={t('chat.hideChat')}
+            onClick={onClose}
+            className="p-1 rounded hover:bg-accent text-muted-foreground"
           >
             <X className="h-3.5 w-3.5" />
           </button>

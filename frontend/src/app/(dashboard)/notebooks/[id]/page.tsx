@@ -7,10 +7,8 @@ import {
   PointerSensor,
   useSensor,
   useSensors,
-  useDroppable,
   closestCenter,
   type DragEndEvent,
-  type DragStartEvent,
 } from '@dnd-kit/core'
 import { SortableContext, arrayMove, horizontalListSortingStrategy } from '@dnd-kit/sortable'
 import { AppShell } from '@/components/layout/AppShell'
@@ -32,7 +30,6 @@ import { PanelTrack } from '@/components/notebooks/PanelTrack'
 import { PanelCard } from '@/components/notebooks/PanelCard'
 import { PoppedChatPanel } from '@/components/notebooks/PoppedChatPanel'
 import { PassageSelectionMenu } from '@/components/notebooks/PassageSelectionMenu'
-import { TAB_DND_PREFIX } from '@/components/notebooks/ChatDock'
 import { useIsDesktop } from '@/lib/hooks/use-media-query'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -52,7 +49,6 @@ import {
 import type { ContextMode, ContextSelections } from '@/lib/types/notebook-context'
 export type { ContextMode, ContextSelections }
 
-const POPZONE_ID = 'popzone'
 const FIXED = FIXED_PANEL_IDS as readonly string[]
 
 export default function NotebookPage() {
@@ -84,13 +80,13 @@ export default function NotebookPage() {
     setMaximized,
   } = useNotebookColumnsStore()
 
-  // Multi-chat workspace state (docked/popped chats, anchor order)
+  // Multi-chat workspace state (open/popped chats, anchor order)
   const wsChats = useChatWorkspaceStore((s) => s.chats)
   const panelOrder = useChatWorkspaceStore((s) => s.panelOrder)
-  const wsOrder = useChatWorkspaceStore((s) => s.order)
-  const setDocked = useChatWorkspaceStore((s) => s.setDocked)
+  const openChat = useChatWorkspaceStore((s) => s.openChat)
+  const popChat = useChatWorkspaceStore((s) => s.popChat)
+  const closeChat = useChatWorkspaceStore((s) => s.closeChat)
   const setChatWidth = useChatWorkspaceStore((s) => s.setChatWidth)
-  const reorder = useChatWorkspaceStore((s) => s.reorder)
   const reorderPanels = useChatWorkspaceStore((s) => s.reorderPanels)
 
   // Detect desktop to avoid double-mounting the chat hook / dock
@@ -141,9 +137,13 @@ export default function NotebookPage() {
   }, [notes, noteContextDefault])
 
   // Popped-out chats (live in the track, not the dock). Derived from the store,
-  // which ChatDock keeps synced to the live session list.
+  // which ChatDock keeps synced to the live session list. Must be OPEN — closed
+  // chats (sidebar-only) never render even though their default docked is false.
   const poppedIds = useMemo(
-    () => Object.keys(wsChats).filter((id) => wsChats[id]?.docked === false),
+    () =>
+      Object.keys(wsChats).filter(
+        (id) => wsChats[id]?.open && wsChats[id]?.docked === false
+      ),
     [wsChats]
   )
   const poppedIdSet = useMemo(() => new Set(poppedIds), [poppedIds])
@@ -192,7 +192,7 @@ export default function NotebookPage() {
     const parentOf = (id: string) => wsChats[id]?.parentId ?? null
     const hasPresentParent = (id: string) => {
       const p = parentOf(id)
-      return !!p && (poppedIdSet.has(p) || wsChats[p]?.docked === false)
+      return !!p && poppedIdSet.has(p)
     }
     const childChatsOf = (token: string) =>
       panelOrder.filter((c) => poppedIdSet.has(c) && parentOf(c) === token)
@@ -289,15 +289,15 @@ export default function NotebookPage() {
     }
   }
 
-  // Pop the freshly-created side chat out of the dock the moment it appears in
-  // the workspace store (new sessions land docked by default), then clear the flag.
+  // Open the freshly-created side chat as a popped panel the moment it appears in
+  // the workspace store (new sessions land closed by default), then clear the flag.
   useEffect(() => {
     if (!pendingPopId) return
     if (wsChats[pendingPopId]) {
-      if (wsChats[pendingPopId].docked !== false) setDocked(pendingPopId, false)
+      popChat(pendingPopId)
       setPendingPopId(null)
     }
-  }, [pendingPopId, wsChats, setDocked])
+  }, [pendingPopId, wsChats, popChat])
 
   // Clear the pending-focus marker shortly after a sub-chat spawns so a later
   // re-mount (e.g. maximize toggle) doesn't re-steal focus.
@@ -307,41 +307,19 @@ export default function NotebookPage() {
     return () => clearTimeout(timer)
   }, [pendingFocusId])
 
-  // --- Drag & drop (reorder tabs / panels, pop a tab out) -------------------
+  // --- Drag & drop (reorder panels) -----------------------------------------
+  // The dock tab strip is gone (Sidebar redesign / Chunk 2); only the fixed
+  // panels + popped chat panels reorder now.
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
-  const [draggingTab, setDraggingTab] = useState(false)
-
-  const handleDragStart = (e: DragStartEvent) => {
-    setDraggingTab(String(e.active.id).startsWith(TAB_DND_PREFIX))
-  }
 
   const handleDragEnd = (e: DragEndEvent) => {
-    setDraggingTab(false)
     const { active, over } = e
     if (!over) return
     const activeId = String(active.id)
     const overId = String(over.id)
     if (activeId === overId) return
 
-    if (activeId.startsWith(TAB_DND_PREFIX)) {
-      const tabId = activeId.slice(TAB_DND_PREFIX.length)
-      if (overId === POPZONE_ID) {
-        // Drag a tab onto the track → pop it out.
-        setDocked(tabId, false)
-        return
-      }
-      if (overId.startsWith(TAB_DND_PREFIX)) {
-        // Reorder dock tabs within the workspace order.
-        const overTab = overId.slice(TAB_DND_PREFIX.length)
-        const from = wsOrder.indexOf(tabId)
-        const to = wsOrder.indexOf(overTab)
-        if (from !== -1 && to !== -1) reorder(arrayMove(wsOrder, from, to))
-      }
-      return
-    }
-
     // Panel reorder (sources / notes / dock / popped chat).
-    if (overId === POPZONE_ID || overId.startsWith(TAB_DND_PREFIX)) return
     const from = panelOrder.indexOf(activeId)
     const to = panelOrder.indexOf(overId)
     if (from !== -1 && to !== -1) reorderPanels(arrayMove(panelOrder, from, to))
@@ -435,10 +413,10 @@ export default function NotebookPage() {
           notebookId={notebookId}
           session={session}
           chat={chat}
-          canClose={chat.sessions.length > 1}
           autoFocus={pendingFocusId === token}
-          onDockBack={() => setDocked(token, true)}
-          onClose={() => chat.deleteSession(token)}
+          onDockBack={() => openChat(token)}
+          onClose={() => closeChat(token)}
+          onDelete={() => chat.deleteSession(token)}
         />
       </PanelCard>
     )
@@ -473,7 +451,6 @@ export default function NotebookPage() {
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}
-          onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
         >
           <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
@@ -547,7 +524,6 @@ export default function NotebookPage() {
                   <SortableContext items={visibleTokens} strategy={horizontalListSortingStrategy}>
                     {visibleTokens.map(renderCard)}
                   </SortableContext>
-                  {draggingTab && !effectiveMax && <PopZone />}
                   {/* Spawn a new side chat to the right of the last panel. */}
                   {!effectiveMax && (
                     <button
@@ -569,24 +545,5 @@ export default function NotebookPage() {
         </DndContext>
       </div>
     </AppShell>
-  )
-}
-
-/**
- * The dashed "drop here to open side by side" target shown while a dock tab is
- * being dragged across the track. Dropping a tab here pops the chat out.
- */
-function PopZone() {
-  const { t } = useTranslation()
-  const { setNodeRef, isOver } = useDroppable({ id: POPZONE_ID })
-  return (
-    <div
-      ref={setNodeRef}
-      className={`flex-shrink-0 self-stretch w-[280px] flex items-center justify-center rounded-xl border-2 border-dashed text-center text-xs px-4 transition-colors ${
-        isOver ? 'border-primary bg-accent-soft text-primary' : 'border-border text-muted-foreground'
-      }`}
-    >
-      {t('chat.dropToPopOut')}
-    </div>
   )
 }

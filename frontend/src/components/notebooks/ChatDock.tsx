@@ -1,22 +1,19 @@
 'use client'
 
 import { useEffect, useMemo } from 'react'
-import { SortableContext, horizontalListSortingStrategy, useSortable } from '@dnd-kit/sortable'
-import { CSS } from '@dnd-kit/utilities'
 import { ChatPanel } from '@/components/source/ChatPanel'
 import { ChatModelPicker } from '@/components/notebooks/ChatModelPicker'
+import { ChatSidebar } from '@/components/notebooks/ChatSidebar'
 import { SideChatDefaultMenu } from '@/components/notebooks/SideChatDefaultMenu'
-import { Button } from '@/components/ui/button'
-import { Plus, X, ArrowUpRight } from 'lucide-react'
 import { useChatWorkspaceStore } from '@/lib/stores/chat-workspace-store'
 import { useChatDefaultsStore } from '@/lib/stores/chat-defaults-store'
 import { useTranslation } from '@/lib/hooks/use-translation'
-import { BaseChatSession, NotebookChatSession, MediaItem } from '@/lib/types/api'
+import { MediaItem } from '@/lib/types/api'
 import type { useNotebookChat } from '@/lib/hooks/useNotebookChat'
 
 // Derive a chat title from the first message (Plan D / Chunk 12). Text wins;
 // otherwise fall back to the single filename or "N attachments" (handoff
-// §"Media attachments"). Shared with PoppedChatPanel.
+// §"Media attachments"). Shared with PoppedChatPanel and ChatSidebar.
 export function deriveChatTitle(
   message: string,
   media: MediaItem[] | undefined,
@@ -32,10 +29,6 @@ export function deriveChatTitle(
   return text
 }
 
-// Sortable id prefix for dock tabs — lets the page's single DndContext tell a
-// tab drag (reorder / pop-out) apart from a panel drag.
-export const TAB_DND_PREFIX = 'tab:'
-
 interface ChatDockContextStats {
   sourcesInsights: number
   sourcesFull: number
@@ -49,28 +42,27 @@ interface ChatDockProps {
   // The single multiplexed chat hook (lifted to the page).
   chat: ReturnType<typeof useNotebookChat>
   contextStats: ChatDockContextStats
-  // Pop-out is only meaningful where the track can render popped panels
-  // (desktop). On the mobile tabbed view it's hidden so a popped chat can't
-  // vanish with nowhere to render (mobile layout is Plan E's scope).
+  // Retained for back-compat with ChatColumn's mobile call; the dock no longer
+  // pops chats out (the sidebar switches the active main; panels come from the
+  // track "+" / side-chats control instead of per-tab pop-out).
   enablePopOut?: boolean
 }
 
 /**
- * The Chat Dock panel (Plan C). A flat list of **docked** chats as drag-orderable
- * tabs (reorder + pop-out via @dnd-kit, Chunk 8), a dock-header model picker
- * bound to the global `claude_agent` config (Decision 8), and a context meter
- * pill. Only the active docked tab renders its conversation; popped chats render
- * as their own panels in the track. The page owns the DndContext; this component
- * provides the tab SortableContext and the pop-out action.
+ * The Chat Dock panel (Sidebar redesign / Chunk 2). A left **sidebar rail** lists
+ * the notebook's MAIN chats (searchable, recency-ordered — {@link ChatSidebar});
+ * the right pane renders the active main's conversation. A dock-header model
+ * picker drives the active chat's per-session override, alongside a context meter
+ * and the side-chat default cog. Side chats live as popped panels in the track
+ * (page.tsx), not here.
  */
-export function ChatDock({ notebookId, chat, contextStats, enablePopOut = true }: ChatDockProps) {
+export function ChatDock({ notebookId, chat, contextStats }: ChatDockProps) {
   const { t } = useTranslation()
   const chats = useChatWorkspaceStore((s) => s.chats)
-  const order = useChatWorkspaceStore((s) => s.order)
+  const activeChatId = useChatWorkspaceStore((s) => s.activeChatId)
   const syncChats = useChatWorkspaceStore((s) => s.syncChats)
-  const setActiveChat = useChatWorkspaceStore((s) => s.setActiveChat)
+  const openChat = useChatWorkspaceStore((s) => s.openChat)
   const setDraft = useChatWorkspaceStore((s) => s.setDraft)
-  const setDocked = useChatWorkspaceStore((s) => s.setDocked)
   const addPending = useChatWorkspaceStore((s) => s.addPending)
   const removePending = useChatWorkspaceStore((s) => s.removePending)
   const clearPending = useChatWorkspaceStore((s) => s.clearPending)
@@ -85,62 +77,50 @@ export function ChatDock({ notebookId, chat, contextStats, enablePopOut = true }
 
   // Reconcile the workspace store with the live session list. Passing the full
   // session objects lets the store re-hydrate persisted sub-chats (those with a
-  // parent_session_id) as popped, anchored panels after a reload (Chunk 11).
+  // parent_session_id) as closed entries and auto-open the most-recent main.
   useEffect(() => {
     syncChats(sessions.map((s) => ({ id: s.id, parent_session_id: s.parent_session_id, quote: s.quote })))
   }, [sessions, syncChats])
 
-  // Docked tabs only (popped chats live in the track), ordered by store order.
-  const dockedSessions = useMemo(() => {
-    const isDocked = (id: string) => chats[id]?.docked !== false // default docked
-    const ordered = order
-      .map((id) => sessions.find((s) => s.id === id))
-      .filter((s): s is NotebookChatSession => !!s && isDocked(s.id))
-    const extras = sessions.filter((s) => !order.includes(s.id) && isDocked(s.id))
-    return [...ordered, ...extras]
-  }, [order, sessions, chats])
+  // The active main shown in the dock body (open + docked). Null → empty state.
+  const activeMainId =
+    activeChatId && chats[activeChatId]?.open && chats[activeChatId]?.docked !== false
+      ? activeChatId
+      : null
 
-  // The active docked tab. If the hook's current session isn't docked (e.g. it
-  // was just popped out), fall back to the first docked tab.
-  const activeDockedId = useMemo(() => {
-    if (currentSessionId && dockedSessions.some((s) => s.id === currentSessionId)) {
-      return currentSessionId
-    }
-    return dockedSessions[0]?.id ?? null
-  }, [currentSessionId, dockedSessions])
-
-  // Keep the hook's current session pointed at a docked tab.
+  // Keep the hook's current session pointed at the active main so its message
+  // stream stays live.
   useEffect(() => {
-    if (activeDockedId && activeDockedId !== currentSessionId) {
-      chat.switchSession(activeDockedId)
-      setActiveChat(activeDockedId)
+    if (activeMainId && activeMainId !== currentSessionId) {
+      chat.switchSession(activeMainId)
     }
-  }, [activeDockedId, currentSessionId, chat, setActiveChat])
+  }, [activeMainId, currentSessionId, chat])
 
-  const activeChat = activeDockedId ? chats[activeDockedId] : undefined
+  const activeChat = activeMainId ? chats[activeMainId] : undefined
 
-  const handleSwitch = (id: string) => {
-    setActiveChat(id)
+  const handleOpen = (id: string) => {
+    openChat(id)
     chat.switchSession(id)
   }
 
-  const handlePopOut = (id: string) => {
-    setDocked(id, false)
-    // If we popped the active tab, hand the dock to the next docked chat.
-    if (id === activeDockedId) {
-      const next = dockedSessions.find((s) => s.id !== id)
-      if (next) handleSwitch(next.id)
-    }
+  const handleNew = async () => {
+    const session = await chat.createSession(newChatLabel)
+    if (session) handleOpen(session.id)
   }
 
   const handleSend = async (message: string, media?: MediaItem[]) => {
-    const target = activeDockedId
-    const wasNew = !!target && sessions.find((s) => s.id === target)?.title === newChatLabel
-    await chat.sendMessageTo(target, message, undefined, media)
-    if (target) clearPending(target)
-    if (wasNew && target) {
-      chat.renameSession(target, deriveChatTitle(message, media, t))
+    let target = activeMainId
+    // No main open (all hidden) → spin one up and open it before sending.
+    if (!target) {
+      const session = await chat.createSession(newChatLabel)
+      if (!session) return
+      target = session.id
+      handleOpen(session.id)
     }
+    const wasNew = sessions.find((s) => s.id === target)?.title === newChatLabel
+    await chat.sendMessageTo(target, message, undefined, media)
+    clearPending(target)
+    if (wasNew) chat.renameSession(target, deriveChatTitle(message, media, t))
   }
 
   // Context meter pill: "N sources · M notes · k tokens".
@@ -153,63 +133,17 @@ export function ChatDock({ notebookId, chat, contextStats, enablePopOut = true }
     t('chat.meterTokens').replace('{count}', tokenLabel),
   ].join(' · ')
 
-  // The dock header's ChatModelPicker drives the *active chat's* per-session
-  // model override, so each tab can talk to a different model (popped panels
-  // carry their own picker). The global Claude Agent default still lives in
-  // Settings (ClaudeAgentModelCard). See ChatModelPicker for the value scheme.
+  // The dock header's ChatModelPicker drives the active main's per-session model
+  // override. See ChatModelPicker for the value scheme.
   const activeSession = useMemo(
-    () => sessions.find((s) => s.id === activeDockedId),
-    [sessions, activeDockedId]
+    () => sessions.find((s) => s.id === activeMainId),
+    [sessions, activeMainId]
   )
   const activeOverride = activeSession?.model_override ?? chat.pendingModelOverride ?? null
 
   const draftProps = activeChat
     ? { draft: activeChat.draft, onDraftChange: (v: string) => setDraft(activeChat.id, v) }
     : {}
-
-  const tabItemIds = dockedSessions.map((s) => `${TAB_DND_PREFIX}${s.id}`)
-  const canClose = sessions.length > 1
-
-  // Tab strip sits *above* the input box (composerHeader); the active-chat model
-  // picker + context meter + settings cog drop into the input box's utility
-  // toolbar row (composerToolbar), separated from the typing area.
-  const dockTabs = (
-    <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
-      {dockedSessions.length === 0 ? (
-        <div className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs bg-accent-soft text-foreground">
-          <span className="truncate max-w-[140px]">{newChatLabel}</span>
-        </div>
-      ) : (
-        <SortableContext items={tabItemIds} strategy={horizontalListSortingStrategy}>
-          {dockedSessions.map((session) => (
-            <SortableTab
-              key={session.id}
-              session={session}
-              isActive={session.id === activeDockedId}
-              canClose={canClose}
-              newChatLabel={newChatLabel}
-              onSwitch={() => handleSwitch(session.id)}
-              onPopOut={() => handlePopOut(session.id)}
-              onClose={() => chat.deleteSession(session.id)}
-              enablePopOut={enablePopOut}
-              popOutLabel={t('chat.popOut')}
-              closeLabel={t('chat.closeChat')}
-            />
-          ))}
-        </SortableContext>
-      )}
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        className="h-7 w-7 flex-shrink-0 rounded-full"
-        title={t('chat.newChat')}
-        onClick={() => chat.createSession(newChatLabel)}
-      >
-        <Plus className="h-4 w-4" />
-      </Button>
-    </div>
-  )
 
   const dockControls = (
     <>
@@ -223,126 +157,35 @@ export function ChatDock({ notebookId, chat, contextStats, enablePopOut = true }
   )
 
   return (
-    <div className="flex flex-col h-full min-h-0 bg-card border border-border rounded-xl shadow-[var(--shadow)] overflow-hidden">
-      {/* Conversation fills the card; tabs sit above the box, controls inside it. */}
-      <ChatPanel
-        variant="dock"
-        contextType="notebook"
-        messages={chat.getMessages(activeDockedId)}
-        isStreaming={chat.getIsSending(activeDockedId)}
-        contextIndicators={null}
-        onSendMessage={(message, _model, media) => handleSend(message, media)}
-        notebookId={notebookId}
-        pending={activeChat?.pending ?? []}
-        onAddPending={activeDockedId ? (item) => addPending(activeDockedId, item) : undefined}
-        onRemovePending={activeDockedId ? (index) => removePending(activeDockedId, index) : undefined}
-        // Tag AI bodies with the active session id so a passage selection can be
-        // traced back to its parent chat for sub-chat creation (Chunk 11).
-        chatScopeId={activeDockedId ?? undefined}
-        composerMaxHeight={140}
-        composerHeader={dockTabs}
-        composerToolbar={dockControls}
-        emptyStateTitle={t('chat.emptyTitle')}
-        emptyStateHelper={t('chat.emptyHelper')}
-        suggestions={[
-          t('chat.suggestionSummarize'),
-          t('chat.suggestionQuestions'),
-          t('chat.suggestionConnections'),
-        ]}
-        {...draftProps}
-      />
-    </div>
-  )
-}
-
-interface SortableTabProps {
-  session: BaseChatSession
-  isActive: boolean
-  canClose: boolean
-  enablePopOut: boolean
-  newChatLabel: string
-  popOutLabel: string
-  closeLabel: string
-  onSwitch: () => void
-  onPopOut: () => void
-  onClose: () => void
-}
-
-/**
- * A single dock tab. Draggable via @dnd-kit (distance-activated so a click still
- * switches tabs); drop onto another tab to reorder, or onto the track drop-zone
- * to pop the chat out.
- */
-function SortableTab({
-  session,
-  isActive,
-  canClose,
-  enablePopOut,
-  newChatLabel,
-  popOutLabel,
-  closeLabel,
-  onSwitch,
-  onPopOut,
-  onClose,
-}: SortableTabProps) {
-  const { setNodeRef, attributes, listeners, transform, transition, isDragging } = useSortable({
-    id: `${TAB_DND_PREFIX}${session.id}`,
-  })
-
-  const style: React.CSSProperties = {
-    transform: CSS.Translate.toString(transform),
-    transition,
-    zIndex: isDragging ? 40 : undefined,
-    opacity: isDragging ? 0.6 : undefined,
-  }
-
-  return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      {...attributes}
-      {...listeners}
-      onClick={onSwitch}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault()
-          onSwitch()
-        }
-      }}
-      className={`group flex items-center gap-1.5 pl-3.5 pr-2 py-1.5 rounded-full text-xs cursor-pointer transition-colors flex-shrink-0 touch-none ${
-        isActive ? 'bg-accent-soft text-foreground' : 'text-muted-foreground hover:bg-accent'
-      }`}
-    >
-      <span className="truncate max-w-[140px]">{session.title || newChatLabel}</span>
-      {/* Pop-out (↗) */}
-      {enablePopOut && (
-        <button
-          type="button"
-          title={popOutLabel}
-          className="p-0.5 rounded hover:bg-background"
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => {
-            e.stopPropagation()
-            onPopOut()
-          }}
-        >
-          <ArrowUpRight className="h-3 w-3" />
-        </button>
-      )}
-      {/* Close (✕) — keep at least one chat */}
-      <button
-        type="button"
-        title={closeLabel}
-        disabled={!canClose}
-        className="p-0.5 rounded hover:bg-background disabled:opacity-30 disabled:hover:bg-transparent"
-        onPointerDown={(e) => e.stopPropagation()}
-        onClick={(e) => {
-          e.stopPropagation()
-          if (canClose) onClose()
-        }}
-      >
-        <X className="h-3 w-3" />
-      </button>
+    <div className="flex h-full min-h-0 bg-card border border-border rounded-xl shadow-[var(--shadow)] overflow-hidden">
+      <ChatSidebar chat={chat} onOpen={handleOpen} onNew={handleNew} />
+      <div className="flex-1 min-w-0 flex flex-col min-h-0">
+        <ChatPanel
+          variant="dock"
+          contextType="notebook"
+          messages={chat.getMessages(activeMainId)}
+          isStreaming={chat.getIsSending(activeMainId)}
+          contextIndicators={null}
+          onSendMessage={(message, _model, media) => handleSend(message, media)}
+          notebookId={notebookId}
+          pending={activeChat?.pending ?? []}
+          onAddPending={activeMainId ? (item) => addPending(activeMainId, item) : undefined}
+          onRemovePending={activeMainId ? (index) => removePending(activeMainId, index) : undefined}
+          // Tag AI bodies with the active session id so a passage selection can be
+          // traced back to its parent chat for sub-chat creation (Chunk 11).
+          chatScopeId={activeMainId ?? undefined}
+          composerMaxHeight={140}
+          composerToolbar={dockControls}
+          emptyStateTitle={t('chat.emptyTitle')}
+          emptyStateHelper={t('chat.emptyHelper')}
+          suggestions={[
+            t('chat.suggestionSummarize'),
+            t('chat.suggestionQuestions'),
+            t('chat.suggestionConnections'),
+          ]}
+          {...draftProps}
+        />
+      </div>
     </div>
   )
 }

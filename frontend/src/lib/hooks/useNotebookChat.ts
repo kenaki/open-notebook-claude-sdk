@@ -312,17 +312,20 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections,
     setCurrentSessionId(sessionId)
   }, [])
 
-  // Create session. New chats spun up from the dock's "+" are treated as side
-  // chats, so they adopt the notebook's configured side-chat default model (the
-  // dock header cog). The main chat is auto-created on first send (sendMessageTo)
-  // and keeps the dock picker's override instead. null → omit (follow default).
-  const createSession = useCallback((title?: string) => {
-    const sideModel = getSideChatModel(notebookId)
-    return createSessionMutation.mutate({
-      notebook_id: notebookId,
-      title,
-      model_override: sideModel ?? undefined
-    })
+  // Create a MAIN chat (Sidebar redesign / Chunk 2). The sidebar "+" makes a
+  // top-level chat, so it follows the global default model (no side-chat default
+  // — that's reserved for true side chats: createSubChat / createSidePanel).
+  // Async + returns the new session so the caller can openChat() it; onError of
+  // the mutation already toasts, so we just swallow + return null.
+  const createSession = useCallback(async (title?: string) => {
+    try {
+      return await createSessionMutation.mutateAsync({
+        notebook_id: notebookId,
+        title,
+      })
+    } catch {
+      return null
+    }
   }, [createSessionMutation, notebookId])
 
   // Update session
@@ -371,7 +374,7 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections,
   // Spawn a standalone side chat that opens directly as a popped panel (the
   // track's "+" button). Like createSubChat but with no parent/quote — it's an
   // empty side conversation. Returns the new session (or null) so the caller can
-  // pop it out (setDocked) and focus/scroll to it; the title defaults to the
+  // pop it out (popChat) and focus/scroll to it; the title defaults to the
   // caller's "New chat" label so the first-message auto-rename still fires.
   const createSidePanel = useCallback(async (title?: string) => {
     try {

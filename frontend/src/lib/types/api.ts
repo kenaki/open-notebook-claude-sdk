@@ -324,7 +324,11 @@ export interface BuildContextResponse {
 // composer until the next send moves it onto the message's `media[]`.
 export interface WorkspaceChat {
   id: string // session id
-  docked: boolean // true → tab in the Chat Dock; false → its own popped panel (Chunk 8)
+  // Sidebar redesign (Chunk 2): is this chat rendered at all? false → it's only
+  // listed in the sidebar (main chats) or reachable via the side-chats control.
+  // true → rendered in the dock (active main) or as a popped panel in the track.
+  open: boolean
+  docked: boolean // among open chats: true → shown in the dock; false → popped panel in the track
   width: number // popped panel width in px (Chunk 8)
   draft: string // current composer text
   pending: MediaItem[] // uploaded attachments staged in the composer (Chunk 12)
