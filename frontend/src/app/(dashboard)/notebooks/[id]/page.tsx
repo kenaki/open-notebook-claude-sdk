@@ -273,10 +273,14 @@ export default function NotebookPage() {
 
   // Spawn a sub-chat from a selected passage (Chunk 11). createSubChat POSTs the
   // session (parent_session_id + quote); the refetch → ChatDock syncChats →
-  // hydrates it as a popped, anchored panel. We just remember its id to focus.
+  // registers it as a CLOSED side chat (Chunk 2 visibility model). Mark it to be
+  // popped + focused the moment it lands (mirrors the track "+" flow).
   const handleCreateSubChat = async (parentId: string, quote: string) => {
     const session = await chat.createSubChat(parentId, quote)
-    if (session) setPendingFocusId(session.id)
+    if (session) {
+      setPendingPopId(session.id)
+      setPendingFocusId(session.id)
+    }
   }
 
   // Track "+" button: spawn a new standalone side chat. Create it, then mark it

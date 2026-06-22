@@ -5,6 +5,7 @@ import { ChatPanel } from '@/components/source/ChatPanel'
 import { ChatModelPicker } from '@/components/notebooks/ChatModelPicker'
 import { ChatSidebar } from '@/components/notebooks/ChatSidebar'
 import { SideChatDefaultMenu } from '@/components/notebooks/SideChatDefaultMenu'
+import { SideChatsMenu } from '@/components/notebooks/SideChatsMenu'
 import { useChatWorkspaceStore } from '@/lib/stores/chat-workspace-store'
 import { useChatDefaultsStore } from '@/lib/stores/chat-defaults-store'
 import { useTranslation } from '@/lib/hooks/use-translation'
@@ -149,6 +150,9 @@ export function ChatDock({ notebookId, chat, contextStats }: ChatDockProps) {
     <>
       <ChatModelPicker compact value={activeOverride} onChange={chat.setModelOverride} />
       <span className="text-[11px] text-text-3 truncate">{meterText}</span>
+      {activeMainId && (
+        <SideChatsMenu sideSessions={chat.sideSessionsOf(activeMainId)} onOpen={openChat} />
+      )}
       <SideChatDefaultMenu
         value={sideChatModel}
         onChange={(model) => setSideChatModel(notebookId, model)}
