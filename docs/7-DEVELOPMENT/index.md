@@ -37,6 +37,16 @@ For deeper dives, check `/open_notebook/` CLAUDE.md for component-specific guida
 
 ---
 
+### 🖥️ I Want to Deploy on a Dedicated Box (DGX Spark)
+
+**[DGX Spark Deployment & Hybrid AI Runbook](dgx-spark-deployment.md)** covers:
+- Hybrid AI: Claude for chat + local Ollama for embeddings/transformations
+- Which models and why (`qwen3-embedding:8b`, `qwen3.6:35b`)
+- Rebuild-from-scratch steps (pull models, register, repoint defaults)
+- Running the stack persistently via systemd user services
+
+---
+
 ### 👨‍🔧 I'm a Maintainer
 
 **[Maintainer Guide](maintainer-guide.md)** covers:
@@ -60,6 +70,7 @@ For deeper dives, check `/open_notebook/` CLAUDE.md for component-specific guida
 | [Design Principles](design-principles.md) | All developers | What guides our decisions |
 | [API Reference](api-reference.md) | Building integrations | Complete REST API documentation |
 | [Security](security.md) | All developers | Security practices and vulnerability prevention |
+| [DGX Spark Deployment](dgx-spark-deployment.md) | Self-hosting on a dedicated box | Hybrid Claude+Ollama AI, model setup, systemd services |
 | [Maintainer Guide](maintainer-guide.md) | Maintainers | Managing issues, PRs, releases |
 
 ---

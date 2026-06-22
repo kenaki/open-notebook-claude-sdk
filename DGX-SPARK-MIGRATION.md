@@ -20,8 +20,8 @@
 ## Status
 | # | Track | Status | Notes |
 |--:|-------|--------|-------|
-| 1 | Migrate dev environment to the Spark | ☐ todo | toolchain, repo, Claude Code login, DB, bring-up |
-| 2 | Local AI: Ollama models + repoint defaults (fixes summary + search) | ☐ todo | BLOCKED on Track 1 + Ollama reachable |
+| 1 | Migrate dev environment to the Spark | ☑ done | toolchain, repo, Claude Code login, DB, bring-up (2026-06-21) |
+| 2 | Local AI: Ollama models + repoint defaults (fixes summary + search) | ☑ done | 2026-06-22 — qwen3.6:35b + qwen3-embedding:8b wired; chat stays claude-agent |
 | 3 | Highlight/annotation feature ("saved references") | ⊘ future | larger; graph ~80% there, PDF-viewer is the lift |
 Legend: ☐ todo · ◐ in progress · ☑ done · ⏸ blocked · ⊘ future.
 
@@ -59,7 +59,16 @@ installed and logged in ON the Spark** (the Agent SDK rides on that login via `c
    frontend on `:3000`; send a chat message → Claude responds (subscription auth works on the Spark).
 
 ## Track 2 — Local AI: Ollama models + repoint defaults  (fixes summary crash + semantic search)
-**Blocked on:** Track 1 done + Ollama running/reachable. **Full detail: `HANDOFF-claude-agent.md` → Track B.**
+**✅ DONE 2026-06-22.** Implemented with zero code, config only. **What was actually done (supersedes the researched picks below):**
+- **Embedding → `qwen3-embedding:8b`** (official Ollama, text-only, **4096-dim native** — Q-embed-dim resolved = 4096, no truncation code; fresh corpus so no re-embed cost).
+- **Transformation / large-context / tools → `qwen3.6:35b`** (35B-A3B MoE, ~3B active = fast on the Spark, 256K ctx). Chosen over the doc's `qwen2.5:32b-instruct`, which Qwen3.6 (Apr 2026) supersedes.
+- **Multimodal embedding (`Qwen3-VL-Embedding`) was evaluated and skipped:** community-only on Ollama (not first-party; native multimodal-embed support pending — Ollama issue #5304) AND the app has no image→embedder code path. The PDF→text→embed pipeline already exists (content-core in `graphs/source.py` → `Source.vectorize()`), so text embeddings cover today's needs.
+- **Ollama upgraded 0.12.6 → 0.30.x** (`curl -fsSL https://ollama.com/install.sh | sh`) — 0.12.6 returned `unable to load model` on qwen3.6 (arch too new).
+- **Wiring:** `scripts/register_ollama_models.py` (idempotent) creates two `provider="ollama"` Model records (no credential — Esperanto reads `OLLAMA_API_BASE` from `.env`) and repoints the four non-chat default slots; `default_chat_model` stays `claude-agent`.
+- **Verified end-to-end** through ON's own model-manager: `get_embedding_model().aembed()` → 4096 dims; `provision_langchain_model(..., 'transformation')` → qwen3.6 reply.
+
+**Original research/plan (kept for context):**
+**Was blocked on:** Track 1 done + Ollama running/reachable. **Full detail: `HANDOFF-claude-agent.md` → Track B.**
 
 **Models (researched 2026-06-21):**
 - **Embeddings → `qwen3-embedding:8b`** — #1 open-source MTEB (70.58), Apache-2.0, 32K context, 4.7 GB.
