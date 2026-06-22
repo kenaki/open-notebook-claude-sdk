@@ -93,8 +93,15 @@ export const useChatWorkspaceStore = create<ChatWorkspaceState>()((set) => ({
       const chats: Record<string, WorkspaceChat> = {}
       for (const s of sessions) {
         if (state.chats[s.id]) {
-          // Existing entry wins — preserves live open/docked/draft/quote state.
-          chats[s.id] = state.chats[s.id]
+          // Existing entry wins for live UI state (open/docked/draft/pending),
+          // but refresh the server-owned parent/quote so a promote (side → main)
+          // reconciles: clearing parent_session_id drops the "discussing passage"
+          // banner + promote affordance, which read parentId/quote (Chunk 5).
+          chats[s.id] = {
+            ...state.chats[s.id],
+            parentId: s.parent_session_id ?? null,
+            quote: s.quote ?? null,
+          }
         } else if (s.parent_session_id) {
           // New side chat: closed, pre-configured to pop (docked:false) when
           // opened via the side-chats control (Chunk 4). Carries parent/quote.

@@ -1,6 +1,6 @@
 'use client'
 
-import { ArrowLeftToLine, X, Quote } from 'lucide-react'
+import { ArrowLeftToLine, ArrowUpToLine, X, Quote } from 'lucide-react'
 import { ChatPanel } from '@/components/source/ChatPanel'
 import { ChatModelPicker } from '@/components/notebooks/ChatModelPicker'
 import { DeleteChatButton } from '@/components/notebooks/DeleteChatButton'
@@ -22,6 +22,9 @@ interface PoppedChatPanelProps {
   onClose: () => void
   // Trash (permanent DELETE): remove the session (gated by a confirm dialog).
   onDelete: () => void
+  // Promote this side chat to a main chat (clears parent_session_id + quote);
+  // it then surfaces in the sidebar. Only meaningful for side chats.
+  onPromote: () => void
   // Focus this panel's composer on mount (a freshly-spawned sub-chat).
   autoFocus?: boolean
 }
@@ -41,10 +44,13 @@ export function PoppedChatPanel({
   onDockBack,
   onClose,
   onDelete,
+  onPromote,
   autoFocus = false,
 }: PoppedChatPanelProps) {
   const { t } = useTranslation()
   const workspaceChat = useChatWorkspaceStore((s) => s.chats[session.id])
+  // A side chat (has a parent) can be promoted to a main chat.
+  const isSideChat = !!workspaceChat?.parentId
   const setDraft = useChatWorkspaceStore((s) => s.setDraft)
   const addPending = useChatWorkspaceStore((s) => s.addPending)
   const removePending = useChatWorkspaceStore((s) => s.removePending)
@@ -78,6 +84,16 @@ export function PoppedChatPanel({
           >
             <ArrowLeftToLine className="h-3.5 w-3.5" />
           </button>
+          {isSideChat && (
+            <button
+              type="button"
+              title={t('chat.promoteToMain')}
+              onClick={onPromote}
+              className="p-1 rounded hover:bg-accent text-muted-foreground"
+            >
+              <ArrowUpToLine className="h-3.5 w-3.5" />
+            </button>
+          )}
           <DeleteChatButton onDelete={onDelete} className="p-1 hover:bg-accent" />
           <button
             type="button"

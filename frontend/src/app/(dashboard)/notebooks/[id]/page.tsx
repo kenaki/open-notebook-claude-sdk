@@ -421,6 +421,7 @@ export default function NotebookPage() {
           onDockBack={() => openChat(token)}
           onClose={() => closeChat(token)}
           onDelete={() => chat.deleteSession(token)}
+          onPromote={() => chat.promoteToMain(token)}
         />
       </PanelCard>
     )
