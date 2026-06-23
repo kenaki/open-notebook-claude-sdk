@@ -687,6 +687,9 @@ class ChatSession(ObjectModel):
     model_override: Optional[str] = None
     parent_session_id: Optional[str] = None
     quote: Optional[str] = None
+    # User-assigned grouping tags (many per chat). Drives the gallery's group
+    # filter + search. Defaults to an empty list so old sessions read cleanly.
+    tags: List[str] = Field(default_factory=list)
 
     async def relate_to_notebook(self, notebook_id: str) -> Any:
         if not notebook_id:

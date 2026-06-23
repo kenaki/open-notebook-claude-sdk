@@ -181,6 +181,9 @@ export interface BaseChatSession {
   // the highlighted passage.
   parent_session_id?: string | null
   quote?: string | null
+  // User-assigned grouping tags (many per chat). Drives the gallery's group
+  // filter + search. Absent/empty on untagged or old sessions.
+  tags?: string[]
 }
 
 export interface SourceChatSession extends BaseChatSession {
@@ -274,6 +277,7 @@ export interface CreateNotebookChatSessionRequest {
   // highlighted passage of its parent. Mirrors the backend CreateSessionRequest.
   parent_session_id?: string
   quote?: string
+  tags?: string[]
 }
 
 export interface UpdateNotebookChatSessionRequest {
@@ -284,6 +288,8 @@ export interface UpdateNotebookChatSessionRequest {
   // and they're in ChatSession.nullable_fields, so PUT-ing null clears them.
   parent_session_id?: string | null
   quote?: string | null
+  // Replaces the session's grouping tags wholesale.
+  tags?: string[]
 }
 
 export interface SendNotebookChatMessageRequest {

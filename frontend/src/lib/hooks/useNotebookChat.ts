@@ -17,7 +17,7 @@ import {
   NoteResponse,
   MediaItem
 } from '@/lib/types/api'
-import { ContextSelections } from '@/app/(dashboard)/notebooks/[id]/page'
+import { ContextSelections } from '@/lib/types/notebook-context'
 
 interface UseNotebookChatParams {
   notebookId: string
@@ -407,6 +407,25 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections,
     })
   }, [notebookId, queryClient])
 
+  // Silent tag update (gallery grouping). Replaces a session's tags wholesale and
+  // refreshes the session list so the gallery's group filter + cards re-derive.
+  // Mirrors renameSession: hits the API directly to skip the "Session updated"
+  // toast the mutation hook fires.
+  const setSessionTags = useCallback(async (sessionId: string, tags: string[]) => {
+    try {
+      await chatApi.updateSession(sessionId, { tags })
+      queryClient.invalidateQueries({
+        queryKey: QUERY_KEYS.notebookChatSessions(notebookId)
+      })
+      queryClient.invalidateQueries({
+        queryKey: QUERY_KEYS.notebookChatSession(sessionId)
+      })
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { detail?: string } }, message?: string }
+      toast.error(getApiErrorMessage(error.response?.data?.detail || error.message, (key) => t(key), 'apiErrors.failedToUpdateSession'))
+    }
+  }, [notebookId, queryClient, t])
+
   // Set model override - handles both existing sessions and pending state
   const setModelOverride = useCallback((model: string | null) => {
     if (currentSessionId) {
@@ -513,6 +532,7 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections,
     updateSession,
     deleteSession,
     renameSession,
+    setSessionTags,
     promoteToMain,
     switchSession,
     sendMessage,

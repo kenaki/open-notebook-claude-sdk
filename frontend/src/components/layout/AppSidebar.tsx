@@ -9,6 +9,8 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/lib/hooks/use-auth'
 import { useSidebarStore } from '@/lib/stores/sidebar-store'
+import { useUtilityDrawerStore } from '@/lib/stores/utility-drawer-store'
+import { useNotebookWorkspace } from '@/components/notebooks/NotebookWorkspaceProvider'
 import { useCreateDialogs } from '@/lib/hooks/use-create-dialogs'
 import {
   Tooltip,
@@ -40,6 +42,8 @@ import {
   Plus,
   Wrench,
   Command,
+  StickyNote,
+  PanelLeftClose,
 } from 'lucide-react'
 
 const getNavigation = (t: TFunction) => [
@@ -72,6 +76,11 @@ export function AppSidebar() {
   const { logout } = useAuth()
   const { isCollapsed, toggleCollapse } = useSidebarStore()
   const { openSourceDialog, openNotebookDialog, openPodcastDialog } = useCreateDialogs()
+  // Notebook-scoped utility drawer (Sources / Notes). Toggles only render inside
+  // a notebook, where the workspace provider supplies the drawer's content.
+  const drawerPanel = useUtilityDrawerStore((s) => s.panel)
+  const toggleDrawerPanel = useUtilityDrawerStore((s) => s.togglePanel)
+  const inNotebook = useNotebookWorkspace() !== null
 
   const [createMenuOpen, setCreateMenuOpen] = useState(false)
   const [isMac, setIsMac] = useState(true) // Default to Mac for SSR
@@ -228,6 +237,52 @@ export function AppSidebar() {
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
+
+          {/* Notebook utility toggles: open the single drawer to Sources / Notes.
+              Only shown inside a notebook (where the drawer has content). */}
+          {inNotebook && (
+            <div className={cn('mb-2', isCollapsed ? 'px-0' : 'px-0')}>
+              {!isCollapsed && (
+                <h3 className="mb-1.5 px-2 text-[10.5px] font-semibold uppercase tracking-[0.07em] text-text-3">
+                  {t('navigation.thisNotebook')}
+                </h3>
+              )}
+              <div className="space-y-0.5">
+                {[
+                  { key: 'sources' as const, name: t('navigation.sources'), icon: FileText },
+                  { key: 'notes' as const, name: t('common.notes'), icon: StickyNote },
+                ].map((tool) => {
+                  const isActive = drawerPanel === tool.key
+                  const button = (
+                    <Button
+                      variant="ghost"
+                      onClick={() => toggleDrawerPanel(tool.key)}
+                      aria-pressed={isActive}
+                      className={cn(
+                        'w-full gap-2.5 font-medium sidebar-menu-item',
+                        isActive ? 'bg-accent-soft text-primary' : 'text-muted-foreground',
+                        isCollapsed ? 'justify-center px-2' : 'justify-start'
+                      )}
+                    >
+                      <tool.icon className={cn('h-4 w-4', isActive ? 'text-primary' : 'text-text-3')} />
+                      {!isCollapsed && <span>{tool.name}</span>}
+                      {!isCollapsed && isActive && (
+                        <PanelLeftClose className="ml-auto h-3.5 w-3.5 text-primary/70" />
+                      )}
+                    </Button>
+                  )
+                  return isCollapsed ? (
+                    <Tooltip key={tool.key}>
+                      <TooltipTrigger asChild>{button}</TooltipTrigger>
+                      <TooltipContent side="right">{tool.name}</TooltipContent>
+                    </Tooltip>
+                  ) : (
+                    <div key={tool.key}>{button}</div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
 
           {navigation.map((section, index) => (
             <div key={section.title} className={cn(index > 0 && !isCollapsed && 'pt-3')}>

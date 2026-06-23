@@ -3,7 +3,6 @@
 import { useEffect, useMemo } from 'react'
 import { ChatPanel } from '@/components/source/ChatPanel'
 import { ChatModelPicker } from '@/components/notebooks/ChatModelPicker'
-import { ChatSidebar } from '@/components/notebooks/ChatSidebar'
 import { SideChatDefaultMenu } from '@/components/notebooks/SideChatDefaultMenu'
 import { SideChatsMenu } from '@/components/notebooks/SideChatsMenu'
 import { useChatWorkspaceStore } from '@/lib/stores/chat-workspace-store'
@@ -104,11 +103,6 @@ export function ChatDock({ notebookId, chat, contextStats }: ChatDockProps) {
     chat.switchSession(id)
   }
 
-  const handleNew = async () => {
-    const session = await chat.createSession(newChatLabel)
-    if (session) handleOpen(session.id)
-  }
-
   const handleSend = async (message: string, media?: MediaItem[]) => {
     let target = activeMainId
     // No main open (all hidden) → spin one up and open it before sending.
@@ -162,7 +156,6 @@ export function ChatDock({ notebookId, chat, contextStats }: ChatDockProps) {
 
   return (
     <div className="flex h-full min-h-0 bg-card border border-border rounded-xl shadow-[var(--shadow)] overflow-hidden">
-      <ChatSidebar chat={chat} onOpen={handleOpen} onNew={handleNew} />
       <div className="flex-1 min-w-0 flex flex-col min-h-0">
         <ChatPanel
           variant="dock"

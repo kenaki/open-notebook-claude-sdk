@@ -12,6 +12,8 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
+import rehypeHighlight from 'rehype-highlight'
+import { MarkdownCodeBlock } from '@/components/source/MarkdownCodeBlock'
 import {
   SourceChatMessage,
   SourceChatContextIndicator,
@@ -351,14 +353,17 @@ export function ChatPanel({
             )}
           </div>
         ) : (
-          messages.map((message) => {
+          messages.map((message, index) => {
             const isHuman = message.type === 'human'
+            // Hairline between Q&A pairs: a new human turn (after the first message)
+            // gets a faint divider above it so each exchange reads as its own block.
+            const showDivider = isHuman && index > 0
             return (
               <div
                 key={message.id}
                 data-msg-id={message.id}
                 style={{ scrollMarginTop: 8 }}
-                className={`flex ${isHuman ? 'justify-end' : 'justify-start'}`}
+                className={`flex ${isHuman ? 'justify-end' : 'justify-start'} ${showDivider ? 'chat-turn-divider' : ''}`}
               >
                 <div
                   // Human turns stay a right-aligned bubble (capped width); AI
@@ -384,7 +389,7 @@ export function ChatPanel({
                     className={
                       isHuman
                         ? 'px-3.5 py-2.5 bg-primary-soft text-primary-foreground'
-                        : 'w-full text-foreground'
+                        : 'w-full text-foreground chat-msg-enter'
                     }
                     style={isHuman ? { borderRadius: USER_BUBBLE_RADIUS } : undefined}
                   >
@@ -499,7 +504,7 @@ export function ChatPanel({
             ? t('chat.sendPlaceholder')
             : `${t('chat.sendPlaceholder')} (${t('chat.pressToSend').replace('{key}', keyHint)})`}
           disabled={isStreaming}
-          className="w-full min-h-[56px] resize-none overflow-y-auto border-0 bg-transparent dark:bg-transparent px-3.5 py-3 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
+          className="w-full min-h-[60px] resize-none overflow-y-auto border-0 bg-transparent dark:bg-transparent px-3.5 py-3.5 leading-relaxed shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
           style={{ maxHeight }}
           rows={1}
         />
@@ -557,7 +562,7 @@ export function ChatPanel({
       </div>
 
       {isDock && (
-        <p className="mt-2 text-[11px] text-text-3">
+        <p className="mt-2.5 text-[11px] text-text-3">
           {t('chat.pressToSend').replace('{key}', keyHint)}
         </p>
       )}
@@ -693,32 +698,23 @@ function AIMessageContent({
   const LinkComponent = createCompactReferenceLinkComponent(onReferenceClick)
 
   return (
-    <div className="prose prose-sm prose-neutral dark:prose-invert max-w-none break-words prose-headings:font-semibold prose-a:text-blue-600 prose-a:break-all prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-p:mb-4 prose-p:leading-7 prose-li:mb-2">
+    <div className="chat-markdown prose prose-sm prose-neutral dark:prose-invert max-w-none break-words prose-headings:font-semibold prose-a:break-all">
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
+        // rehype-highlight tokenizes fenced code; rehype-katex renders math. They
+        // touch disjoint nodes (code vs. math) so order is immaterial.
+        rehypePlugins={[rehypeHighlight, rehypeKatex]}
         components={{
           a: LinkComponent,
-          p: ({ children }) => <p className="mb-4">{children}</p>,
-          h1: ({ children }) => <h1 className="mb-4 mt-6">{children}</h1>,
-          h2: ({ children }) => <h2 className="mb-3 mt-5">{children}</h2>,
-          h3: ({ children }) => <h3 className="mb-3 mt-4">{children}</h3>,
-          h4: ({ children }) => <h4 className="mb-2 mt-4">{children}</h4>,
-          h5: ({ children }) => <h5 className="mb-2 mt-3">{children}</h5>,
-          h6: ({ children }) => <h6 className="mb-2 mt-3">{children}</h6>,
-          li: ({ children }) => <li className="mb-1">{children}</li>,
-          ul: ({ children }) => <ul className="mb-4 space-y-1">{children}</ul>,
-          ol: ({ children }) => <ol className="mb-4 space-y-1">{children}</ol>,
+          // Fenced code blocks get the header bar + copy button (MarkdownCodeBlock);
+          // styling for the <pre>/<code> and everything else lives in `.chat-markdown`
+          // (globals.css) so the renderer stays declarative.
+          pre: MarkdownCodeBlock,
           table: ({ children }) => (
-            <div className="my-4 overflow-x-auto">
-              <table className="min-w-full border-collapse border border-border">{children}</table>
+            <div className="chat-markdown-table">
+              <table>{children}</table>
             </div>
           ),
-          thead: ({ children }) => <thead className="bg-muted">{children}</thead>,
-          tbody: ({ children }) => <tbody>{children}</tbody>,
-          tr: ({ children }) => <tr className="border-b border-border">{children}</tr>,
-          th: ({ children }) => <th className="border border-border px-3 py-2 text-left font-semibold">{children}</th>,
-          td: ({ children }) => <td className="border border-border px-3 py-2">{children}</td>,
         }}
       >
         {markdownWithCompactRefs}

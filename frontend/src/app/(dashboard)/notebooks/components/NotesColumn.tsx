@@ -1,9 +1,8 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState } from 'react'
 import { NoteResponse } from '@/lib/types/api'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,8 +21,6 @@ import { ContextMode } from '../[id]/page'
 import type { NoteContextDefault } from '@/lib/utils/source-context'
 import { useDeleteNote } from '@/lib/hooks/use-notes'
 import { ConfirmDialog } from '@/components/common/ConfirmDialog'
-import { CollapsibleColumn, createCollapseButton } from '@/components/notebooks/CollapsibleColumn'
-import { useNotebookColumnsStore } from '@/lib/stores/notebook-columns-store'
 import { useTranslation } from '@/lib/hooks/use-translation'
 
 interface NotesColumnProps {
@@ -51,13 +48,6 @@ export function NotesColumn({
 
   const deleteNote = useDeleteNote()
 
-  // Collapsible column state
-  const { notesCollapsed, toggleNotes } = useNotebookColumnsStore()
-  const collapseButton = useMemo(
-    () => createCollapseButton(toggleNotes, t('common.notes')),
-    [toggleNotes, t('common.notes')]
-  )
-
   const handleDeleteClick = (noteId: string) => {
     setNoteToDelete(noteId)
     setDeleteDialogOpen(true)
@@ -77,64 +67,54 @@ export function NotesColumn({
 
   return (
     <>
-      <CollapsibleColumn
-        isCollapsed={notesCollapsed}
-        onToggle={toggleNotes}
-        collapsedIcon={StickyNote}
-        collapsedLabel={t('common.notes')}
-      >
-        <Card className="h-full flex flex-col flex-1 overflow-hidden">
-          <CardHeader className="pb-3 flex-shrink-0">
-            <div className="flex items-center justify-between gap-2">
-              <CardTitle className="text-lg">{t('common.notes')}</CardTitle>
-              <div className="flex items-center gap-2">
-                {onBulkContextModeChange && notes && notes.length > 0 && (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="sm" title={t('sources.bulkContext')}>
-                        <ListChecks className="h-4 w-4" />
-                        <ChevronDown className="h-4 w-4 ml-1" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => onBulkContextModeChange('include')}>
-                        {t('sources.includeAllInContext')}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => onBulkContextModeChange('exclude')}>
-                        {t('sources.excludeAllFromContext')}
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                )}
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    setEditingNote(null)
-                    setShowAddDialog(true)
-                  }}
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  {t('common.writeNote')}
+      <div className="flex h-full flex-col">
+        {/* Slim action toolbar — the drawer header already supplies the title +
+            close, so this carries only the real controls (bulk context + add). */}
+        <div className="flex flex-shrink-0 items-center justify-end gap-1.5 border-b border-border px-3 py-2">
+          {onBulkContextModeChange && notes && notes.length > 0 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="sm" title={t('sources.bulkContext')}>
+                  <ListChecks className="h-4 w-4" />
+                  <ChevronDown className="h-4 w-4 ml-1" />
                 </Button>
-                {collapseButton}
-              </div>
-            </div>
-          </CardHeader>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => onBulkContextModeChange('include')}>
+                  {t('sources.includeAllInContext')}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onBulkContextModeChange('exclude')}>
+                  {t('sources.excludeAllFromContext')}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+          <Button
+            size="sm"
+            onClick={() => {
+              setEditingNote(null)
+              setShowAddDialog(true)
+            }}
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            {t('common.writeNote')}
+          </Button>
+        </div>
 
-          <CardContent className="flex-1 overflow-y-auto min-h-0">
-            {isLoading ? (
-              <div className="flex items-center justify-center py-8">
-                <LoadingSpinner />
-              </div>
-            ) : !notes || notes.length === 0 ? (
-              <EmptyState
-                icon={StickyNote}
-                title={t('notebooks.noNotesYet')}
-                description={t('sources.createFirstNote')}
-              />
-            ) : (
-              <div className="space-y-3">
-                {notes.map((note) => (
+        <div className="min-h-0 flex-1 overflow-y-auto p-3">
+          {isLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <LoadingSpinner />
+            </div>
+          ) : !notes || notes.length === 0 ? (
+            <EmptyState
+              icon={StickyNote}
+              title={t('notebooks.noNotesYet')}
+              description={t('sources.createFirstNote')}
+            />
+          ) : (
+            <div className="space-y-3">
+              {notes.map((note) => (
                   <div
                     key={note.id}
                     className="p-3 border rounded-lg card-hover group relative cursor-pointer"
@@ -212,9 +192,8 @@ export function NotesColumn({
                 ))}
               </div>
             )}
-          </CardContent>
-        </Card>
-      </CollapsibleColumn>
+        </div>
+      </div>
 
       <NoteEditorDialog
         open={showAddDialog || Boolean(editingNote)}

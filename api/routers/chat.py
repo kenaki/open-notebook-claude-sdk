@@ -42,6 +42,9 @@ class CreateSessionRequest(BaseModel):
     quote: Optional[str] = Field(
         None, description="Highlighted passage that seeded this sub-chat"
     )
+    tags: Optional[List[str]] = Field(
+        None, description="Grouping tags to assign to this session"
+    )
 
 
 class UpdateSessionRequest(BaseModel):
@@ -54,6 +57,9 @@ class UpdateSessionRequest(BaseModel):
     )
     quote: Optional[str] = Field(
         None, description="Highlighted passage that seeded this sub-chat"
+    )
+    tags: Optional[List[str]] = Field(
+        None, description="Grouping tags for this session (replaces existing)"
     )
 
 
@@ -131,6 +137,9 @@ class ChatSessionResponse(BaseModel):
     )
     quote: Optional[str] = Field(
         None, description="Highlighted passage that seeded this sub-chat"
+    )
+    tags: List[str] = Field(
+        default_factory=list, description="Grouping tags assigned to this session"
     )
 
 
@@ -336,6 +345,7 @@ async def get_sessions(notebook_id: str = Query(..., description="Notebook ID"))
                     model_override=getattr(session, "model_override", None),
                     parent_session_id=getattr(session, "parent_session_id", None),
                     quote=getattr(session, "quote", None),
+                    tags=getattr(session, "tags", []) or [],
                 )
             )
 
@@ -365,6 +375,7 @@ async def create_session(request: CreateSessionRequest):
             model_override=request.model_override,
             parent_session_id=request.parent_session_id,
             quote=request.quote,
+            tags=request.tags or [],
         )
         await session.save()
 
@@ -381,6 +392,7 @@ async def create_session(request: CreateSessionRequest):
             model_override=session.model_override,
             parent_session_id=session.parent_session_id,
             quote=session.quote,
+            tags=session.tags or [],
         )
     except NotFoundError:
         raise HTTPException(status_code=404, detail="Notebook not found")
@@ -453,6 +465,7 @@ async def get_session(session_id: str):
             model_override=getattr(session, "model_override", None),
             parent_session_id=getattr(session, "parent_session_id", None),
             quote=getattr(session, "quote", None),
+            tags=getattr(session, "tags", []) or [],
         )
     except NotFoundError:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -489,6 +502,9 @@ async def update_session(session_id: str, request: UpdateSessionRequest):
         if "quote" in update_data:
             session.quote = update_data["quote"]
 
+        if "tags" in update_data:
+            session.tags = update_data["tags"] or []
+
         await session.save()
 
         # Find notebook_id
@@ -517,6 +533,7 @@ async def update_session(session_id: str, request: UpdateSessionRequest):
             model_override=session.model_override,
             parent_session_id=getattr(session, "parent_session_id", None),
             quote=getattr(session, "quote", None),
+            tags=getattr(session, "tags", []) or [],
         )
     except NotFoundError:
         raise HTTPException(status_code=404, detail="Session not found")
