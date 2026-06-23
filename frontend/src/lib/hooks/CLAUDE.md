@@ -15,9 +15,9 @@ React hooks for API data fetching, state management, and complex workflows (chat
 ## Important Patterns
 
 - **TanStack Query integration**: All data hooks use `useQuery`/`useMutation` with `QUERY_KEYS` for cache consistency
-- **Optimistic updates**: Mutations add local state before server response (e.g., notebook chat messages)
-- **Cache invalidation**: Broad invalidation of query keys on mutations (e.g., `['sources']` catches all source queries)
-- **Auto-refetch on return**: `refetchOnWindowFocus: true` on frequently-changing data (sources, notebooks)
+- **Optimistic updates**: not the default — most mutations invalidate-and-refetch. The optimistic surfaces are the notebook chat message bubble and `useNotebookChat`'s `createSessionMutation` (`onMutate` inserts a temp-id session card, reconciled on success / rolled back on error)
+- **Cache invalidation**: broad invalidation (e.g. `['sources']` catches all source queries) where the mutation lacks a notebook id; notebook-scoped (`sourcesInfinite(nbId)`/`sources(nbId)` + item key) where it has one
+- **Auto-refetch on return**: global default is `refetchOnWindowFocus: false`; only `use-sources.ts` opts in (`true`) for the source list/status. Other hooks (notebooks, notes, chat) use the global default
 - **Manual refetch controls**: Hooks return `refetch()` for parent components to trigger refresh
 - **SSE streaming pattern**: `useAsk` manually parses newline-delimited JSON from `/api/search/ask`; handles incomplete buffers
 - **Status polling**: `useSourceStatus` auto-refetches every 2s while `status === 'running' | 'queued' | 'new'`

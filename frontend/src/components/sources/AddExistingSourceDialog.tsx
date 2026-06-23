@@ -18,7 +18,7 @@ import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { searchApi } from '@/lib/api/search'
 import { sourcesApi } from '@/lib/api/sources'
-import { useSources, useAddSourcesToNotebook } from '@/lib/hooks/use-sources'
+import { useNotebookSources, useAddSourcesToNotebook } from '@/lib/hooks/use-sources'
 import { SourceListResponse } from '@/lib/types/api'
 import { useTranslation } from '@/lib/hooks/use-translation'
 
@@ -43,8 +43,9 @@ export function AddExistingSourceDialog({
   const [filteredSources, setFilteredSources] = useState<SourceListResponse[]>([])
   const [isSearching, setIsSearching] = useState(false)
 
-  // Get sources already in this notebook
-  const { data: currentNotebookSources } = useSources(notebookId)
+  // Get sources already in this notebook from the canonical infinite-source cache
+  // (shared with the workspace, so opening the dialog reuses loaded pages instead of refetching).
+  const { sources: currentNotebookSources } = useNotebookSources(notebookId)
   const currentSourceIds = useMemo(
     () => new Set(currentNotebookSources?.map(s => s.id) || []),
     [currentNotebookSources]

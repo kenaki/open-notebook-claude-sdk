@@ -15,6 +15,9 @@ class NotebookUpdate(BaseModel):
     archived: Optional[bool] = Field(
         None, description="Whether the notebook is archived"
     )
+    chat_tag_colors: Optional[Dict[str, str]] = Field(
+        None, description="Tag → color-key map for the chat gallery (replaces existing)"
+    )
 
 
 class NotebookResponse(BaseModel):
@@ -26,6 +29,9 @@ class NotebookResponse(BaseModel):
     updated: str
     source_count: int
     note_count: int
+    chat_tag_colors: Dict[str, str] = Field(
+        default_factory=dict, description="Tag → color-key map for the chat gallery"
+    )
 
 
 # Search models

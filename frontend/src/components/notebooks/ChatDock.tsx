@@ -103,19 +103,26 @@ export function ChatDock({ notebookId, chat, contextStats }: ChatDockProps) {
     chat.switchSession(id)
   }
 
-  const handleSend = async (message: string, media?: MediaItem[]) => {
+  const handleSend = async (message: string, media?: MediaItem[]): Promise<{ ok: boolean }> => {
     let target = activeMainId
     // No main open (all hidden) → spin one up and open it before sending.
     if (!target) {
       const session = await chat.createSession(newChatLabel)
-      if (!session) return
+      // Creation failed (already toasted) — signal failure so the composer
+      // restores the draft (Track A / A2).
+      if (!session) return { ok: false }
       target = session.id
       handleOpen(session.id)
     }
     const wasNew = sessions.find((s) => s.id === target)?.title === newChatLabel
-    await chat.sendMessageTo(target, message, undefined, media)
-    clearPending(target)
-    if (wasNew) chat.renameSession(target, deriveChatTitle(message, media, t))
+    const result = await chat.sendMessageTo(target, message, undefined, media)
+    // Only finalize on success: clearing pending media / renaming on a failed
+    // send would discard the user's staged attachments and draft (Track A / A2).
+    if (result.ok) {
+      clearPending(target)
+      if (wasNew) chat.renameSession(target, deriveChatTitle(message, media, t))
+    }
+    return result
   }
 
   // Context meter pill: "N sources · M notes · k tokens".

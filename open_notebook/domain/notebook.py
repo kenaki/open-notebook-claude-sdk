@@ -18,6 +18,10 @@ class Notebook(ObjectModel):
     name: str
     description: str
     archived: Optional[bool] = False
+    # Notebook-wide tag → color-key map for the chat gallery's grouping tags
+    # (e.g. {"grammar": "violet"}). Keys are lowercased tag names; values are
+    # palette keys the frontend resolves to styles. Empty for old notebooks.
+    chat_tag_colors: Dict[str, str] = Field(default_factory=dict)
 
     @field_validator("name")
     @classmethod

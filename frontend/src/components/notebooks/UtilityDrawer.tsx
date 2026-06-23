@@ -29,7 +29,7 @@ export function UtilityDrawer() {
   return (
     <div
       className={cn(
-        'flex-shrink-0 overflow-hidden border-r border-border bg-card transition-[width] duration-300 ease-out',
+        'flex-shrink-0 overflow-hidden border-r border-border bg-card transition-[width] duration-300 ease-out [contain:layout_paint] will-change-[width]',
         open ? 'w-[340px]' : 'w-0'
       )}
       aria-hidden={!open}

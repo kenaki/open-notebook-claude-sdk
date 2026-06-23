@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect, useId, type ReactNode } from 'react'
+import { useState, useRef, useEffect, useId, useCallback, useMemo, memo, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -25,7 +25,7 @@ import { ContextIndicator } from '@/components/common/ContextIndicator'
 import { SessionManager } from '@/components/source/SessionManager'
 import { MessageActions } from '@/components/source/MessageActions'
 import { convertReferencesToCompactMarkdown, createCompactReferenceLinkComponent } from '@/lib/utils/source-references'
-import { MessageReferences, FollowupChips } from '@/components/source/MessageReferences'
+import { MessageReferences } from '@/components/source/MessageReferences'
 import { ToolUseDisclosure } from '@/components/source/ToolUseDisclosure'
 import { MessageMedia } from '@/components/source/MessageMedia'
 import { chatApi } from '@/lib/api/chat'
@@ -37,6 +37,10 @@ import { useTranslation } from '@/lib/hooks/use-translation'
 // (4px), the other three are 14px. AI bubbles mirror the user bubble.
 const USER_BUBBLE_RADIUS = '14px 14px 4px 14px'
 const AI_BUBBLE_RADIUS = '14px 14px 14px 4px'
+
+// Stable inline-style object for the per-message scroll anchor — hoisted so the
+// message `.map` doesn't allocate a fresh object per row each render (A3).
+const MSG_SCROLL_MARGIN = { scrollMarginTop: 8 }
 
 interface NotebookContextStats {
   sourcesInsights: number
@@ -50,7 +54,11 @@ interface ChatPanelProps {
   messages: SourceChatMessage[]
   isStreaming: boolean
   contextIndicators: SourceChatContextIndicator | null
-  onSendMessage: (message: string, modelOverride?: string, media?: MediaItem[]) => void
+  // Returning `{ ok: false }` (the notebook dock path) tells the composer the send
+  // failed so it can restore the user's draft (Track A / A2). Handlers that don't
+  // signal (source chat) return void and the composer keeps its clear-on-send
+  // behavior.
+  onSendMessage: (message: string, modelOverride?: string, media?: MediaItem[]) => void | Promise<{ ok: boolean } | void>
   modelOverride?: string
   onModelChange?: (model?: string) => void
   // Session management props
@@ -155,6 +163,10 @@ export function ChatPanel({
   const [tailSpacer, setTailSpacer] = useState(0)
   const prevCountRef = useRef(0)
   const pinActiveRef = useRef(false)
+  // Mirror of `tailSpacer` readable synchronously inside pinPrompt's timed
+  // callbacks so the spacer can be recomputed from the *natural* content height
+  // (scrollHeight minus the spacer it currently contributes).
+  const tailSpacerRef = useRef(0)
   const { openModal } = useModalManager()
 
   const isDock = variant === 'dock'
@@ -175,7 +187,15 @@ export function ChatPanel({
     }
   }
 
-  const handleReferenceClick = (type: string, id: string) => {
+  // `openModal` (URL-param based) and `t` are re-created each render, so keep the
+  // latest in a ref and expose a fully stable `handleReferenceClick`. A stable
+  // identity is what lets the memoized `AIMessageContent` skip re-rendering prior
+  // messages on each new turn (A3).
+  const refClickDeps = useRef({ openModal, t })
+  refClickDeps.current = { openModal, t }
+
+  const handleReferenceClick = useCallback((type: string, id: string) => {
+    const { openModal, t } = refClickDeps.current
     // Citation → flash the matching source card in the Sources panel (handoff
     // §"Citations": accent ring, 1.7s). `id` arrives bare (MessageReferences
     // strips the "source:" prefix) and SourceCard stamps the same bare id on
@@ -206,10 +226,15 @@ export function ChatPanel({
     } catch {
       toast.error(t('common.noResults'))
     }
-  }
+  }, [])
 
   // Smooth-scroll the just-sent prompt near the top ("new-turn feel"). Re-runs on
   // a few timers to survive reflow / tab-backgrounding (per the handoff pinPrompt).
+  const setSpacer = (height: number) => {
+    tailSpacerRef.current = height
+    setTailSpacer(height)
+  }
+
   const pinPrompt = (messageId: string) => {
     const run = () => {
       const viewport = scrollAreaRef.current?.querySelector<HTMLElement>(
@@ -218,9 +243,18 @@ export function ChatPanel({
       if (!viewport) return
       const sel = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(messageId) : messageId
       const el = viewport.querySelector<HTMLElement>(`[data-msg-id="${sel}"]`)
+      // Stale timer (e.g. the optimistic temp id was swapped for the real one on
+      // reconcile): the element is gone, so leave the spacer/scroll to the
+      // re-pin that the reconcile fires for the new id.
       if (!el) return
-      // Grow the spacer so a short answer can still scroll the prompt to the top.
-      setTailSpacer(viewport.clientHeight)
+      // Size the spacer to *exactly* the room the prompt needs to reach the top:
+      // viewport height minus whatever real content already sits below the
+      // prompt. `scrollHeight` includes the current spacer, so subtract it back
+      // out to measure the natural content. This keeps a short answer scrollable
+      // to the top without leaving a viewport-tall blank gap under a long one.
+      const naturalHeight = viewport.scrollHeight - tailSpacerRef.current
+      const belowPrompt = naturalHeight - el.offsetTop
+      setSpacer(Math.max(0, viewport.clientHeight - belowPrompt))
       el.scrollIntoView({ behavior: 'smooth', block: 'start' })
     }
     run()
@@ -248,10 +282,22 @@ export function ChatPanel({
       pinActiveRef.current = true
       pinPrompt(last.id)
     } else if (grew && pinActiveRef.current) {
-      // AI reply for the pinned turn — keep the prompt at the top.
+      // The pinned turn's reply landed. This is also where the optimistic→server
+      // reconcile swaps the human turn's temp id for its real one, so re-pin the
+      // latest human message by its *current* id — otherwise the anchor (the now
+      // removed temp element) is lost and the view drifts past the prompt into
+      // the tail spacer. Release the pin afterwards so later history/session
+      // loads scroll normally rather than re-pinning an unrelated turn.
+      pinActiveRef.current = false
+      let lastHuman: SourceChatMessage | undefined
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].type === 'human') { lastHuman = messages[i]; break }
+      }
+      if (lastHuman) pinPrompt(lastHuman.id)
+      else setSpacer(0)
     } else {
       pinActiveRef.current = false
-      setTailSpacer(0)
+      setSpacer(0)
       messagesEndRef.current?.scrollIntoView({ behavior: 'auto' })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -276,10 +322,20 @@ export function ChatPanel({
   // Send is allowed with text OR ≥1 pending attachment (handoff §"Composer").
   const canSend = (inputValue.trim().length > 0 || pendingMedia.length > 0) && !isStreaming
 
-  const handleSend = () => {
-    if (canSend) {
-      onSendMessage(inputValue.trim(), modelOverride, pendingMedia.length ? pendingMedia : undefined)
-      setInputValue('')
+  const handleSend = async () => {
+    if (!canSend) return
+    // Capture the draft (+ staged media) before the optimistic clear so a failed
+    // send can restore it instead of silently losing the user's text (Track A / A2).
+    const text = inputValue.trim()
+    const media = pendingMedia.length ? pendingMedia : undefined
+    setInputValue('')
+    const outcome = await onSendMessage(text, modelOverride, media)
+    if (outcome && outcome.ok === false) {
+      // Send failed (the optimistic bubble was rolled back + a toast shown). Put
+      // the draft back and re-focus so the user can retry without retyping; the
+      // dock keeps the staged media (it only clears pending on success).
+      setInputValue(text)
+      requestAnimationFrame(() => textareaRef.current?.focus())
     }
   }
 
@@ -362,7 +418,7 @@ export function ChatPanel({
               <div
                 key={message.id}
                 data-msg-id={message.id}
-                style={{ scrollMarginTop: 8 }}
+                style={MSG_SCROLL_MARGIN}
                 className={`flex ${isHuman ? 'justify-end' : 'justify-start'} ${showDivider ? 'chat-turn-divider' : ''}`}
               >
                 <div
@@ -414,13 +470,6 @@ export function ChatPanel({
                     <MessageReferences
                       citations={message.citations}
                       onReferenceClick={handleReferenceClick}
-                    />
-                  )}
-                  {message.type === 'ai' && message.followups && message.followups.length > 0 && (
-                    <FollowupChips
-                      followups={message.followups}
-                      onSelect={handleSuggestion}
-                      disabled={isStreaming}
                     />
                   )}
                   {message.type === 'ai' && (
@@ -679,8 +728,11 @@ export function ChatPanel({
   )
 }
 
-// Helper component to render AI messages with clickable references
-function AIMessageContent({
+// Helper component to render AI messages with clickable references. Memoized so a
+// new turn doesn't re-parse every prior message's markdown — it only re-renders
+// when `content`/`onReferenceClick`/`appendReferenceList` change (A3). The parent
+// passes a stable `onReferenceClick` (useCallback) so the memo holds across turns.
+const AIMessageContent = memo(function AIMessageContent({
   content,
   onReferenceClick,
   appendReferenceList = true,
@@ -692,10 +744,18 @@ function AIMessageContent({
   const { t } = useTranslation()
   // Convert references to compact markdown with numbered citations. When
   // structured citation cards render the list separately, skip the appended one.
-  const markdownWithCompactRefs = convertReferencesToCompactMarkdown(content, t('common.references'), appendReferenceList)
+  // Memoized so the (non-trivial) reference conversion runs once per content.
+  const markdownWithCompactRefs = useMemo(
+    () => convertReferencesToCompactMarkdown(content, t('common.references'), appendReferenceList),
+    [content, appendReferenceList, t]
+  )
 
-  // Create custom link component for compact references
-  const LinkComponent = createCompactReferenceLinkComponent(onReferenceClick)
+  // Create custom link component for compact references — stable per click handler
+  // so ReactMarkdown's `components` prop doesn't churn each render.
+  const LinkComponent = useMemo(
+    () => createCompactReferenceLinkComponent(onReferenceClick),
+    [onReferenceClick]
+  )
 
   return (
     <div className="chat-markdown prose prose-sm prose-neutral dark:prose-invert max-w-none break-words prose-headings:font-semibold prose-a:break-all">
@@ -721,4 +781,4 @@ function AIMessageContent({
       </ReactMarkdown>
     </div>
   )
-}
+})

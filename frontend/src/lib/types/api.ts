@@ -7,6 +7,8 @@ export interface NotebookResponse {
   updated: string
   source_count: number
   note_count: number
+  // Notebook-wide chat-gallery tag → color-key map (lowercased tag → palette key).
+  chat_tag_colors?: Record<string, string>
 }
 
 export interface NoteResponse {
@@ -69,6 +71,8 @@ export interface UpdateNotebookRequest {
   name?: string
   description?: string
   archived?: boolean
+  // Replaces the notebook's chat-gallery tag → color-key map wholesale.
+  chat_tag_colors?: Record<string, string>
 }
 
 export interface NotebookDeletePreview {

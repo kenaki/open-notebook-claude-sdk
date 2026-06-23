@@ -1,20 +1,22 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { formatDistanceToNow } from 'date-fns'
 import { getDateLocale } from '@/lib/utils/date-locale'
 import {
   MessageSquare,
   Plus,
   CornerDownRight,
-  Loader2,
   LayoutGrid,
   List as ListIcon,
   Trash2,
   Search,
   Tag as TagIcon,
   X,
+  Layers,
+  Check,
+  Pencil,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -36,25 +38,33 @@ import {
   useChatGalleryViewStore,
   type ChatGalleryViewMode,
 } from '@/lib/stores/chat-gallery-view-store'
+import {
+  resolveTagColorKey,
+  tagColorStyle,
+  TAG_COLOR_KEYS,
+  type TagColorKey,
+} from '@/lib/utils/tag-colors'
 import type { NotebookChatSession } from '@/lib/types/api'
+
+type TagColorMap = Record<string, string>
 
 /**
  * Notebook Chat Gallery (UI refactor — tier 2 of the three-tier flow). The
  * landing screen after a notebook is selected: past Main Chats laid out either
  * as a roomy card grid or a compact list (toggle persisted per-browser). A
- * search box filters by title or tag, and chats can be grouped with free-form
- * tags (persisted on the session) that double as one-click filter chips. Each
- * card surfaces its nested Side Chats so the hierarchy reads at a glance.
- * Cards/rows enter the Dual-Panel Deep Dive (`/notebooks/[id]/chat/[chatId]`);
- * "Start New Main Chat" spins one up and jumps straight in. A per-chat delete
- * (with confirmation) removes a Main Chat.
+ * search box filters by title or tag; chats can be grouped with free-form tags
+ * (persisted on the session) that double as one-click filter chips, carry a
+ * per-notebook color, and — via "Group by tag" — section the gallery into
+ * tagged groups. Each card surfaces its nested Side Chats so the hierarchy reads
+ * at a glance. Cards/rows enter the Dual-Panel Deep Dive
+ * (`/notebooks/[id]/chat/[chatId]`); "Start New Main Chat" spins one up and
+ * jumps straight in. A per-chat delete (with confirmation) removes a Main Chat.
  */
 export function ChatGallery() {
   const { t, language } = useTranslation()
   const router = useRouter()
-  const { notebookId, chat } = useNotebookWorkspaceStrict()
+  const { notebookId, chat, tagColors, setTagColor, renameTag } = useNotebookWorkspaceStrict()
   const dfLocale = getDateLocale(language)
-  const [creating, setCreating] = useState(false)
   const viewMode = useChatGalleryViewStore((s) => s.viewMode)
   const setViewMode = useChatGalleryViewStore((s) => s.setViewMode)
   // Main chat queued for deletion (drives the confirmation dialog).
@@ -62,12 +72,13 @@ export function ChatGallery() {
   // Free-text search (title + tags) and the active tag-group filter (AND).
   const [query, setQuery] = useState('')
   const [activeTags, setActiveTags] = useState<string[]>([])
+  const [groupByTag, setGroupByTag] = useState(false)
 
   const newChatLabel = t('chat.newChat')
   const mains = chat.mainSessions
 
-  // Every tag in use across this notebook's main chats — drives the filter row
-  // and the editor's suggestions. Sorted, de-duped (case-insensitive).
+  // Every tag in use across this notebook's main chats — drives the filter row,
+  // the grouped sections, and the editor's suggestions. Sorted, de-duped.
   const allTags = useMemo(() => {
     const seen = new Map<string, string>()
     for (const m of mains) {
@@ -99,6 +110,22 @@ export function ChatGallery() {
     })
   }, [mains, query, activeTags, newChatLabel])
 
+  // Sectioned view: one group per tag (chats with multiple tags appear in each),
+  // plus a trailing "Untagged" group. Built from the already-filtered chats.
+  const groups = useMemo(() => {
+    const out: { tag: string | null; chats: NotebookChatSession[] }[] = []
+    for (const tag of allTags) {
+      const lower = tag.toLowerCase()
+      const chats = filteredMains.filter((m) =>
+        (m.tags ?? []).some((tg) => tg.toLowerCase() === lower)
+      )
+      if (chats.length > 0) out.push({ tag, chats })
+    }
+    const untagged = filteredMains.filter((m) => (m.tags ?? []).length === 0)
+    if (untagged.length > 0) out.push({ tag: null, chats: untagged })
+    return out
+  }, [allTags, filteredMains])
+
   const relativeTime = (d: string) =>
     formatDistanceToNow(new Date(d), { addSuffix: true, locale: dfLocale })
 
@@ -106,15 +133,19 @@ export function ChatGallery() {
     router.push(`/notebooks/${notebookId}/chat/${chatId}`)
   }
 
-  const startNewMainChat = async () => {
-    if (creating) return
-    setCreating(true)
-    try {
-      const session = await chat.createSession(newChatLabel)
-      if (session) enterChat(session.id)
-    } finally {
-      setCreating(false)
-    }
+  // Optimistic spawn (Track A / A1): a temp card lands in the list and we jump
+  // straight into the Deep-Dive at the temp id, then reconcile the URL to the
+  // real session once it lands (or fall back to the gallery if creation failed).
+  const startNewMainChat = () => {
+    const { tempId, promise } = chat.createMainChat(newChatLabel)
+    enterChat(tempId)
+    promise.then((session) => {
+      router.replace(
+        session
+          ? `/notebooks/${notebookId}/chat/${session.id}`
+          : `/notebooks/${notebookId}`
+      )
+    })
   }
 
   const confirmDelete = () => {
@@ -129,11 +160,73 @@ export function ChatGallery() {
     )
   }
 
+  // Rename a tag notebook-wide, then keep any active filter pointing at the new
+  // name (de-duped) so the view doesn't empty out after the rename.
+  const handleRenameTag = (oldTag: string, newName: string) => {
+    const trimmed = newName.trim()
+    renameTag(oldTag, trimmed)
+    if (!trimmed) return
+    setActiveTags((prev) => {
+      const mapped = prev.map((tg) =>
+        tg.toLowerCase() === oldTag.toLowerCase() ? trimmed : tg
+      )
+      return [...new Set(mapped)]
+    })
+  }
+
   const filtersActive = query.trim().length > 0 || activeTags.length > 0
   const clearFilters = () => {
     setQuery('')
     setActiveTags([])
   }
+
+  // Render a set of chats in the current view mode (reused by the flat view and
+  // by each grouped section).
+  const renderChats = (list: NotebookChatSession[]) =>
+    viewMode === 'grid' ? (
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        {list.map((main) => (
+          <MainChatCard
+            key={main.id}
+            main={main}
+            sideChats={chat.sideSessionsOf(main.id)}
+            newChatLabel={newChatLabel}
+            allTags={allTags}
+            tagColors={tagColors}
+            relativeTime={relativeTime}
+            onOpenMain={() => enterChat(main.id)}
+            onOpenSide={(sideId) => enterChat(sideId)}
+            onDelete={() => setPendingDelete(main)}
+            onRename={(title) => chat.renameSession(main.id, title)}
+            onSaveTags={(tags) => chat.setSessionTags(main.id, tags)}
+            onTagClick={toggleTagFilter}
+            onSetTagColor={setTagColor}
+            activeTags={activeTags}
+          />
+        ))}
+      </div>
+    ) : (
+      <ul className="flex flex-col divide-y divide-border-2 overflow-hidden rounded-xl border border-border bg-card">
+        {list.map((main) => (
+          <MainChatRow
+            key={main.id}
+            main={main}
+            sideCount={chat.sideSessionsOf(main.id).length}
+            newChatLabel={newChatLabel}
+            allTags={allTags}
+            tagColors={tagColors}
+            relativeTime={relativeTime}
+            onOpenMain={() => enterChat(main.id)}
+            onDelete={() => setPendingDelete(main)}
+            onRename={(title) => chat.renameSession(main.id, title)}
+            onSaveTags={(tags) => chat.setSessionTags(main.id, tags)}
+            onTagClick={toggleTagFilter}
+            onSetTagColor={setTagColor}
+            activeTags={activeTags}
+          />
+        ))}
+      </ul>
+    )
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto">
@@ -146,45 +239,60 @@ export function ChatGallery() {
           </div>
           <div className="flex flex-shrink-0 items-center gap-2">
             {mains.length > 0 && <ViewToggle mode={viewMode} onChange={setViewMode} />}
-            <Button onClick={startNewMainChat} disabled={creating} className="gap-2">
-              {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+            <Button onClick={startNewMainChat} className="gap-2">
+              <Plus className="h-4 w-4" />
               {t('gallery.startNewMainChat')}
             </Button>
           </div>
         </div>
 
-        {/* Search + tag-group filter toolbar */}
+        {/* Search + grouping + tag-group filter toolbar */}
         {mains.length > 0 && (
           <div className="mb-5 space-y-3">
-            <div className="relative max-w-sm">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-3" />
-              <Input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder={t('gallery.searchPlaceholder')}
-                className="pl-9"
-              />
+            <div className="flex items-center gap-2">
+              <div className="relative max-w-sm flex-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-3" />
+                <Input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder={t('gallery.searchPlaceholder')}
+                  className="pl-9"
+                />
+              </div>
+              {allTags.length > 0 && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setGroupByTag((g) => !g)}
+                  aria-pressed={groupByTag}
+                  className={cn(
+                    'flex-shrink-0 gap-2',
+                    groupByTag && 'border-primary-soft-border bg-accent-soft text-primary'
+                  )}
+                >
+                  <Layers className="h-4 w-4" />
+                  {t('gallery.groupByTag')}
+                </Button>
+              )}
             </div>
             {allTags.length > 0 && (
               <div className="flex flex-wrap items-center gap-1.5">
                 {allTags.map((tag) => {
-                  const active = activeTags.includes(tag)
+                  const colorKey = resolveTagColorKey(tag, tagColors)
+                  const style = tagColorStyle(colorKey)
                   return (
-                    <button
+                    <EditableTagChip
                       key={tag}
-                      type="button"
-                      onClick={() => toggleTagFilter(tag)}
-                      aria-pressed={active}
-                      className={cn(
-                        'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-soft-2',
-                        active
-                          ? 'border-primary-soft-border bg-accent-soft text-primary'
-                          : 'border-border text-muted-foreground hover:bg-accent hover:text-foreground'
-                      )}
-                    >
-                      <TagIcon className="h-3 w-3" />
-                      {tag}
-                    </button>
+                      tag={tag}
+                      variant="filter"
+                      chipClass={style.chip}
+                      solidClass={style.solid}
+                      colorKey={colorKey}
+                      active={activeTags.includes(tag)}
+                      onToggle={() => toggleTagFilter(tag)}
+                      onRename={(newName) => handleRenameTag(tag, newName)}
+                      onSetColor={(key) => setTagColor(tag, key)}
+                    />
                   )
                 })}
                 {filtersActive && (
@@ -203,48 +311,45 @@ export function ChatGallery() {
         )}
 
         {mains.length === 0 ? (
-          <EmptyState onStart={startNewMainChat} creating={creating} />
+          <EmptyState onStart={startNewMainChat} />
         ) : filteredMains.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border bg-card/40 px-6 py-12 text-center text-sm text-muted-foreground">
             {t('gallery.noResults')}
           </div>
-        ) : viewMode === 'grid' ? (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {filteredMains.map((main) => (
-              <MainChatCard
-                key={main.id}
-                main={main}
-                sideChats={chat.sideSessionsOf(main.id)}
-                newChatLabel={newChatLabel}
-                allTags={allTags}
-                relativeTime={relativeTime}
-                onOpenMain={() => enterChat(main.id)}
-                onOpenSide={(sideId) => enterChat(sideId)}
-                onDelete={() => setPendingDelete(main)}
-                onSaveTags={(tags) => chat.setSessionTags(main.id, tags)}
-                onTagClick={toggleTagFilter}
-                activeTags={activeTags}
-              />
-            ))}
+        ) : groupByTag && allTags.length > 0 ? (
+          <div className="space-y-8">
+            {groups.map((group) => {
+              const style = group.tag
+                ? tagColorStyle(resolveTagColorKey(group.tag, tagColors))
+                : null
+              return (
+                <section key={group.tag ?? '__untagged__'}>
+                  <div className="mb-3 flex items-center gap-2">
+                    {group.tag ? (
+                      <EditableTagChip
+                        tag={group.tag}
+                        variant="header"
+                        chipClass={style?.chip ?? ''}
+                        solidClass={tagColorStyle(resolveTagColorKey(group.tag, tagColors)).solid}
+                        colorKey={resolveTagColorKey(group.tag, tagColors)}
+                        onRename={(newName) => handleRenameTag(group.tag as string, newName)}
+                        onSetColor={(key) => setTagColor(group.tag as string, key)}
+                      />
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-accent px-2.5 py-1 text-sm font-medium text-muted-foreground">
+                        {t('gallery.untagged')}
+                      </span>
+                    )}
+                    <span className="text-xs text-text-3">{group.chats.length}</span>
+                    <div className="ml-2 h-px flex-1 bg-border-2" />
+                  </div>
+                  {renderChats(group.chats)}
+                </section>
+              )
+            })}
           </div>
         ) : (
-          <ul className="flex flex-col divide-y divide-border-2 overflow-hidden rounded-xl border border-border bg-card">
-            {filteredMains.map((main) => (
-              <MainChatRow
-                key={main.id}
-                main={main}
-                sideCount={chat.sideSessionsOf(main.id).length}
-                newChatLabel={newChatLabel}
-                allTags={allTags}
-                relativeTime={relativeTime}
-                onOpenMain={() => enterChat(main.id)}
-                onDelete={() => setPendingDelete(main)}
-                onSaveTags={(tags) => chat.setSessionTags(main.id, tags)}
-                onTagClick={toggleTagFilter}
-                activeTags={activeTags}
-              />
-            ))}
-          </ul>
+          renderChats(filteredMains)
         )}
       </div>
 
@@ -318,29 +423,123 @@ function ViewToggle({
   )
 }
 
+// Inline-rename chat title for a gallery card/row. A hover/focus pencil turns the
+// heading into a text field; Enter or blur commits, Escape cancels. Every handler
+// stops propagation so editing never triggers the parent's navigate-on-click.
+function EditableChatTitle({
+  title,
+  fallback,
+  subtitle,
+  headingClass,
+  onRename,
+}: {
+  title: string
+  fallback: string
+  subtitle: string
+  headingClass: string
+  onRename: (title: string) => void
+}) {
+  const { t } = useTranslation()
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(title)
+  // Guard against the Enter-then-blur double commit (both fire onRename).
+  const committed = useRef(false)
+
+  const startEdit = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    committed.current = false
+    setDraft(title)
+    setEditing(true)
+  }
+  const commit = () => {
+    if (committed.current) return
+    committed.current = true
+    setEditing(false)
+    const trimmed = draft.trim()
+    if (trimmed && trimmed !== title) onRename(trimmed)
+  }
+  const cancel = () => {
+    committed.current = true
+    setEditing(false)
+    setDraft(title)
+  }
+
+  if (editing) {
+    return (
+      <div className="min-w-0 flex-1" onClick={(e) => e.stopPropagation()}>
+        <Input
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onFocus={(e) => e.target.select()}
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            e.stopPropagation()
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              commit()
+            } else if (e.key === 'Escape') {
+              e.preventDefault()
+              cancel()
+            }
+          }}
+          onBlur={commit}
+          placeholder={t('chat.sessionTitlePlaceholder')}
+          aria-label={t('chat.renameChat')}
+          className="h-7 text-sm"
+        />
+      </div>
+    )
+  }
+
+  return (
+    <div className="min-w-0 flex-1">
+      <div className="flex items-center gap-1">
+        <h3 className={cn('truncate', headingClass)}>{title || fallback}</h3>
+        <button
+          type="button"
+          onClick={startEdit}
+          aria-label={t('chat.renameChat')}
+          title={t('chat.renameChat')}
+          className="flex-shrink-0 text-text-3 opacity-0 transition-opacity hover:text-foreground focus:outline-none focus-visible:opacity-100 group-hover:opacity-100"
+        >
+          <Pencil className="h-3 w-3" />
+        </button>
+      </div>
+      <p className="mt-0.5 text-xs text-muted-foreground">{subtitle}</p>
+    </div>
+  )
+}
+
 function MainChatCard({
   main,
   sideChats,
   newChatLabel,
   allTags,
+  tagColors,
   relativeTime,
   onOpenMain,
   onOpenSide,
   onDelete,
+  onRename,
   onSaveTags,
   onTagClick,
+  onSetTagColor,
   activeTags,
 }: {
   main: NotebookChatSession
   sideChats: NotebookChatSession[]
   newChatLabel: string
   allTags: string[]
+  tagColors: TagColorMap
   relativeTime: (date: string) => string
   onOpenMain: () => void
   onOpenSide: (sideId: string) => void
   onDelete: () => void
+  onRename: (title: string) => void
   onSaveTags: (tags: string[]) => void
   onTagClick: (tag: string) => void
+  onSetTagColor: (tag: string, colorKey: string) => void
   activeTags: string[]
 }) {
   const { t } = useTranslation()
@@ -362,18 +561,31 @@ function MainChatCard({
         <span className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-accent-soft text-primary">
           <MessageSquare className="h-4 w-4" />
         </span>
-        <div className="min-w-0 flex-1">
-          <h3 className="truncate text-sm font-semibold text-foreground">
-            {main.title || newChatLabel}
-          </h3>
-          <p className="mt-0.5 text-xs text-muted-foreground">{relativeTime(main.updated)}</p>
-        </div>
-        <TagEditor tags={tags} allTags={allTags} onSave={onSaveTags} />
+        <EditableChatTitle
+          title={main.title || ''}
+          fallback={newChatLabel}
+          subtitle={relativeTime(main.updated)}
+          headingClass="text-sm font-semibold text-foreground"
+          onRename={onRename}
+        />
+        <TagEditor
+          tags={tags}
+          allTags={allTags}
+          tagColors={tagColors}
+          onSave={onSaveTags}
+          onSetTagColor={onSetTagColor}
+        />
         <DeleteButton label={t('gallery.deleteChat')} onDelete={onDelete} />
       </div>
 
       {tags.length > 0 && (
-        <TagChips tags={tags} activeTags={activeTags} onTagClick={onTagClick} className="mt-3" />
+        <TagChips
+          tags={tags}
+          tagColors={tagColors}
+          activeTags={activeTags}
+          onTagClick={onTagClick}
+          className="mt-3"
+        />
       )}
 
       {/* Nested side chats — subtle, so the hierarchy reads at a glance. */}
@@ -413,22 +625,28 @@ function MainChatRow({
   sideCount,
   newChatLabel,
   allTags,
+  tagColors,
   relativeTime,
   onOpenMain,
   onDelete,
+  onRename,
   onSaveTags,
   onTagClick,
+  onSetTagColor,
   activeTags,
 }: {
   main: NotebookChatSession
   sideCount: number
   newChatLabel: string
   allTags: string[]
+  tagColors: TagColorMap
   relativeTime: (date: string) => string
   onOpenMain: () => void
   onDelete: () => void
+  onRename: (title: string) => void
   onSaveTags: (tags: string[]) => void
   onTagClick: (tag: string) => void
+  onSetTagColor: (tag: string, colorKey: string) => void
   activeTags: string[]
 }) {
   const { t } = useTranslation()
@@ -449,15 +667,17 @@ function MainChatRow({
       <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-accent-soft text-primary">
         <MessageSquare className="h-4 w-4" />
       </span>
-      <div className="min-w-0 flex-1">
-        <h3 className="truncate text-sm font-medium text-foreground">
-          {main.title || newChatLabel}
-        </h3>
-        <p className="mt-0.5 text-xs text-muted-foreground">{relativeTime(main.updated)}</p>
-      </div>
+      <EditableChatTitle
+        title={main.title || ''}
+        fallback={newChatLabel}
+        subtitle={relativeTime(main.updated)}
+        headingClass="text-sm font-medium text-foreground"
+        onRename={onRename}
+      />
       {tags.length > 0 && (
         <TagChips
           tags={tags}
+          tagColors={tagColors}
           activeTags={activeTags}
           onTagClick={onTagClick}
           className="hidden max-w-[40%] md:flex"
@@ -470,60 +690,251 @@ function MainChatRow({
             : t('gallery.sideChatCount').replace('{count}', sideCount.toString())}
         </span>
       )}
-      <TagEditor tags={tags} allTags={allTags} onSave={onSaveTags} />
+      <TagEditor
+        tags={tags}
+        allTags={allTags}
+        tagColors={tagColors}
+        onSave={onSaveTags}
+        onSetTagColor={onSetTagColor}
+      />
       <DeleteButton label={t('gallery.deleteChat')} onDelete={onDelete} />
     </li>
   )
 }
 
 // Read-only tag chips shown on a card/row; clicking one toggles it as a gallery
-// filter. stopPropagation keeps the click off the parent's "open chat" handler.
+// filter. Colored by the tag's resolved color. stopPropagation keeps the click
+// off the parent's "open chat" handler.
 function TagChips({
   tags,
+  tagColors,
   activeTags,
   onTagClick,
   className,
 }: {
   tags: string[]
+  tagColors: TagColorMap
   activeTags: string[]
   onTagClick: (tag: string) => void
   className?: string
 }) {
   return (
     <div className={cn('flex flex-wrap gap-1', className)}>
-      {tags.map((tag) => (
-        <button
-          key={tag}
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation()
-            onTagClick(tag)
-          }}
-          className={cn(
-            'inline-flex max-w-full items-center gap-1 truncate rounded-full px-2 py-0.5 text-[11px] transition-colors',
-            activeTags.includes(tag)
-              ? 'bg-accent-soft text-primary'
-              : 'bg-accent text-muted-foreground hover:text-foreground'
-          )}
-        >
-          <TagIcon className="h-2.5 w-2.5 flex-shrink-0" />
-          <span className="truncate">{tag}</span>
-        </button>
-      ))}
+      {tags.map((tag) => {
+        const style = tagColorStyle(resolveTagColorKey(tag, tagColors))
+        return (
+          <button
+            key={tag}
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              onTagClick(tag)
+            }}
+            className={cn(
+              'inline-flex max-w-full items-center gap-1 truncate rounded-full px-2 py-0.5 text-[11px] transition-shadow',
+              style.chip,
+              activeTags.includes(tag) ? 'ring-2 ring-current/50' : 'opacity-90 hover:opacity-100'
+            )}
+          >
+            <TagIcon className="h-2.5 w-2.5 flex-shrink-0" />
+            <span className="truncate">{tag}</span>
+          </button>
+        )
+      })}
     </div>
   )
 }
 
-// Popover tag editor: add free-form tags (Enter), remove with ✕, or click an
-// existing notebook tag to apply it. Persists the whole list on every change.
+// A tag pill with inline rename. Pencil (hover/focus) or double-click turns the
+// label into a text field; Enter / blur commits the rename notebook-wide,
+// Escape cancels. The "filter" variant single-clicks to toggle the gallery
+// filter; the "header" variant leads with a color swatch (opens the picker) and
+// single-clicks the label to rename.
+function EditableTagChip({
+  tag,
+  variant,
+  chipClass,
+  solidClass,
+  colorKey,
+  active,
+  onToggle,
+  onRename,
+  onSetColor,
+}: {
+  tag: string
+  variant: 'filter' | 'header'
+  chipClass: string
+  solidClass: string
+  colorKey: TagColorKey
+  active?: boolean
+  onToggle?: () => void
+  onRename: (newName: string) => void
+  onSetColor: (key: TagColorKey) => void
+}) {
+  const { t } = useTranslation()
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(tag)
+  // Guard against the Enter-then-blur double commit (both fire onRename).
+  const committed = useRef(false)
+  const isHeader = variant === 'header'
+
+  const startEdit = () => {
+    committed.current = false
+    setDraft(tag)
+    setEditing(true)
+  }
+  const commit = () => {
+    if (committed.current) return
+    committed.current = true
+    setEditing(false)
+    const trimmed = draft.trim()
+    if (trimmed && trimmed !== tag) onRename(trimmed)
+  }
+  const cancel = () => {
+    committed.current = true
+    setEditing(false)
+    setDraft(tag)
+  }
+
+  const sizeClass = isHeader ? 'px-2.5 py-1 text-sm font-medium' : 'px-2.5 py-1 text-xs'
+
+  if (editing) {
+    return (
+      <span className={cn('inline-flex items-center gap-1 rounded-full', chipClass, sizeClass)}>
+        <input
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onFocus={(e) => e.target.select()}
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              commit()
+            } else if (e.key === 'Escape') {
+              e.preventDefault()
+              cancel()
+            }
+          }}
+          onBlur={commit}
+          aria-label={t('gallery.renameTag')}
+          className="w-28 bg-transparent text-current outline-none placeholder:text-current/50"
+        />
+      </span>
+    )
+  }
+
+  return (
+    <span
+      className={cn(
+        'group/tag inline-flex items-center gap-1 rounded-full transition-shadow',
+        chipClass,
+        sizeClass,
+        active ? 'ring-2 ring-current/50' : !isHeader && 'opacity-80 hover:opacity-100'
+      )}
+    >
+      {isHeader ? (
+        <TagColorPicker tag={tag} colorKey={colorKey} onPick={onSetColor}>
+          <button
+            type="button"
+            title={t('gallery.tagColor')}
+            aria-label={t('gallery.tagColor')}
+            onClick={(e) => e.stopPropagation()}
+            className={cn(
+              'h-3 w-3 flex-shrink-0 rounded-full ring-1 ring-inset ring-black/10 transition-transform hover:scale-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-soft-2',
+              solidClass
+            )}
+          />
+        </TagColorPicker>
+      ) : (
+        <TagIcon className="h-3 w-3 flex-shrink-0" />
+      )}
+
+      <button
+        type="button"
+        onClick={onToggle ?? startEdit}
+        onDoubleClick={(e) => {
+          e.stopPropagation()
+          startEdit()
+        }}
+        aria-pressed={onToggle ? !!active : undefined}
+        aria-label={onToggle ? tag : t('gallery.renameTag')}
+        className="max-w-[12rem] truncate outline-none focus-visible:underline"
+      >
+        {tag}
+      </button>
+
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          startEdit()
+        }}
+        aria-label={t('gallery.renameTag')}
+        title={t('gallery.renameTag')}
+        className="flex-shrink-0 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/tag:opacity-100"
+      >
+        <Pencil className="h-3 w-3" />
+      </button>
+    </span>
+  )
+}
+
+// Swatch-grid color picker for a single tag. `children` is the trigger.
+function TagColorPicker({
+  colorKey,
+  onPick,
+  children,
+}: {
+  tag: string
+  colorKey: TagColorKey
+  onPick: (key: TagColorKey) => void
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>{children}</PopoverTrigger>
+      <PopoverContent align="start" className="w-auto p-2" onClick={(e) => e.stopPropagation()}>
+        <div className="grid grid-cols-5 gap-1.5">
+          {TAG_COLOR_KEYS.map((key) => (
+            <button
+              key={key}
+              type="button"
+              aria-label={key}
+              onClick={() => {
+                onPick(key)
+                setOpen(false)
+              }}
+              className={cn(
+                'flex h-6 w-6 items-center justify-center rounded-full transition-transform hover:scale-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-soft-2',
+                tagColorStyle(key).solid
+              )}
+            >
+              {key === colorKey && <Check className="h-3.5 w-3.5 text-white" />}
+            </button>
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+// Popover tag editor: add free-form tags (Enter), remove with ✕, recolor each
+// tag via its swatch, or click an existing notebook tag to apply it. Persists
+// the whole list on every change.
 function TagEditor({
   tags,
   allTags,
+  tagColors,
   onSave,
+  onSetTagColor,
 }: {
   tags: string[]
   allTags: string[]
+  tagColors: TagColorMap
   onSave: (tags: string[]) => void
+  onSetTagColor: (tag: string, colorKey: string) => void
 }) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
@@ -572,22 +983,44 @@ function TagEditor({
       >
         {tags.length > 0 && (
           <div className="flex flex-wrap gap-1">
-            {tags.map((tag) => (
-              <span
-                key={tag}
-                className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-2 py-0.5 text-[11px] text-primary"
-              >
-                {tag}
-                <button
-                  type="button"
-                  aria-label={`${t('common.delete')} ${tag}`}
-                  onClick={() => removeTag(tag)}
-                  className="rounded-full hover:text-foreground"
+            {tags.map((tag) => {
+              const colorKey = resolveTagColorKey(tag, tagColors)
+              const style = tagColorStyle(colorKey)
+              return (
+                <span
+                  key={tag}
+                  className={cn(
+                    'inline-flex items-center gap-1 rounded-full py-0.5 pl-1 pr-1.5 text-[11px]',
+                    style.chip
+                  )}
                 >
-                  <X className="h-2.5 w-2.5" />
-                </button>
-              </span>
-            ))}
+                  <TagColorPicker
+                    tag={tag}
+                    colorKey={colorKey}
+                    onPick={(key) => onSetTagColor(tag, key)}
+                  >
+                    <button
+                      type="button"
+                      aria-label={t('gallery.tagColor')}
+                      title={t('gallery.tagColor')}
+                      className={cn(
+                        'h-3 w-3 flex-shrink-0 rounded-full ring-1 ring-inset ring-black/10',
+                        style.solid
+                      )}
+                    />
+                  </TagColorPicker>
+                  <span className="truncate">{tag}</span>
+                  <button
+                    type="button"
+                    aria-label={`${t('common.delete')} ${tag}`}
+                    onClick={() => removeTag(tag)}
+                    className="rounded-full hover:text-foreground"
+                  >
+                    <X className="h-2.5 w-2.5" />
+                  </button>
+                </span>
+              )
+            })}
           </div>
         )}
         <Input
@@ -641,7 +1074,7 @@ function DeleteButton({ label, onDelete }: { label: string; onDelete: () => void
   )
 }
 
-function EmptyState({ onStart, creating }: { onStart: () => void; creating: boolean }) {
+function EmptyState({ onStart }: { onStart: () => void }) {
   const { t } = useTranslation()
   return (
     <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card/40 px-6 py-16 text-center">
@@ -650,8 +1083,8 @@ function EmptyState({ onStart, creating }: { onStart: () => void; creating: bool
       </span>
       <h3 className="text-sm font-semibold text-foreground">{t('gallery.emptyTitle')}</h3>
       <p className="mt-1 max-w-sm text-sm text-muted-foreground">{t('gallery.emptyHelper')}</p>
-      <Button onClick={onStart} disabled={creating} className="mt-5 gap-2">
-        {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+      <Button onClick={onStart} className="mt-5 gap-2">
+        <Plus className="h-4 w-4" />
         {t('gallery.startNewMainChat')}
       </Button>
     </div>

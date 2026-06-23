@@ -1,6 +1,6 @@
 'use client'
 
-import { ReactNode, useRef, useEffect, useCallback } from 'react'
+import { ReactNode, useRef, useEffect, useCallback, useState } from 'react'
 import { GripHorizontal } from 'lucide-react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -58,6 +58,9 @@ export function PanelCard({
   children,
 }: PanelCardProps) {
   const drag = useRef<{ startX: number; startWidth: number } | null>(null)
+  // While the right-edge resize handle is held, width must track the pointer
+  // 1:1 (no easing); the maximize/restore size change, by contrast, should ease.
+  const [isResizing, setIsResizing] = useState(false)
   const { setNodeRef, attributes, listeners, transform, transition, isDragging } = useSortable({ id })
 
   // Combine dnd-kit's node ref with our own so we can scroll the panel into view.
@@ -81,6 +84,7 @@ export function PanelCard({
   const handlePointerDown = (e: React.PointerEvent) => {
     if (!onWidthChange) return
     drag.current = { startX: e.clientX, startWidth: width }
+    setIsResizing(true)
     e.currentTarget.setPointerCapture(e.pointerId)
     e.preventDefault()
   }
@@ -98,6 +102,7 @@ export function PanelCard({
   const endDrag = (e: React.PointerEvent) => {
     if (!drag.current) return
     drag.current = null
+    setIsResizing(false)
     if (e.currentTarget.hasPointerCapture(e.pointerId)) {
       e.currentTarget.releasePointerCapture(e.pointerId)
     }
@@ -118,10 +123,15 @@ export function PanelCard({
     onToggleMaximize()
   }
 
+  // Ease the maximize/restore size change (flex ⇄ fixed width). Suppressed while
+  // resize-dragging (width must follow the pointer) and while sort-dragging (dnd-kit
+  // owns the transform transition there). Composes with dnd-kit's `transition`.
+  const sizeTransition =
+    !isResizing && !isDragging ? 'flex 0.25s ease, width 0.25s ease' : undefined
   const style: React.CSSProperties = {
     order,
     transform: CSS.Transform.toString(transform),
-    transition,
+    transition: [transition, sizeTransition].filter(Boolean).join(', ') || undefined,
     zIndex: isDragging ? 40 : undefined,
     opacity: isDragging ? 0.85 : undefined,
     ...(maximized

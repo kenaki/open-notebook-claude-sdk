@@ -15,16 +15,6 @@ import {
 
 const NOTEBOOK_SOURCES_PAGE_SIZE = 30
 
-export function useSources(notebookId?: string) {
-  return useQuery({
-    queryKey: QUERY_KEYS.sources(notebookId),
-    queryFn: () => sourcesApi.list({ notebook_id: notebookId }),
-    enabled: !!notebookId,
-    staleTime: 5 * 1000, // 5 seconds - more responsive for real-time source updates
-    refetchOnWindowFocus: true, // Refetch when user comes back to the tab
-  })
-}
-
 /**
  * Hook for fetching notebook sources with infinite scroll pagination.
  * Returns flattened sources array and pagination controls.
@@ -117,12 +107,6 @@ export function useCreateSource() {
         })
       }
 
-      // Invalidate general sources query too with immediate refetch
-      queryClient.invalidateQueries({
-        queryKey: QUERY_KEYS.sources(),
-        refetchType: 'active'
-      })
-
       // Show different messages based on processing mode
       if (variables.async_processing) {
         toast({
@@ -155,7 +139,9 @@ export function useUpdateSource() {
     mutationFn: ({ id, data }: { id: string; data: UpdateSourceRequest }) =>
       sourcesApi.update(id, data),
     onSuccess: (_, { id }) => {
-      // Invalidate ALL sources queries (both general and notebook-specific)
+      // Broad on purpose: a source can belong to multiple notebooks and the update
+      // mutation carries no notebook id, so we can't scope to one list. Invalidate the
+      // whole `['sources']` tree (every notebook list + this source's detail).
       queryClient.invalidateQueries({ queryKey: ['sources'] })
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.source(id) })
       toast({
@@ -181,7 +167,9 @@ export function useDeleteSource() {
   return useMutation({
     mutationFn: (id: string) => sourcesApi.delete(id),
     onSuccess: (_, id) => {
-      // Invalidate ALL sources queries (both general and notebook-specific)
+      // Broad on purpose: the delete mutation carries no notebook id and a source can
+      // belong to multiple notebooks, so we can't scope to one list. Invalidate the whole
+      // `['sources']` tree (every notebook list + this source's detail).
       queryClient.invalidateQueries({ queryKey: ['sources'] })
       // Also invalidate the specific source
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.source(id) })
@@ -270,7 +258,8 @@ export function useRetrySource() {
       queryClient.invalidateQueries({
         queryKey: ['sources', sourceId, 'status']
       })
-      // Invalidate ALL sources queries to refresh the UI
+      // Broad on purpose: retry carries no notebook id and the requeued source can appear
+      // in multiple notebook lists (status badges), so we can't scope to one list.
       queryClient.invalidateQueries({ queryKey: ['sources'] })
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.source(sourceId) })
 
@@ -310,11 +299,12 @@ export function useAddSourcesToNotebook() {
       return { successes, failures, total: sourceIds.length }
     },
     onSuccess: (result, { notebookId, sourceIds }) => {
-      // Invalidate ALL sources queries to refresh all lists
-      queryClient.invalidateQueries({ queryKey: ['sources'] })
-      // Specifically invalidate the notebook's sources
+      // Scope to the affected notebook only — adding sources to notebook X doesn't change
+      // any other notebook's source list. Refresh the canonical infinite list (what the
+      // workspace renders) and the flat list (podcast dialog) for this notebook.
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.sourcesInfinite(notebookId) })
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.sources(notebookId) })
-      // Invalidate each affected source
+      // Invalidate each affected source's detail
       sourceIds.forEach(sourceId => {
         queryClient.invalidateQueries({ queryKey: QUERY_KEYS.source(sourceId) })
       })
@@ -363,11 +353,12 @@ export function useRemoveSourceFromNotebook() {
       return notebooksApi.removeSource(notebookId, sourceId)
     },
     onSuccess: (_, { notebookId, sourceId }) => {
-      // Invalidate ALL sources queries to refresh all lists
-      queryClient.invalidateQueries({ queryKey: ['sources'] })
-      // Specifically invalidate the notebook's sources
+      // Scope to the affected notebook only — removing a source from notebook X doesn't
+      // change any other notebook's source list. Refresh the canonical infinite list
+      // (workspace) and the flat list (podcast dialog) for this notebook.
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.sourcesInfinite(notebookId) })
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.sources(notebookId) })
-      // Also invalidate the specific source
+      // Also invalidate the specific source's detail
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.source(sourceId) })
 
       toast({

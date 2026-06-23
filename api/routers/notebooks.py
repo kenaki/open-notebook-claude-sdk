@@ -74,6 +74,7 @@ async def get_notebooks(
                 updated=str(nb.get("updated", "")),
                 source_count=nb.get("source_count", 0),
                 note_count=nb.get("note_count", 0),
+                chat_tag_colors=nb.get("chat_tag_colors", {}) or {},
             )
             for nb in result
         ]
@@ -105,6 +106,7 @@ async def create_notebook(notebook: NotebookCreate):
             updated=str(new_notebook.updated),
             source_count=0,  # New notebook has no sources
             note_count=0,  # New notebook has no notes
+            chat_tag_colors=new_notebook.chat_tag_colors or {},
         )
     except InvalidInputError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -170,6 +172,7 @@ async def get_notebook(notebook_id: str):
             updated=str(nb.get("updated", "")),
             source_count=nb.get("source_count", 0),
             note_count=nb.get("note_count", 0),
+            chat_tag_colors=nb.get("chat_tag_colors", {}) or {},
         )
     except HTTPException:
         raise
@@ -193,6 +196,8 @@ async def update_notebook(notebook_id: str, notebook_update: NotebookUpdate):
             notebook.description = notebook_update.description
         if notebook_update.archived is not None:
             notebook.archived = notebook_update.archived
+        if notebook_update.chat_tag_colors is not None:
+            notebook.chat_tag_colors = notebook_update.chat_tag_colors
 
         await notebook.save()
 
@@ -216,6 +221,7 @@ async def update_notebook(notebook_id: str, notebook_update: NotebookUpdate):
                 updated=str(nb.get("updated", "")),
                 source_count=nb.get("source_count", 0),
                 note_count=nb.get("note_count", 0),
+                chat_tag_colors=nb.get("chat_tag_colors", {}) or {},
             )
 
         # Fallback if query fails
@@ -228,6 +234,7 @@ async def update_notebook(notebook_id: str, notebook_update: NotebookUpdate):
             updated=str(notebook.updated),
             source_count=0,
             note_count=0,
+            chat_tag_colors=notebook.chat_tag_colors or {},
         )
     except HTTPException:
         raise

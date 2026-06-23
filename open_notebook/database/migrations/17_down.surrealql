@@ -1,0 +1,3 @@
+-- Migration 17 rollback: remove the chat-gallery tag → color map from notebooks.
+
+REMOVE FIELD IF EXISTS chat_tag_colors ON TABLE notebook;

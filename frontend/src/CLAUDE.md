@@ -98,8 +98,8 @@ User interactions trigger mutations/queries via hooks, which communicate with th
 
 ### Caching & Invalidation
 - **Query keys**: `QUERY_KEYS.notebook(id)`, `QUERY_KEYS.sources(notebookId)` — hierarchical structure
-- **Broad invalidation**: `['sources']` invalidates all source queries; trade-off between accuracy + performance
-- **Auto-refetch**: `refetchOnWindowFocus: true` on frequently-changing data (sources, notebooks)
+- **Broad invalidation**: `['sources']` invalidates all source queries; trade-off between accuracy + performance. Source/note list mutations that know their notebook id scope to `sourcesInfinite(nbId)`/`sources(nbId)` + the item key; the broad tree is the fallback only when the mutation carries no notebook id (e.g. update/delete/retry).
+- **Auto-refetch**: the global default is `refetchOnWindowFocus: false` (`query-client.ts`). Only `use-sources.ts` opts in (`refetchOnWindowFocus: true` + `staleTime: 5s`) for the frequently-changing source list/status. Notebook, note, and chat queries use the global default.
 
 ### Auth & Protected Routes
 - **Proxy** (`src/proxy.ts`): Redirects root `/` to `/notebooks`
@@ -112,6 +112,7 @@ User interactions trigger mutations/queries via hooks, which communicate with th
 - **Pattern**: One store per modal type; triggered by button clicks + data passing via hook arguments
 
 ### Error Handling
+- **Global query error surface**: the singleton `QueryClient` attaches a `QueryCache.onError` (`query-client.ts`) that toasts failed **queries** via `getApiErrorMessage`. Queries opt out with `meta: { silent: true }` (prefetch, background polling). Mutations are NOT handled there — they keep their own per-hook `onError` toasts, so there's no double-toast.
 - **API errors**: All request failures propagate to consuming code; components show toast notifications
 - **Error message resolution** (`lib/utils/error-handler.ts`): `getApiErrorMessage()` tries i18n mapping first via `ERROR_MAP`, then falls back to displaying the backend's descriptive error message directly. This ensures user-friendly error messages from the error classification system are shown as-is.
 - **Toast feedback**: Mutations show success/error toasts (from `sonner` library)
@@ -143,7 +144,7 @@ User interactions trigger mutations/queries via hooks, which communicate with th
 
 - **Token storage**: Stored in localStorage under `auth-storage` key (Zustand persist); consumed by API interceptor
 - **Base URL discovery**: API client fetches base URL from runtime config on first request (async; can be slow on startup)
-- **Optimistic updates**: Chat messages added to state before server confirmation; removed on error
+- **Optimistic updates**: not a general mutation pattern — most mutations are invalidate-and-refetch. The optimistic surfaces are the user's own chat bubble (added to local state before server confirmation, removed on error) and chat-session creation (`useNotebookChat`'s `createSessionMutation` uses `onMutate` to insert a temp-id session card, reconciled to the real id on success / rolled back on error)
 - **Modal lifecycle**: Dialogs not auto-reset; parent must clear form state after submit
 - **Focus management**: Dialog auto-focuses first input; can cause layout shifts if inputs are conditional
 - **Cache invalidation breadth**: Trade-off between precision + simplicity; broad invalidation simpler but may over-fetch

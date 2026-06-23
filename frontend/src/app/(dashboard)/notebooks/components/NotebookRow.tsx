@@ -13,7 +13,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { useUpdateNotebook } from '@/lib/hooks/use-notebooks'
+import { useUpdateNotebook, useNotebookPrefetch } from '@/lib/hooks/use-notebooks'
 import { NotebookDeleteDialog } from './NotebookDeleteDialog'
 import { useState } from 'react'
 import { useTranslation } from '@/lib/hooks/use-translation'
@@ -28,6 +28,7 @@ export function NotebookRow({ notebook }: NotebookRowProps) {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const router = useRouter()
   const updateNotebook = useUpdateNotebook()
+  const { prefetch, seed } = useNotebookPrefetch()
 
   const handleArchiveToggle = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -38,6 +39,7 @@ export function NotebookRow({ notebook }: NotebookRowProps) {
   }
 
   const handleRowClick = () => {
+    seed(notebook)
     router.push(`/notebooks/${encodeURIComponent(notebook.id)}`)
   }
 
@@ -49,13 +51,18 @@ export function NotebookRow({ notebook }: NotebookRowProps) {
       <div
         className="group flex items-center gap-4 rounded-lg border bg-card px-4 py-3 card-hover"
         onClick={handleRowClick}
+        onMouseEnter={() => prefetch(notebook.id)}
         style={{ cursor: 'pointer' }}
       >
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <Link
               href={`/notebooks/${encodeURIComponent(notebook.id)}`}
-              onClick={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation()
+                seed(notebook)
+              }}
+              onFocus={() => prefetch(notebook.id)}
               className="font-medium truncate rounded-sm outline-none group-hover:text-primary transition-colors focus-visible:ring-2 focus-visible:ring-ring"
             >
               {notebook.name}

@@ -1,0 +1,6 @@
+-- Migration 17: add the chat-gallery tag → color map to notebooks.
+-- The notebook table is SCHEMAFULL (migration 1), so an undeclared field would
+-- be dropped on save. FLEXIBLE TYPE object lets it hold arbitrary tag keys
+-- (lowercased tag name → palette color key), defaulting to an empty object.
+
+DEFINE FIELD IF NOT EXISTS chat_tag_colors ON TABLE notebook FLEXIBLE TYPE object DEFAULT {};

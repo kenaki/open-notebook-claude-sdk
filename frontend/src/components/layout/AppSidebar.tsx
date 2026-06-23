@@ -106,7 +106,7 @@ export function AppSidebar() {
     <TooltipProvider delayDuration={0}>
       <div
         className={cn(
-          'app-sidebar flex h-full flex-col bg-sidebar border-sidebar-border border-r transition-all duration-300',
+          'app-sidebar flex h-full flex-col bg-sidebar border-sidebar-border border-r transition-[width] duration-300 [contain:layout_paint] will-change-[width]',
           isCollapsed ? 'w-16' : 'w-[236px]'
         )}
       >
@@ -293,7 +293,13 @@ export function AppSidebar() {
                   </h3>
                 )}
 
-                {section.items.map((item) => {
+                {section.items
+                  // Inside a notebook, the global "Sources" library link is
+                  // redundant with the "This notebook → Sources" drawer toggle
+                  // (same label + icon), so drop it here to kill the duplicate.
+                  // It stays reachable from the global nav outside a notebook.
+                  .filter((item) => !(inNotebook && item.href === '/sources'))
+                  .map((item) => {
                   const isActive = pathname?.startsWith(item.href) || false
                   const button = (
                     <Button

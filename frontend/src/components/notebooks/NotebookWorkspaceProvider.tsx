@@ -2,12 +2,16 @@
 
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
   useState,
   type ReactNode,
 } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { notebooksApi } from '@/lib/api/notebooks'
+import { QUERY_KEYS } from '@/lib/api/query-client'
 import { useNotebook } from '@/lib/hooks/use-notebooks'
 import { useNotebookSources } from '@/lib/hooks/use-sources'
 import { useNotes } from '@/lib/hooks/use-notes'
@@ -46,6 +50,11 @@ interface NotebookWorkspaceValue {
   notebookId: string
   notebook: NotebookResponse | undefined
   notebookLoading: boolean
+  // The notebook fetch settled with a genuine 404 (notebook does not exist).
+  notebookNotFound: boolean
+  // The notebook fetch failed transiently (500/network) — recoverable via retry.
+  notebookFetchError: boolean
+  refetchNotebook: () => void
 
   sources: SourceListResponse[] | undefined
   sourcesLoading: boolean
@@ -64,8 +73,17 @@ interface NotebookWorkspaceValue {
 
   chat: ReturnType<typeof useNotebookChat>
   contextStats: ContextStats
-  // True when neither sources nor notes loaded at all (hard failure).
+  // True when the sources or notes fetch genuinely failed (a real query error),
+  // NOT merely while data is still loading or for an empty notebook.
   dataError: boolean
+
+  // Notebook-wide chat-gallery tag → color-key map, plus a silent setter that
+  // persists a single tag's color onto the notebook.
+  tagColors: Record<string, string>
+  setTagColor: (tag: string, colorKey: string) => void
+  // Rename a tag everywhere: rewrite it on every main chat that carries it and
+  // migrate its color-map entry. No-op on empty/unchanged names.
+  renameTag: (oldTag: string, newName: string) => void
 }
 
 const NotebookWorkspaceContext = createContext<NotebookWorkspaceValue | null>(null)
@@ -98,16 +116,37 @@ export function NotebookWorkspaceProvider({
   notebookId: string
   children: ReactNode
 }) {
-  const { data: notebook, isLoading: notebookLoading } = useNotebook(notebookId)
+  const queryClient = useQueryClient()
+  const {
+    data: notebook,
+    isLoading: notebookLoading,
+    isError: notebookIsError,
+    error: notebookErrorObj,
+    refetch: refetchNotebook,
+  } = useNotebook(notebookId)
+  // Distinguish a genuine 404 (notebook gone → "not found") from a transient
+  // failure (500/network → offer retry). Axios errors carry response.status.
+  const notebookStatus = (
+    notebookErrorObj as { response?: { status?: number } } | null
+  )?.response?.status
+  const notebookNotFound = notebookIsError && notebookStatus === 404
+  const notebookFetchError = notebookIsError && notebookStatus !== 404
   const {
     sources,
     isLoading: sourcesLoading,
+    error: sourcesError,
     refetch: refetchSources,
     hasNextPage,
     isFetchingNextPage,
     fetchNextPage,
   } = useNotebookSources(notebookId)
-  const { data: notes, isLoading: notesLoading } = useNotes(notebookId)
+  const { data: notes, isLoading: notesLoading, isError: notesIsError } = useNotes(notebookId)
+  // `dataError` means "a fetch genuinely failed," not "data is still undefined."
+  // The flat `sources` array is always `[] ` (`?? []`), so the old `!sources &&
+  // !notes` derivation was effectively always false — it never fired on real
+  // errors and could misfire during normal load. Derive from real query flags:
+  // loading → skeleton (B2), empty notebook → empty state, only a true error here.
+  const dataError = !!sourcesError || notesIsError
 
   // Context selection state (which sources/notes feed the chat, and in what mode).
   const [contextSelections, setContextSelections] = useState<ContextSelections>({
@@ -204,11 +243,79 @@ export function NotebookWorkspaceProvider({
     }))
   }
 
+  // Tag → color-key map persisted on the notebook.
+  const tagColors = useMemo(() => notebook?.chat_tag_colors ?? {}, [notebook])
+
+  // Persist a whole tag→color map (silent, no toast): paint optimistically, PUT
+  // it, then refresh the notebook caches so every tag chip re-colors.
+  const persistTagColors = useCallback(
+    (next: Record<string, string>) => {
+      queryClient.setQueryData<NotebookResponse>(QUERY_KEYS.notebook(notebookId), (old) =>
+        old ? { ...old, chat_tag_colors: next } : old
+      )
+      void notebooksApi
+        .update(notebookId, { chat_tag_colors: next })
+        .then(() => {
+          queryClient.invalidateQueries({ queryKey: QUERY_KEYS.notebook(notebookId) })
+          queryClient.invalidateQueries({ queryKey: QUERY_KEYS.notebooks })
+        })
+    },
+    [notebookId, queryClient]
+  )
+
+  const setTagColor = useCallback(
+    (tag: string, colorKey: string) => {
+      persistTagColors({ ...tagColors, [tag.toLowerCase()]: colorKey })
+    },
+    [tagColors, persistTagColors]
+  )
+
+  // Rename a tag across the whole notebook: rewrite it on every main chat that
+  // carries it (de-duping if the new name collides with an existing tag), then
+  // migrate its color-map entry. `chat.setSessionTags` persists each session.
+  const renameTag = useCallback(
+    (oldTag: string, newNameRaw: string) => {
+      const newName = newNameRaw.trim()
+      const oldLower = oldTag.toLowerCase()
+      const newLower = newName.toLowerCase()
+      // Allow case-only renames (e.g. "grammar" → "Grammar"); bail only when the
+      // name is empty or completely unchanged.
+      if (!newName || newName === oldTag) return
+
+      for (const session of chat.mainSessions) {
+        const tags = session.tags ?? []
+        if (!tags.some((tg) => tg.toLowerCase() === oldLower)) continue
+        const nextTags: string[] = []
+        for (const tg of tags) {
+          const replaced = tg.toLowerCase() === oldLower ? newName : tg
+          if (!nextTags.some((x) => x.toLowerCase() === replaced.toLowerCase())) {
+            nextTags.push(replaced)
+          }
+        }
+        chat.setSessionTags(session.id, nextTags)
+      }
+
+      // Migrate the color when the color-map key actually changes (skip case-only
+      // renames, whose lowercased key is unchanged). Keep the new tag's existing
+      // color if it already has one, else carry the old tag's color over.
+      if (oldLower !== newLower && oldLower in tagColors) {
+        const next = { ...tagColors }
+        if (!(newLower in next)) next[newLower] = next[oldLower]
+        delete next[oldLower]
+        persistTagColors(next)
+      }
+    },
+    [chat, tagColors, persistTagColors]
+  )
+
   const value = useMemo<NotebookWorkspaceValue>(
     () => ({
       notebookId,
       notebook,
       notebookLoading,
+      notebookNotFound,
+      notebookFetchError,
+      refetchNotebook,
       sources,
       sourcesLoading,
       refetchSources,
@@ -223,13 +330,19 @@ export function NotebookWorkspaceProvider({
       handleBulkNoteContext,
       chat,
       contextStats,
-      dataError: !sources && !notes,
+      dataError,
+      tagColors,
+      setTagColor,
+      renameTag,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       notebookId,
       notebook,
       notebookLoading,
+      notebookNotFound,
+      notebookFetchError,
+      refetchNotebook,
       sources,
       sourcesLoading,
       hasNextPage,
@@ -239,6 +352,10 @@ export function NotebookWorkspaceProvider({
       contextSelections,
       chat,
       contextStats,
+      dataError,
+      tagColors,
+      setTagColor,
+      renameTag,
     ]
   )
 

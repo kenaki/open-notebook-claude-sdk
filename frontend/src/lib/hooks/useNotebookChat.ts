@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect, useMemo } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { getApiErrorMessage } from '@/lib/utils/error-handler'
@@ -10,6 +10,7 @@ import { QUERY_KEYS } from '@/lib/api/query-client'
 import { getSideChatModel } from '@/lib/stores/chat-defaults-store'
 import {
   NotebookChatMessage,
+  NotebookChatSession,
   NotebookChatSessionWithMessages,
   CreateNotebookChatSessionRequest,
   UpdateNotebookChatSessionRequest,
@@ -18,6 +19,11 @@ import {
   MediaItem
 } from '@/lib/types/api'
 import { ContextSelections } from '@/lib/types/notebook-context'
+
+// Create-session payload plus an internal optimistic marker. `_tempId`, when
+// present, drives the optimistic temp-card insert/reconcile in
+// createSessionMutation (Track A / A1); it is stripped before hitting the API.
+type CreateSessionVars = CreateNotebookChatSessionRequest & { _tempId?: string }
 
 interface UseNotebookChatParams {
   notebookId: string
@@ -102,18 +108,79 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections,
     }
   }, [sessions, currentSessionId])
 
-  // Create session mutation
+  // Optimistic main-chat creation (Track A / A1). When called with a `_tempId`
+  // (the gallery's instant-spawn path) we insert a temp card into the session
+  // list AND seed its detail cache so the Deep-Dive dock renders an empty chat
+  // instantly — the seeded data is fresh under the 5-min staleTime, so no 404
+  // fetch fires against the not-yet-real id. On success we swap the temp card
+  // for the authoritative session; on failure we roll the card back + toast.
   const createSessionMutation = useMutation({
-    mutationFn: (data: CreateNotebookChatSessionRequest) =>
-      chatApi.createSession(data),
-    onSuccess: (newSession) => {
+    // _tempId is an internal optimistic marker, not part of the API payload.
+    mutationFn: (vars: CreateSessionVars) => {
+      const data: CreateSessionVars = { ...vars }
+      delete data._tempId
+      return chatApi.createSession(data)
+    },
+    onMutate: async (vars: CreateSessionVars) => {
+      const tempId = vars._tempId
+      if (!tempId) return
+      await queryClient.cancelQueries({
+        queryKey: QUERY_KEYS.notebookChatSessions(notebookId)
+      })
+      const previous = queryClient.getQueryData<NotebookChatSession[]>(
+        QUERY_KEYS.notebookChatSessions(notebookId)
+      )
+      const now = new Date().toISOString()
+      const optimistic: NotebookChatSessionWithMessages = {
+        id: tempId,
+        notebook_id: notebookId,
+        title: vars.title ?? '',
+        created: now,
+        updated: now,
+        message_count: 0,
+        model_override: vars.model_override ?? null,
+        messages: [],
+      }
+      queryClient.setQueryData<NotebookChatSession[]>(
+        QUERY_KEYS.notebookChatSessions(notebookId),
+        (old = []) => [optimistic, ...old]
+      )
+      queryClient.setQueryData<NotebookChatSessionWithMessages>(
+        QUERY_KEYS.notebookChatSession(tempId),
+        optimistic
+      )
+      return { previous, tempId }
+    },
+    onSuccess: (newSession, _vars, ctx) => {
+      if (ctx?.tempId) {
+        // Swap the temp card for the authoritative session in the list…
+        queryClient.setQueryData<NotebookChatSession[]>(
+          QUERY_KEYS.notebookChatSessions(notebookId),
+          (old = []) => old.map((s) => (s.id === ctx.tempId ? newSession : s))
+        )
+        // …and seed its detail cache so the dock has it before any refetch.
+        queryClient.setQueryData<NotebookChatSessionWithMessages>(
+          QUERY_KEYS.notebookChatSession(newSession.id),
+          (old) => old ?? { ...newSession, messages: [] }
+        )
+      }
+      // Reconcile against the server (no longer the source of truth for the card).
       queryClient.invalidateQueries({
         queryKey: QUERY_KEYS.notebookChatSessions(notebookId)
       })
-      setCurrentSessionId(newSession.id)
-      toast.success(t('chat.sessionCreated'))
     },
-    onError: (err: unknown) => {
+    onError: (err: unknown, _vars, ctx) => {
+      if (ctx?.previous !== undefined) {
+        queryClient.setQueryData(
+          QUERY_KEYS.notebookChatSessions(notebookId),
+          ctx.previous
+        )
+      }
+      if (ctx?.tempId) {
+        queryClient.removeQueries({
+          queryKey: QUERY_KEYS.notebookChatSession(ctx.tempId)
+        })
+      }
       const error = err as { response?: { data?: { detail?: string } }, message?: string };
       toast.error(getApiErrorMessage(error.response?.data?.detail || error.message, (key) => t(key), 'apiErrors.failedToCreateSession'))
     }
@@ -222,7 +289,7 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections,
   // Send a message to a specific session (multiplexed — popped chats send to
   // their own session independently). Auto-creates a session only when targeting
   // the dock with none selected yet.
-  const sendMessageTo = useCallback(async (targetSessionId: string | null, message: string, modelOverride?: string, media?: MediaItem[]) => {
+  const sendMessageTo = useCallback(async (targetSessionId: string | null, message: string, modelOverride?: string, media?: MediaItem[]): Promise<{ ok: boolean }> => {
     let sessionId = targetSessionId
 
     // Auto-create session if none exists (dock-only path)
@@ -247,7 +314,7 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections,
       } catch (err: unknown) {
         const error = err as { response?: { data?: { detail?: string } }, message?: string };
         toast.error(getApiErrorMessage(error.response?.data?.detail || error.message, (key) => t(key), 'apiErrors.failedToCreateSession'))
-        return
+        return { ok: false }
       }
     }
 
@@ -283,12 +350,15 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections,
       queryClient.invalidateQueries({
         queryKey: QUERY_KEYS.notebookChatSession(sessionId)
       })
+      return { ok: true }
     } catch (err: unknown) {
       const error = err as { response?: { data?: { detail?: string } }, message?: string };
       console.error('Error sending message:', error)
       toast.error(getApiErrorMessage(error.response?.data?.detail || error.message, (key) => t(key), 'apiErrors.failedToSendMessage'))
-      // Remove optimistic message on error
+      // Remove optimistic message on error. The caller (ChatPanel via the dock)
+      // reads { ok: false } to restore the user's draft + staged media (Track A / A2).
       patchSessionMessages(sessionId, (prev) => prev.filter(msg => !msg.id.startsWith('temp-')))
+      return { ok: false }
     } finally {
       setSendingBySession(prev => ({ ...prev, [sessionId!]: false }))
     }
@@ -312,21 +382,26 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections,
     setCurrentSessionId(sessionId)
   }, [])
 
-  // Create a MAIN chat (Sidebar redesign / Chunk 2). The sidebar "+" makes a
-  // top-level chat, so it follows the global default model (no side-chat default
-  // — that's reserved for true side chats: createSubChat / createSidePanel).
-  // Async + returns the new session so the caller can openChat() it; onError of
-  // the mutation already toasts, so we just swallow + return null.
-  const createSession = useCallback(async (title?: string) => {
-    try {
-      return await createSessionMutation.mutateAsync({
-        notebook_id: notebookId,
-        title,
-      })
-    } catch {
-      return null
-    }
+  // Optimistic main-chat spawn (Track A / A1). Returns the temp id synchronously
+  // plus a promise resolving to the real session (or null on error). The gallery
+  // navigates to `tempId` immediately for an instant feel, then router.replace()s
+  // to the real id once it lands. onError of the mutation already toasts.
+  const createMainChat = useCallback((title?: string) => {
+    const tempId = `temp-session-${Date.now()}`
+    const promise = createSessionMutation
+      .mutateAsync({ notebook_id: notebookId, title, _tempId: tempId })
+      .catch(() => null)
+    return { tempId, promise }
   }, [createSessionMutation, notebookId])
+
+  // Create a MAIN chat (Sidebar redesign / Chunk 2). Back-compat await-the-real-
+  // session wrapper: ChatDock spins a main then sends to its real id, so it needs
+  // the authoritative session, not the temp card. Follows the global default
+  // model (side-chat defaults are reserved for createSubChat / createSidePanel).
+  const createSession = useCallback(
+    (title?: string) => createMainChat(title).promise,
+    [createMainChat]
+  )
 
   // Update session
   const updateSession = useCallback((sessionId: string, data: UpdateNotebookChatSessionRequest) => {
@@ -491,7 +566,13 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections,
     [sessions]
   )
 
-  // Update token/char counts when context selections change
+  // Update token/char counts when context selections change.
+  // The first run fires immediately so counts populate on mount; rapid
+  // source/note toggling after that is debounced (250ms trailing) so a burst
+  // of changes collapses into a single POST /chat/context instead of one per
+  // toggle. The pending timer is cleared on each input change and on unmount.
+  const contextDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const contextCountsPrimedRef = useRef(false)
   useEffect(() => {
     const updateContextCounts = async () => {
       try {
@@ -500,7 +581,24 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections,
         console.error('Error updating context counts:', error)
       }
     }
-    updateContextCounts()
+
+    if (!contextCountsPrimedRef.current) {
+      contextCountsPrimedRef.current = true
+      updateContextCounts()
+      return
+    }
+
+    if (contextDebounceRef.current) {
+      clearTimeout(contextDebounceRef.current)
+    }
+    contextDebounceRef.current = setTimeout(updateContextCounts, 250)
+
+    return () => {
+      if (contextDebounceRef.current) {
+        clearTimeout(contextDebounceRef.current)
+        contextDebounceRef.current = null
+      }
+    }
   }, [buildContext])
 
   return {
@@ -527,6 +625,7 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections,
 
     // Actions
     createSession,
+    createMainChat,
     createSubChat,
     createSidePanel,
     updateSession,

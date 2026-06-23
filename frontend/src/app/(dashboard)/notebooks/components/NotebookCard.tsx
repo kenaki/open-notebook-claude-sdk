@@ -13,7 +13,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { useUpdateNotebook } from '@/lib/hooks/use-notebooks'
+import { useUpdateNotebook, useNotebookPrefetch } from '@/lib/hooks/use-notebooks'
 import { NotebookDeleteDialog } from './NotebookDeleteDialog'
 import { useState } from 'react'
 import { useTranslation } from '@/lib/hooks/use-translation'
@@ -27,6 +27,7 @@ export function NotebookCard({ notebook }: NotebookCardProps) {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const router = useRouter()
   const updateNotebook = useUpdateNotebook()
+  const { prefetch, seed } = useNotebookPrefetch()
 
   const handleArchiveToggle = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -37,14 +38,17 @@ export function NotebookCard({ notebook }: NotebookCardProps) {
   }
 
   const handleCardClick = () => {
+    seed(notebook)
     router.push(`/notebooks/${encodeURIComponent(notebook.id)}`)
   }
 
   return (
     <>
-      <Card 
+      <Card
         className="group card-hover"
         onClick={handleCardClick}
+        onMouseEnter={() => prefetch(notebook.id)}
+        onFocus={() => prefetch(notebook.id)}
         style={{ cursor: 'pointer' }}
       >
           <CardHeader className="pb-3">

@@ -208,7 +208,7 @@
 
   /* Enhanced sidebar menu item hover effects */
   .sidebar-menu-item {
-    @apply transition-all duration-200 ease-out;
+    @apply transition-[background-color,box-shadow,transform] duration-200 ease-out;
   }
 
   .sidebar-menu-item:hover {
@@ -223,7 +223,7 @@
 
   /* Enhanced hover effects for cards */
   .card-hover {
-    @apply transition-all duration-200 cursor-pointer;
+    @apply transition-[background-color,border-color,transform,box-shadow] duration-200 cursor-pointer;
   }
 
   .card-hover:hover {
@@ -559,4 +559,24 @@
 }
 .chat-markdown .hljs-strong {
   font-weight: 600;
+}
+
+/* --- Reduced motion (accessibility) --------------------------------------- */
+/* Respect the OS "reduce motion" preference. One universal rule neutralizes
+   everything that moves: the app's custom keyframes (onb-pulse / onb-flash /
+   chat-msg-enter), the D1 drawer/sidebar width transitions + PanelCard
+   maximize, the .sidebar-menu-item / .card-hover hover transitions, and the
+   Radix / tw-animate-css `animate-in` effects — all of those run via
+   `animation` or `transition`, so collapsing their durations and stopping
+   infinite loops covers them. End states are reached instantly (e.g. the
+   processing dot settles, messages appear without sliding) so nothing breaks. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

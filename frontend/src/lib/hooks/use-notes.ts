@@ -83,7 +83,8 @@ export function useDeleteNote() {
   return useMutation({
     mutationFn: (id: string) => notesApi.delete(id),
     onSuccess: () => {
-      // Invalidate all notes queries (with and without notebook IDs)
+      // Broad on purpose: the delete mutation carries only the note id (no notebook id),
+      // so we can't scope to one notebook's list. Invalidate the whole `['notes']` tree.
       queryClient.invalidateQueries({ queryKey: ['notes'] })
       toast({
         title: t('common.success'),

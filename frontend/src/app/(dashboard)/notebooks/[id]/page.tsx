@@ -3,8 +3,9 @@
 import { AppShell } from '@/components/layout/AppShell'
 import { NotebookHeader } from '../components/NotebookHeader'
 import { ChatGallery } from '@/components/notebooks/ChatGallery'
-import { LoadingSpinner } from '@/components/common/LoadingSpinner'
+import { GallerySkeleton } from '@/components/notebooks/GallerySkeleton'
 import { useNotebookWorkspace } from '@/components/notebooks/NotebookWorkspaceProvider'
+import { Button } from '@/components/ui/button'
 import { useTranslation } from '@/lib/hooks/use-translation'
 
 // Re-exported for backward compatibility — historically these types lived here.
@@ -21,15 +22,30 @@ export default function NotebookGalleryPage() {
   const { t } = useTranslation()
   const workspace = useNotebookWorkspace()
 
+  // Keep the app chrome mounted on cold open; swap only the content area to a
+  // skeleton instead of a full-screen spinner outside the shell (no flash).
   if (!workspace || workspace.notebookLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <LoadingSpinner size="lg" />
-      </div>
+      <AppShell>
+        <GallerySkeleton />
+      </AppShell>
     )
   }
 
   if (!workspace.notebook) {
+    // Transient failure (500/network) → recoverable error card with retry.
+    if (workspace.notebookFetchError) {
+      return (
+        <AppShell>
+          <div className="p-6 max-w-lg">
+            <h1 className="text-2xl font-bold mb-2">{t('notebooks.loadError')}</h1>
+            <p className="text-muted-foreground mb-4">{t('notebooks.loadErrorDesc')}</p>
+            <Button onClick={() => workspace.refetchNotebook()}>{t('common.retry')}</Button>
+          </div>
+        </AppShell>
+      )
+    }
+    // Genuine 404 (or settled with no data) → "not found".
     return (
       <AppShell>
         <div className="p-6">

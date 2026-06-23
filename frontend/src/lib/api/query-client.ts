@@ -1,6 +1,19 @@
-import { QueryClient } from '@tanstack/react-query'
+import { QueryCache, QueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
+import i18n from '@/lib/i18n'
+import { getApiErrorMessage } from '@/lib/utils/error-handler'
 
 export const queryClient = new QueryClient({
+  // Global surface for *query* failures so they're no longer silent. Mutations are
+  // intentionally NOT handled here — they keep their own per-hook onError toasts, so
+  // adding a MutationCache here would double-toast. Queries that should stay quiet
+  // (prefetch, background polling) opt out via `meta: { silent: true }`.
+  queryCache: new QueryCache({
+    onError: (error, query) => {
+      if (query.meta?.silent) return
+      toast.error(getApiErrorMessage(error, i18n.t.bind(i18n)))
+    },
+  }),
   defaultOptions: {
     queries: {
       staleTime: 5 * 60 * 1000, // 5 minutes
