@@ -2,8 +2,7 @@
 
 import { useRouter } from 'next/navigation'
 import { useMemo, useRef, useState } from 'react'
-import { formatDistanceToNow } from 'date-fns'
-import { getDateLocale } from '@/lib/utils/date-locale'
+import { formatRelative } from '@/lib/utils/format'
 import {
   MessageSquare,
   Plus,
@@ -64,7 +63,6 @@ export function ChatGallery() {
   const { t, language } = useTranslation()
   const router = useRouter()
   const { notebookId, chat, tagColors, setTagColor, renameTag } = useNotebookWorkspaceStrict()
-  const dfLocale = getDateLocale(language)
   const viewMode = useChatGalleryViewStore((s) => s.viewMode)
   const setViewMode = useChatGalleryViewStore((s) => s.setViewMode)
   // Main chat queued for deletion (drives the confirmation dialog).
@@ -126,8 +124,7 @@ export function ChatGallery() {
     return out
   }, [allTags, filteredMains])
 
-  const relativeTime = (d: string) =>
-    formatDistanceToNow(new Date(d), { addSuffix: true, locale: dfLocale })
+  const relativeTime = (d: string) => formatRelative(d, language)
 
   const enterChat = (chatId: string) => {
     router.push(`/notebooks/${notebookId}/chat/${chatId}`)

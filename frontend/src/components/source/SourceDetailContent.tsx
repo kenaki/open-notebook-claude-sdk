@@ -61,8 +61,7 @@ import {
   AlertCircle,
   MessageSquare,
 } from 'lucide-react'
-import { formatDistanceToNow } from 'date-fns'
-import { getDateLocale } from '@/lib/utils/date-locale'
+import { formatRelative } from '@/lib/utils/format'
 import { toast } from 'sonner'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { SourceInsightDialog } from '@/components/source/SourceInsightDialog'
@@ -776,10 +775,7 @@ export function SourceDetailContent({
                     <div>
                       <p className="text-xs font-medium text-muted-foreground">{t('common.created_label')}</p>
                       <p className="text-sm">
-                        {formatDistanceToNow(new Date(source.created), {
-                          addSuffix: true,
-                          locale: getDateLocale(language)
-                        })}
+                        {formatRelative(source.created, language)}
                       </p>
                       <p className="text-xs text-muted-foreground">
                         {new Date(source.created).toLocaleString()}
@@ -788,10 +784,7 @@ export function SourceDetailContent({
                     <div>
                       <p className="text-xs font-medium text-muted-foreground">{t('common.updated_label')}</p>
                       <p className="text-sm">
-                        {formatDistanceToNow(new Date(source.updated), {
-                          addSuffix: true,
-                          locale: getDateLocale(language)
-                        })}
+                        {formatRelative(source.updated, language)}
                       </p>
                       <p className="text-xs text-muted-foreground">
                         {new Date(source.updated).toLocaleString()}

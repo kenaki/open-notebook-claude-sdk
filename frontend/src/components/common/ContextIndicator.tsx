@@ -4,6 +4,7 @@ import { FileText, Lightbulb, StickyNote } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
+import { formatCompactNumber } from '@/lib/utils/format'
 
 interface ContextIndicatorProps {
   sourcesInsights: number
@@ -12,17 +13,6 @@ interface ContextIndicatorProps {
   tokenCount?: number
   charCount?: number
   className?: string
-}
-
-// Helper function to format large numbers with K/M suffixes
-function formatNumber(num: number): string {
-  if (num >= 1000000) {
-    return `${(num / 1000000).toFixed(1)}M`
-  }
-  if (num >= 1000) {
-    return `${(num / 1000).toFixed(1)}K`
-  }
-  return num.toString()
 }
 
 export function ContextIndicator({
@@ -101,13 +91,13 @@ export function ContextIndicator({
       {(tokenCount !== undefined || charCount !== undefined) && (
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           {tokenCount !== undefined && tokenCount > 0 && (
-            <span>{formatNumber(tokenCount)} tokens</span>
+            <span>{formatCompactNumber(tokenCount)} tokens</span>
           )}
           {tokenCount !== undefined && charCount !== undefined && tokenCount > 0 && charCount > 0 && (
             <span>/</span>
           )}
           {charCount !== undefined && charCount > 0 && (
-            <span>{formatNumber(charCount)} chars</span>
+            <span>{formatCompactNumber(charCount)} chars</span>
           )}
         </div>
       )}

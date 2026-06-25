@@ -119,8 +119,8 @@ class TestModelCreation:
 class TestModelsProviderAvailability:
     """Test suite for Models Provider Availability endpoint."""
 
-    @patch("api.routers.models.os.environ.get")
-    @patch("api.routers.models.AIFactory.get_available_providers")
+    @patch("api.provider_check.os.environ.get")
+    @patch("api.provider_check.AIFactory.get_available_providers")
     def test_generic_env_var_enables_all_modes(self, mock_esperanto, mock_env, client):
         """Test that OPENAI_COMPATIBLE_BASE_URL enables all 4 modes."""
 
@@ -157,8 +157,8 @@ class TestModelsProviderAvailability:
         assert "text_to_speech" in supported
         assert len(supported) == 4
 
-    @patch("api.routers.models.os.environ.get")
-    @patch("api.routers.models.AIFactory.get_available_providers")
+    @patch("api.provider_check.os.environ.get")
+    @patch("api.provider_check.AIFactory.get_available_providers")
     def test_mode_specific_env_vars_llm_embedding(
         self, mock_esperanto, mock_env, client
     ):
@@ -199,8 +199,8 @@ class TestModelsProviderAvailability:
         assert "text_to_speech" not in supported
         assert len(supported) == 2
 
-    @patch("api.routers.models.os.environ.get")
-    @patch("api.routers.models.AIFactory.get_available_providers")
+    @patch("api.provider_check.os.environ.get")
+    @patch("api.provider_check.AIFactory.get_available_providers")
     def test_no_env_vars_set(self, mock_esperanto, mock_env, client):
         """Test that openai-compatible is not available when no env vars are set."""
 
@@ -228,8 +228,8 @@ class TestModelsProviderAvailability:
         # Should not have supported_types entry
         assert "openai_compatible" not in data["supported_types"]
 
-    @patch("api.routers.models.os.environ.get")
-    @patch("api.routers.models.AIFactory.get_available_providers")
+    @patch("api.provider_check.os.environ.get")
+    @patch("api.provider_check.AIFactory.get_available_providers")
     def test_mixed_config_generic_and_mode_specific(
         self, mock_esperanto, mock_env, client
     ):
@@ -270,8 +270,8 @@ class TestModelsProviderAvailability:
         assert "text_to_speech" in supported
         assert len(supported) == 4
 
-    @patch("api.routers.models.os.environ.get")
-    @patch("api.routers.models.AIFactory.get_available_providers")
+    @patch("api.provider_check.os.environ.get")
+    @patch("api.provider_check.AIFactory.get_available_providers")
     def test_individual_mode_llm_only(self, mock_esperanto, mock_env, client):
         """Test individual mode-specific var (LLM only)."""
 
@@ -300,8 +300,8 @@ class TestModelsProviderAvailability:
         supported = data["supported_types"]["openai_compatible"]
         assert supported == ["language"]
 
-    @patch("api.routers.models.os.environ.get")
-    @patch("api.routers.models.AIFactory.get_available_providers")
+    @patch("api.provider_check.os.environ.get")
+    @patch("api.provider_check.AIFactory.get_available_providers")
     def test_individual_mode_embedding_only(self, mock_esperanto, mock_env, client):
         """Test individual mode-specific var (EMBEDDING only)."""
 
@@ -330,8 +330,8 @@ class TestModelsProviderAvailability:
         supported = data["supported_types"]["openai_compatible"]
         assert supported == ["embedding"]
 
-    @patch("api.routers.models.os.environ.get")
-    @patch("api.routers.models.AIFactory.get_available_providers")
+    @patch("api.provider_check.os.environ.get")
+    @patch("api.provider_check.AIFactory.get_available_providers")
     def test_individual_mode_stt_only(self, mock_esperanto, mock_env, client):
         """Test individual mode-specific var (STT only)."""
 
@@ -360,8 +360,8 @@ class TestModelsProviderAvailability:
         supported = data["supported_types"]["openai_compatible"]
         assert supported == ["speech_to_text"]
 
-    @patch("api.routers.models.os.environ.get")
-    @patch("api.routers.models.AIFactory.get_available_providers")
+    @patch("api.provider_check.os.environ.get")
+    @patch("api.provider_check.AIFactory.get_available_providers")
     def test_individual_mode_tts_only(self, mock_esperanto, mock_env, client):
         """Test individual mode-specific var (TTS only)."""
 

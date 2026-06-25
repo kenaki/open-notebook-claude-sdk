@@ -32,23 +32,13 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
+import { formatCompactNumber } from '@/lib/utils/format'
 
 type SourceMode = 'off' | 'insights' | 'full'
 
 interface NotebookSelection {
   sources: Record<string, SourceMode>
   notes: Record<string, SourceMode>
-}
-
-// Helper function to format large numbers with K/M suffixes
-function formatNumber(num: number): string {
-  if (num >= 1000000) {
-    return `${(num / 1000000).toFixed(1)}M`
-  }
-  if (num >= 1000) {
-    return `${(num / 1000).toFixed(1)}K`
-  }
-  return num.toString()
 }
 
 function hasSelections(selection?: NotebookSelection): boolean {
@@ -170,9 +160,9 @@ function ContentSelectionPanel({
           </Badge>
           {(tokenCount > 0 || charCount > 0) && (
             <span className="text-xs text-muted-foreground">
-              {tokenCount > 0 && tr.tokens.replace('{count}', formatNumber(tokenCount))}
+              {tokenCount > 0 && tr.tokens.replace('{count}', formatCompactNumber(tokenCount))}
               {tokenCount > 0 && charCount > 0 && ' / '}
-              {charCount > 0 && tr.chars.replace('{count}', formatNumber(charCount))}
+              {charCount > 0 && tr.chars.replace('{count}', formatCompactNumber(charCount))}
             </span>
           )}
         </div>

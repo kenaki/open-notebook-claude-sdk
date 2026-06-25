@@ -1,8 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { formatDistanceToNow } from 'date-fns'
-import { getDateLocale } from '@/lib/utils/date-locale'
+import { formatRelative } from '@/lib/utils/format'
 import { InfoIcon, RefreshCcw, Trash2 } from 'lucide-react'
 
 import { resolvePodcastAssetUrl } from '@/lib/api/podcasts'
@@ -204,12 +203,7 @@ export function EpisodeCard({ episode, onDelete, deleting, onRetry, retrying }: 
     }
   }, [episode.audio_url, episode.audio_file, t])
 
-  const distance = episode.created
-    ? formatDistanceToNow(new Date(episode.created), {
-        addSuffix: true,
-        locale: getDateLocale(language),
-      })
-    : null
+  const distance = episode.created ? formatRelative(episode.created, language) : null
 
   const createdLabel = distance
     ? t('podcasts.created').replace('{time}', distance)

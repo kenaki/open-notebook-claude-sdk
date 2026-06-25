@@ -14,8 +14,7 @@ import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { EmptyState } from '@/components/common/EmptyState'
 import { Badge } from '@/components/ui/badge'
 import { NoteEditorDialog } from './NoteEditorDialog'
-import { getDateLocale } from '@/lib/utils/date-locale'
-import { formatDistanceToNow } from 'date-fns'
+import { formatRelative } from '@/lib/utils/format'
 import { ContextToggle } from '@/components/common/ContextToggle'
 import { ContextMode } from '../[id]/page'
 import type { NoteContextDefault } from '@/lib/utils/source-context'
@@ -134,10 +133,7 @@ export function NotesColumn({
 
                       <div className="flex items-center gap-2">
                         <span className="text-xs text-muted-foreground">
-                          {formatDistanceToNow(new Date(note.updated), { 
-                            addSuffix: true,
-                            locale: getDateLocale(language)
-                          })}
+                          {formatRelative(note.updated, language)}
                         </span>
 
                         {/* Context toggle - only show if handler provided */}
