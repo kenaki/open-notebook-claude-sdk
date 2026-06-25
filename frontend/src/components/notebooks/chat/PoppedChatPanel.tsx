@@ -2,9 +2,9 @@
 
 import { ArrowLeftToLine, ArrowUpToLine, X, Quote } from 'lucide-react'
 import { ChatPanel } from '@/components/source/chat'
-import { ChatModelPicker } from '@/components/notebooks/ChatModelPicker'
-import { DeleteChatButton } from '@/components/notebooks/DeleteChatButton'
-import { deriveChatTitle } from '@/components/notebooks/ChatDock'
+import { ChatModelPicker } from './ChatModelPicker'
+import { DeleteChatButton } from './DeleteChatButton'
+import { deriveChatTitle } from './ChatDock'
 import { useChatWorkspaceStore } from '@/lib/stores/chat-workspace-store'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import type { BaseChatSession, MediaItem } from '@/lib/types/api'

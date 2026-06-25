@@ -1,7 +1,7 @@
 'use client'
 
 import { useParams } from 'next/navigation'
-import { NotebookWorkspaceProvider } from '@/components/notebooks/NotebookWorkspaceProvider'
+import { NotebookWorkspaceProvider } from '@/components/notebooks/workspace'
 
 /**
  * Layout shared by the notebook Chat Gallery (`/notebooks/[id]`) and the

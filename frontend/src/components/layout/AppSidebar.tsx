@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button'
 import { useAuth } from '@/lib/hooks/use-auth'
 import { useSidebarStore } from '@/lib/stores/sidebar-store'
 import { useUtilityDrawerStore } from '@/lib/stores/utility-drawer-store'
-import { useNotebookWorkspace } from '@/components/notebooks/NotebookWorkspaceProvider'
+import { useNotebookWorkspace } from '@/components/notebooks/workspace'
 import { useCreateDialogs } from '@/lib/hooks/use-create-dialogs'
 import {
   Tooltip,

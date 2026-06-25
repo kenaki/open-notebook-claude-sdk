@@ -11,7 +11,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { FOLLOW_DEFAULT, useChatModelOptions } from '@/components/notebooks/ChatModelPicker'
+import { FOLLOW_DEFAULT, useChatModelOptions } from './ChatModelPicker'
 import { useTranslation } from '@/lib/hooks/use-translation'
 
 interface SideChatDefaultMenuProps {

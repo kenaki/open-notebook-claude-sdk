@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo } from 'react'
 import { ChatPanel } from '@/components/source/chat'
-import { ChatModelPicker } from '@/components/notebooks/ChatModelPicker'
-import { SideChatDefaultMenu } from '@/components/notebooks/SideChatDefaultMenu'
-import { SideChatsMenu } from '@/components/notebooks/SideChatsMenu'
+import { ChatModelPicker } from './ChatModelPicker'
+import { SideChatDefaultMenu } from './SideChatDefaultMenu'
+import { SideChatsMenu } from './SideChatsMenu'
 import { useChatWorkspaceStore } from '@/lib/stores/chat-workspace-store'
 import { useChatDefaultsStore } from '@/lib/stores/chat-defaults-store'
 import { useTranslation } from '@/lib/hooks/use-translation'

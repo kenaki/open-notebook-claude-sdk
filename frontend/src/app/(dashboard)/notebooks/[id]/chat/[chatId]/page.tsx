@@ -2,9 +2,9 @@
 
 import { useParams } from 'next/navigation'
 import { AppShell } from '@/components/layout/AppShell'
-import { DeepDiveWorkspace } from '@/components/notebooks/DeepDiveWorkspace'
+import { DeepDiveWorkspace } from '@/components/notebooks/workspace'
 import { GallerySkeleton } from '@/components/notebooks/GallerySkeleton'
-import { useNotebookWorkspace } from '@/components/notebooks/NotebookWorkspaceProvider'
+import { useNotebookWorkspace } from '@/components/notebooks/workspace'
 import { Button } from '@/components/ui/button'
 import { useTranslation } from '@/lib/hooks/use-translation'
 

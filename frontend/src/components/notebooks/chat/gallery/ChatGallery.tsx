@@ -26,7 +26,7 @@ import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { EmptyState } from '@/components/common/EmptyState'
-import { useNotebookWorkspaceStrict } from '@/components/notebooks/NotebookWorkspaceProvider'
+import { useNotebookWorkspaceStrict } from '@/components/notebooks/workspace/NotebookWorkspaceProvider'
 import {
   useChatGalleryViewStore,
   type ChatGalleryViewMode,

@@ -2,7 +2,7 @@
 
 import { AppSidebar } from './AppSidebar'
 import { SetupBanner } from './SetupBanner'
-import { UtilityDrawer } from '@/components/notebooks/UtilityDrawer'
+import { UtilityDrawer } from '@/components/notebooks/workspace'
 
 interface AppShellProps {
   children: React.ReactNode

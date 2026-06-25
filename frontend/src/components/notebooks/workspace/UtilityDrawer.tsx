@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils'
 import { SourcesColumn } from '@/app/(dashboard)/notebooks/components/SourcesColumn'
 import { NotesColumn } from '@/app/(dashboard)/notebooks/components/NotesColumn'
 import { useUtilityDrawerStore } from '@/lib/stores/utility-drawer-store'
-import { useNotebookWorkspace } from '@/components/notebooks/NotebookWorkspaceProvider'
+import { useNotebookWorkspace } from './NotebookWorkspaceProvider'
 import { useTranslation } from '@/lib/hooks/use-translation'
 
 const DRAWER_WIDTH = 340

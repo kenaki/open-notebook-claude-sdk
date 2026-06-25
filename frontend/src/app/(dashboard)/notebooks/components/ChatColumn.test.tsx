@@ -5,7 +5,7 @@ import { useNotebookChat } from '@/lib/hooks/useNotebookChat'
 
 // ChatColumn is now presentational: the multiplexed chat hook is created by the
 // notebook page and passed in (Plan C / Chunk 8). The dock is stubbed.
-vi.mock('@/components/notebooks/ChatDock', () => ({
+vi.mock('@/components/notebooks/chat', () => ({
   ChatDock: () => <div data-testid="chat-panel" />
 }))
 

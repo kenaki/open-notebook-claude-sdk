@@ -1,6 +1,6 @@
 'use client'
 
-import { ChatDock } from '@/components/notebooks/ChatDock'
+import { ChatDock } from '@/components/notebooks/chat'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { Card, CardContent } from '@/components/ui/card'
 import { AlertCircle } from 'lucide-react'
