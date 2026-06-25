@@ -705,6 +705,23 @@ class ChatSession(ObjectModel):
             raise InvalidInputError("Source ID must be provided")
         return await self.relate("refers_to", source_id)
 
+    async def get_notebook_id(self) -> Optional[str]:
+        """Return the notebook this session is linked to via refers_to, or None."""
+        results = await repo_query(
+            "SELECT out FROM refers_to WHERE in = $id",
+            {"id": ensure_record_id(self.id)},
+        )
+        return results[0]["out"] if results else None
+
+    @classmethod
+    async def get_ids_for_source(cls, source_id: str) -> List[str]:
+        """Return session IDs that refer_to the given source_id."""
+        results = await repo_query(
+            "SELECT in FROM refers_to WHERE out = $source_id",
+            {"source_id": ensure_record_id(source_id)},
+        )
+        return [r["in"] for r in results]
+
 
 async def text_search(
     keyword: str, results: int, source: bool = True, note: bool = True
