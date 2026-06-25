@@ -1,4 +1,4 @@
-import axios, { AxiosResponse } from 'axios'
+import axios, { AxiosRequestConfig, AxiosResponse } from 'axios'
 import { getApiUrl } from '@/lib/config'
 
 // API client with runtime-configurable base URL
@@ -26,6 +26,18 @@ export const apiClient = axios.create({
   withCredentials: false,
 })
 
+export function getAuthToken(): string | null {
+  if (typeof window === 'undefined') return null
+  const authStorage = localStorage.getItem('auth-storage')
+  if (!authStorage) return null
+  try {
+    const { state } = JSON.parse(authStorage)
+    return state?.token ?? null
+  } catch {
+    return null
+  }
+}
+
 // Request interceptor to add base URL and auth header
 apiClient.interceptors.request.use(async (config) => {
   // Set the base URL dynamically from runtime config
@@ -34,18 +46,9 @@ apiClient.interceptors.request.use(async (config) => {
     config.baseURL = `${apiUrl}/api`
   }
 
-  if (typeof window !== 'undefined') {
-    const authStorage = localStorage.getItem('auth-storage')
-    if (authStorage) {
-      try {
-        const { state } = JSON.parse(authStorage)
-        if (state?.token) {
-          config.headers.Authorization = `Bearer ${state.token}`
-        }
-      } catch (error) {
-        console.error('Error parsing auth storage:', error)
-      }
-    }
+  const token = getAuthToken()
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
   }
 
   // Handle FormData vs JSON content types
@@ -73,5 +76,50 @@ apiClient.interceptors.response.use(
     return Promise.reject(error)
   }
 )
+
+export function get<T>(url: string, cfg?: AxiosRequestConfig): Promise<T> {
+  return apiClient.get<T>(url, cfg).then(r => r.data)
+}
+
+export function post<T>(url: string, body?: unknown, cfg?: AxiosRequestConfig): Promise<T> {
+  return apiClient.post<T>(url, body, cfg).then(r => r.data)
+}
+
+export function put<T>(url: string, body?: unknown, cfg?: AxiosRequestConfig): Promise<T> {
+  return apiClient.put<T>(url, body, cfg).then(r => r.data)
+}
+
+export function del<T = void>(url: string, cfg?: AxiosRequestConfig): Promise<T> {
+  return apiClient.delete<T>(url, cfg).then(r => r.data)
+}
+
+export async function streamFetch(url: string, body: unknown): Promise<ReadableStream<Uint8Array>> {
+  const token = getAuthToken()
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token && { Authorization: `Bearer ${token}` }),
+    },
+    body: JSON.stringify(body),
+  })
+
+  if (!response.ok) {
+    let errorMessage = `HTTP error! status: ${response.status}`
+    try {
+      const errorData = await response.json()
+      errorMessage = errorData.detail || errorData.message || errorMessage
+    } catch {
+      errorMessage = response.statusText || errorMessage
+    }
+    throw new Error(errorMessage)
+  }
+
+  if (!response.body) {
+    throw new Error('No response body received')
+  }
+
+  return response.body
+}
 
 export default apiClient
