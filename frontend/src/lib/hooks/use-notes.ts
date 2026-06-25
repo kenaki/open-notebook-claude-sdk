@@ -3,7 +3,7 @@ import { notesApi } from '@/lib/api/notes'
 import { QUERY_KEYS } from '@/lib/api/query-client'
 import { useToast } from '@/lib/hooks/use-toast'
 import { useTranslation } from '@/lib/hooks/use-translation'
-import { getApiErrorKey } from '@/lib/utils/error-handler'
+import { useErrorToast } from '@/lib/hooks/use-error-toast'
 import { CreateNoteRequest, UpdateNoteRequest } from '@/lib/types/api'
 
 export function useNotes(notebookId?: string) {
@@ -27,25 +27,20 @@ export function useCreateNote() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const { t } = useTranslation()
+  const errorToast = useErrorToast()
 
   return useMutation({
     mutationFn: (data: CreateNoteRequest) => notesApi.create(data),
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ 
-        queryKey: QUERY_KEYS.notes(variables.notebook_id) 
+      queryClient.invalidateQueries({
+        queryKey: QUERY_KEYS.notes(variables.notebook_id)
       })
       toast({
         title: t('common.success'),
         description: t('notebooks.noteCreatedSuccess'),
       })
     },
-    onError: (error: unknown) => {
-      toast({
-        title: t('common.error'),
-        description: getApiErrorKey(error, t('notebooks.failedToCreateNote')),
-        variant: 'destructive',
-      })
-    },
+    onError: (error) => errorToast(error, 'notebooks.failedToCreateNote'),
   })
 }
 
@@ -53,6 +48,7 @@ export function useUpdateNote() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const { t } = useTranslation()
+  const errorToast = useErrorToast()
 
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: UpdateNoteRequest }) =>
@@ -65,13 +61,7 @@ export function useUpdateNote() {
         description: t('notebooks.noteUpdatedSuccess'),
       })
     },
-    onError: (error: unknown) => {
-      toast({
-        title: t('common.error'),
-        description: getApiErrorKey(error, t('notebooks.failedToUpdateNote')),
-        variant: 'destructive',
-      })
-    },
+    onError: (error) => errorToast(error, 'notebooks.failedToUpdateNote'),
   })
 }
 
@@ -79,6 +69,7 @@ export function useDeleteNote() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const { t } = useTranslation()
+  const errorToast = useErrorToast()
 
   return useMutation({
     mutationFn: (id: string) => notesApi.delete(id),
@@ -91,12 +82,6 @@ export function useDeleteNote() {
         description: t('notebooks.noteDeletedSuccess'),
       })
     },
-    onError: (error: unknown) => {
-      toast({
-        title: t('common.error'),
-        description: getApiErrorKey(error, t('notebooks.failedToDeleteNote')),
-        variant: 'destructive',
-      })
-    },
+    onError: (error) => errorToast(error, 'notebooks.failedToDeleteNote'),
   })
 }

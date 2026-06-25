@@ -3,7 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { getApiErrorMessage } from '@/lib/utils/error-handler'
+import { toastApiError } from '@/lib/utils/error-handler'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { sourceChatApi } from '@/lib/api/source-chat'
 import {
@@ -63,8 +63,7 @@ export function useSourceChat(sourceId: string) {
       toast.success(t('chat.sessionCreated'))
     },
     onError: (err: unknown) => {
-      const error = err as { response?: { data?: { detail?: string } }, message?: string };
-      toast.error(getApiErrorMessage(error.response?.data?.detail || error.message, (key) => t(key), 'apiErrors.failedToCreateSession'))
+      toastApiError(err, t, 'apiErrors.failedToCreateSession')
     }
   })
 
@@ -78,8 +77,7 @@ export function useSourceChat(sourceId: string) {
       toast.success(t('chat.sessionUpdated'))
     },
     onError: (err: unknown) => {
-      const error = err as { response?: { data?: { detail?: string } }, message?: string };
-      toast.error(getApiErrorMessage(error.response?.data?.detail || error.message, (key) => t(key), 'apiErrors.failedToUpdateSession'))
+      toastApiError(err, t, 'apiErrors.failedToUpdateSession')
     }
   })
 
@@ -96,8 +94,7 @@ export function useSourceChat(sourceId: string) {
       toast.success(t('chat.sessionDeleted'))
     },
     onError: (err: unknown) => {
-      const error = err as { response?: { data?: { detail?: string } }, message?: string };
-      toast.error(getApiErrorMessage(error.response?.data?.detail || error.message, (key) => t(key), 'apiErrors.failedToDeleteSession'))
+      toastApiError(err, t, 'apiErrors.failedToDeleteSession')
     }
   })
 
@@ -114,9 +111,7 @@ export function useSourceChat(sourceId: string) {
         setCurrentSessionId(sessionId)
         queryClient.invalidateQueries({ queryKey: ['sourceChatSessions', sourceId] })
       } catch (err: unknown) {
-        const error = err as { response?: { data?: { detail?: string } }, message?: string };
-        console.error('Failed to create chat session:', error)
-        toast.error(getApiErrorMessage(error.response?.data?.detail || error.message, (key) => t(key), 'apiErrors.failedToCreateSession'))
+        toastApiError(err, t, 'apiErrors.failedToCreateSession')
         return
       }
     }
@@ -192,9 +187,7 @@ export function useSourceChat(sourceId: string) {
         }
       }
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } }, message?: string };
-      console.error('Error sending message:', error)
-      toast.error(getApiErrorMessage(error.response?.data?.detail || error.message, (key) => t(key), 'apiErrors.failedToSendMessage'))
+      toastApiError(err, t, 'apiErrors.failedToSendMessage')
       // Remove optimistic messages on error
       setMessages(prev => prev.filter(msg => !msg.id.startsWith('temp-')))
     } finally {

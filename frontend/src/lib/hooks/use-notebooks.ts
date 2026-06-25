@@ -7,7 +7,7 @@ import { chatApi } from '@/lib/api/chat'
 import { QUERY_KEYS } from '@/lib/api/query-client'
 import { useToast } from '@/lib/hooks/use-toast'
 import { useTranslation } from '@/lib/hooks/use-translation'
-import { getApiErrorKey } from '@/lib/utils/error-handler'
+import { useErrorToast } from '@/lib/hooks/use-error-toast'
 import { CreateNotebookRequest, UpdateNotebookRequest, NotebookResponse } from '@/lib/types/api'
 
 // Mirror the page size used by useNotebookSources so the prefetched first page
@@ -105,6 +105,7 @@ export function useCreateNotebook() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const { t } = useTranslation()
+  const errorToast = useErrorToast()
 
   return useMutation({
     mutationFn: (data: CreateNotebookRequest) => notebooksApi.create(data),
@@ -115,13 +116,7 @@ export function useCreateNotebook() {
         description: t('notebooks.createSuccess'),
       })
     },
-    onError: (error: unknown) => {
-      toast({
-        title: t('common.error'),
-        description: t(getApiErrorKey(error, t('common.error'))),
-        variant: 'destructive',
-      })
-    },
+    onError: (error) => errorToast(error),
   })
 }
 
@@ -129,6 +124,7 @@ export function useUpdateNotebook() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const { t } = useTranslation()
+  const errorToast = useErrorToast()
 
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: UpdateNotebookRequest }) =>
@@ -141,13 +137,7 @@ export function useUpdateNotebook() {
         description: t('notebooks.updateSuccess'),
       })
     },
-    onError: (error: unknown) => {
-      toast({
-        title: t('common.error'),
-        description: t(getApiErrorKey(error, t('common.error'))),
-        variant: 'destructive',
-      })
-    },
+    onError: (error) => errorToast(error),
   })
 }
 
@@ -163,6 +153,7 @@ export function useDeleteNotebook() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const { t } = useTranslation()
+  const errorToast = useErrorToast()
 
   return useMutation({
     mutationFn: ({
@@ -181,12 +172,6 @@ export function useDeleteNotebook() {
         description: t('notebooks.deleteSuccess'),
       })
     },
-    onError: (error: unknown) => {
-      toast({
-        title: t('common.error'),
-        description: t(getApiErrorKey(error, t('common.error'))),
-        variant: 'destructive',
-      })
-    },
+    onError: (error) => errorToast(error),
   })
 }

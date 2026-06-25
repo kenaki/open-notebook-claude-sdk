@@ -4,7 +4,7 @@ import { sourcesApi } from '@/lib/api/sources'
 import { QUERY_KEYS } from '@/lib/api/query-client'
 import { useToast } from '@/lib/hooks/use-toast'
 import { useTranslation } from '@/lib/hooks/use-translation'
-import { getApiErrorMessage } from '@/lib/utils/error-handler'
+import { useErrorToast } from '@/lib/hooks/use-error-toast'
 import {
   CreateSourceRequest,
   UpdateSourceRequest,
@@ -80,6 +80,7 @@ export function useCreateSource() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const { t } = useTranslation()
+  const errorToast = useErrorToast()
 
   return useMutation({
     mutationFn: (data: CreateSourceRequest) => sourcesApi.create(data),
@@ -120,13 +121,7 @@ export function useCreateSource() {
         })
       }
     },
-    onError: (error: unknown) => {
-      toast({
-        title: t('common.error'),
-        description: getApiErrorMessage(error, (key) => t(key), t('sources.failedToAddSource')),
-        variant: 'destructive',
-      })
-    },
+    onError: (error) => errorToast(error, 'sources.failedToAddSource'),
   })
 }
 
@@ -134,6 +129,7 @@ export function useUpdateSource() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const { t } = useTranslation()
+  const errorToast = useErrorToast()
 
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: UpdateSourceRequest }) =>
@@ -149,13 +145,7 @@ export function useUpdateSource() {
         description: t('sources.sourceUpdatedSuccess'),
       })
     },
-    onError: (error: unknown) => {
-      toast({
-        title: t('common.error'),
-        description: getApiErrorMessage(error, (key) => t(key), t('sources.failedToUpdateSource')),
-        variant: 'destructive',
-      })
-    },
+    onError: (error) => errorToast(error, 'sources.failedToUpdateSource'),
   })
 }
 
@@ -163,6 +153,7 @@ export function useDeleteSource() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const { t } = useTranslation()
+  const errorToast = useErrorToast()
 
   return useMutation({
     mutationFn: (id: string) => sourcesApi.delete(id),
@@ -178,13 +169,7 @@ export function useDeleteSource() {
         description: t('sources.sourceDeletedSuccess'),
       })
     },
-    onError: (error: unknown) => {
-      toast({
-        title: t('common.error'),
-        description: getApiErrorMessage(error, (key) => t(key), t('sources.failedToDeleteSource')),
-        variant: 'destructive',
-      })
-    },
+    onError: (error) => errorToast(error, 'sources.failedToDeleteSource'),
   })
 }
 
@@ -192,6 +177,7 @@ export function useFileUpload() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const { t } = useTranslation()
+  const errorToast = useErrorToast()
 
   return useMutation({
     mutationFn: ({ file, notebookId }: { file: File; notebookId: string }) =>
@@ -209,13 +195,7 @@ export function useFileUpload() {
         description: t('sources.fileUploadedSuccess'),
       })
     },
-    onError: (error: unknown) => {
-      toast({
-        title: t('common.error'),
-        description: getApiErrorMessage(error, (key) => t(key), t('sources.failedToUploadFile')),
-        variant: 'destructive',
-      })
-    },
+    onError: (error) => errorToast(error, 'sources.failedToUploadFile'),
   })
 }
 
@@ -250,6 +230,7 @@ export function useRetrySource() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const { t } = useTranslation()
+  const errorToast = useErrorToast()
 
   return useMutation({
     mutationFn: (sourceId: string) => sourcesApi.retry(sourceId),
@@ -268,13 +249,7 @@ export function useRetrySource() {
         description: t('sources.sourceRequeuedDesc'),
       })
     },
-    onError: (error: unknown) => {
-      toast({
-        title: t('common.error'),
-        description: getApiErrorMessage(error, (key) => t(key), t('sources.failedToRetry')),
-        variant: 'destructive',
-      })
-    },
+    onError: (error) => errorToast(error, 'sources.failedToRetry'),
   })
 }
 
@@ -282,6 +257,7 @@ export function useAddSourcesToNotebook() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const { t } = useTranslation()
+  const errorToast = useErrorToast()
 
   return useMutation({
     mutationFn: async ({ notebookId, sourceIds }: { notebookId: string; sourceIds: string[] }) => {
@@ -331,13 +307,7 @@ export function useAddSourcesToNotebook() {
         })
       }
     },
-    onError: (error: unknown) => {
-      toast({
-        title: t('common.error'),
-        description: getApiErrorMessage(error, (key) => t(key), t('sources.failedToAddSourcesToNotebook')),
-        variant: 'destructive',
-      })
-    },
+    onError: (error) => errorToast(error, 'sources.failedToAddSourcesToNotebook'),
   })
 }
 
@@ -345,6 +315,7 @@ export function useRemoveSourceFromNotebook() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const { t } = useTranslation()
+  const errorToast = useErrorToast()
 
   return useMutation({
     mutationFn: async ({ notebookId, sourceId }: { notebookId: string; sourceId: string }) => {
@@ -366,12 +337,6 @@ export function useRemoveSourceFromNotebook() {
         description: t('sources.sourceRemovedFromNotebook'),
       })
     },
-    onError: (error: unknown) => {
-      toast({
-        title: t('common.error'),
-        description: getApiErrorMessage(error, (key) => t(key), t('sources.failedToRemoveSourceFromNotebook')),
-        variant: 'destructive',
-      })
-    },
+    onError: (error) => errorToast(error, 'sources.failedToRemoveSourceFromNotebook'),
   })
 }

@@ -9,7 +9,7 @@ import {
 } from '@/lib/api/credentials'
 import { useToast } from '@/lib/hooks/use-toast'
 import { useTranslation } from '@/lib/hooks/use-translation'
-import { getApiErrorKey } from '@/lib/utils/error-handler'
+import { useErrorToast } from '@/lib/hooks/use-error-toast'
 import { MODEL_QUERY_KEYS } from '@/lib/hooks/use-models'
 
 export const CREDENTIAL_QUERY_KEYS = {
@@ -80,6 +80,7 @@ export function useCreateCredential() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const { t } = useTranslation()
+  const errorToast = useErrorToast()
 
   return useMutation({
     mutationFn: (data: CreateCredentialRequest) => credentialsApi.create(data),
@@ -91,13 +92,7 @@ export function useCreateCredential() {
         description: t('apiKeys.configSaveSuccess'),
       })
     },
-    onError: (error: unknown) => {
-      toast({
-        title: t('common.error'),
-        description: getApiErrorKey(error, t('common.error')),
-        variant: 'destructive',
-      })
-    },
+    onError: (error) => errorToast(error),
   })
 }
 
@@ -108,6 +103,7 @@ export function useUpdateCredential() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const { t } = useTranslation()
+  const errorToast = useErrorToast()
 
   return useMutation({
     mutationFn: ({
@@ -125,13 +121,7 @@ export function useUpdateCredential() {
         description: t('apiKeys.configUpdateSuccess'),
       })
     },
-    onError: (error: unknown) => {
-      toast({
-        title: t('common.error'),
-        description: getApiErrorKey(error, t('common.error')),
-        variant: 'destructive',
-      })
-    },
+    onError: (error) => errorToast(error),
   })
 }
 
@@ -142,6 +132,7 @@ export function useDeleteCredential() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const { t } = useTranslation()
+  const errorToast = useErrorToast()
 
   return useMutation({
     mutationFn: ({
@@ -160,13 +151,7 @@ export function useDeleteCredential() {
         description: t('apiKeys.configDeleteSuccess'),
       })
     },
-    onError: (error: unknown) => {
-      toast({
-        title: t('common.error'),
-        description: getApiErrorKey(error, t('common.error')),
-        variant: 'destructive',
-      })
-    },
+    onError: (error) => errorToast(error),
   })
 }
 
@@ -176,6 +161,7 @@ export function useDeleteCredential() {
 export function useTestCredential() {
   const { toast } = useToast()
   const { t } = useTranslation()
+  const errorToast = useErrorToast()
   const [testResults, setTestResults] = useState<Record<string, TestConnectionResult>>({})
 
   const mutation = useMutation({
@@ -195,13 +181,7 @@ export function useTestCredential() {
         })
       }
     },
-    onError: (error: unknown) => {
-      toast({
-        title: t('common.error'),
-        description: getApiErrorKey(error, t('apiKeys.testFailed')),
-        variant: 'destructive',
-      })
-    },
+    onError: (error) => errorToast(error, 'apiKeys.testFailed'),
   })
 
   return {
@@ -222,18 +202,11 @@ export function useTestCredential() {
  * Hook to discover models for a credential
  */
 export function useDiscoverModels() {
-  const { toast } = useToast()
-  const { t } = useTranslation()
+  const errorToast = useErrorToast()
 
   return useMutation({
     mutationFn: (credentialId: string) => credentialsApi.discover(credentialId),
-    onError: (error: unknown) => {
-      toast({
-        title: t('common.error'),
-        description: getApiErrorKey(error, t('apiKeys.syncFailed')),
-        variant: 'destructive',
-      })
-    },
+    onError: (error) => errorToast(error, 'apiKeys.syncFailed'),
   })
 }
 
@@ -244,6 +217,7 @@ export function useRegisterModels() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const { t } = useTranslation()
+  const errorToast = useErrorToast()
 
   return useMutation({
     mutationFn: ({
@@ -271,13 +245,7 @@ export function useRegisterModels() {
         })
       }
     },
-    onError: (error: unknown) => {
-      toast({
-        title: t('common.error'),
-        description: getApiErrorKey(error, t('apiKeys.syncFailed')),
-        variant: 'destructive',
-      })
-    },
+    onError: (error) => errorToast(error, 'apiKeys.syncFailed'),
   })
 }
 
@@ -288,6 +256,7 @@ export function useMigrateFromEnv() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const { t } = useTranslation()
+  const errorToast = useErrorToast()
 
   return useMutation({
     mutationFn: () => credentialsApi.migrateFromEnv(),
@@ -324,13 +293,7 @@ export function useMigrateFromEnv() {
         })
       }
     },
-    onError: (error: unknown) => {
-      toast({
-        title: t('common.error'),
-        description: getApiErrorKey(error, t('common.error')),
-        variant: 'destructive',
-      })
-    },
+    onError: (error) => errorToast(error),
   })
 }
 
@@ -341,6 +304,7 @@ export function useMigrateFromProviderConfig() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const { t } = useTranslation()
+  const errorToast = useErrorToast()
 
   return useMutation({
     mutationFn: () => credentialsApi.migrateFromProviderConfig(),
@@ -377,12 +341,6 @@ export function useMigrateFromProviderConfig() {
         })
       }
     },
-    onError: (error: unknown) => {
-      toast({
-        title: t('common.error'),
-        description: getApiErrorKey(error, t('common.error')),
-        variant: 'destructive',
-      })
-    },
+    onError: (error) => errorToast(error),
   })
 }

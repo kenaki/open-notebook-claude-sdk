@@ -3,7 +3,7 @@ import { settingsApi } from '@/lib/api/settings'
 import { QUERY_KEYS } from '@/lib/api/query-client'
 import { useToast } from '@/lib/hooks/use-toast'
 import { useTranslation } from '@/lib/hooks/use-translation'
-import { getApiErrorMessage } from '@/lib/utils/error-handler'
+import { useErrorToast } from '@/lib/hooks/use-error-toast'
 import { SettingsResponse } from '@/lib/types/api'
 
 export function useSettings() {
@@ -17,6 +17,7 @@ export function useUpdateSettings() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const { t } = useTranslation()
+  const errorToast = useErrorToast()
 
   return useMutation({
     mutationFn: (data: Partial<SettingsResponse>) => settingsApi.update(data),
@@ -27,12 +28,6 @@ export function useUpdateSettings() {
         description: t('common.saveSuccess'),
       })
     },
-    onError: (error: unknown) => {
-      toast({
-        title: t('common.error'),
-        description: getApiErrorMessage(error, (key) => t(key), 'common.error'),
-        variant: 'destructive',
-      })
-    },
+    onError: (error) => errorToast(error),
   })
 }

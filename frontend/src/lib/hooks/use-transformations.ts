@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { transformationsApi } from '@/lib/api/transformations'
 import { useToast } from '@/lib/hooks/use-toast'
 import { useTranslation } from '@/lib/hooks/use-translation'
-import { getApiErrorMessage } from '@/lib/utils/error-handler'
+import { useErrorToast } from '@/lib/hooks/use-error-toast'
 import {
   CreateTransformationRequest,
   UpdateTransformationRequest,
@@ -36,6 +36,7 @@ export function useCreateTransformation() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const { t } = useTranslation()
+  const errorToast = useErrorToast()
 
   return useMutation({
     mutationFn: (data: CreateTransformationRequest) => transformationsApi.create(data),
@@ -46,13 +47,7 @@ export function useCreateTransformation() {
         description: t('transformations.createSuccess'),
       })
     },
-    onError: (error: unknown) => {
-      toast({
-        title: t('common.error'),
-        description: getApiErrorMessage(error, (key) => t(key)),
-        variant: 'destructive',
-      })
-    },
+    onError: (error) => errorToast(error),
   })
 }
 
@@ -60,6 +55,7 @@ export function useUpdateTransformation() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const { t } = useTranslation()
+  const errorToast = useErrorToast()
 
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: UpdateTransformationRequest }) =>
@@ -72,13 +68,7 @@ export function useUpdateTransformation() {
         description: t('transformations.updateSuccess'),
       })
     },
-    onError: (error: unknown) => {
-      toast({
-        title: t('common.error'),
-        description: getApiErrorMessage(error, (key) => t(key)),
-        variant: 'destructive',
-      })
-    },
+    onError: (error) => errorToast(error),
   })
 }
 
@@ -86,6 +76,7 @@ export function useDeleteTransformation() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const { t } = useTranslation()
+  const errorToast = useErrorToast()
 
   return useMutation({
     mutationFn: (id: string) => transformationsApi.delete(id),
@@ -96,29 +87,16 @@ export function useDeleteTransformation() {
         description: t('transformations.deleteSuccess'),
       })
     },
-    onError: (error: unknown) => {
-      toast({
-        title: t('common.error'),
-        description: getApiErrorMessage(error, (key) => t(key)),
-        variant: 'destructive',
-      })
-    },
+    onError: (error) => errorToast(error),
   })
 }
 
 export function useExecuteTransformation() {
-  const { toast } = useToast()
-  const { t } = useTranslation()
+  const errorToast = useErrorToast()
 
   return useMutation({
     mutationFn: (data: ExecuteTransformationRequest) => transformationsApi.execute(data),
-    onError: (error: unknown) => {
-      toast({
-        title: t('common.error'),
-        description: getApiErrorMessage(error, (key) => t(key)),
-        variant: 'destructive',
-      })
-    },
+    onError: (error) => errorToast(error),
   })
 }
 
@@ -133,6 +111,7 @@ export function useUpdateDefaultPrompt() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const { t } = useTranslation()
+  const errorToast = useErrorToast()
 
   return useMutation({
     mutationFn: (prompt: { transformation_instructions: string }) => transformationsApi.updateDefaultPrompt(prompt),
@@ -143,12 +122,6 @@ export function useUpdateDefaultPrompt() {
         description: t('transformations.updateSuccess'),
       })
     },
-    onError: (error: unknown) => {
-      toast({
-        title: t('common.error'),
-        description: getApiErrorMessage(error, (key) => t(key)),
-        variant: 'destructive',
-      })
-    },
+    onError: (error) => errorToast(error),
   })
 }

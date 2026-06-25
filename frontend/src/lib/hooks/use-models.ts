@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { modelsApi } from '@/lib/api/models'
 import { useToast } from '@/lib/hooks/use-toast'
 import { useTranslation } from '@/lib/hooks/use-translation'
-import { getApiErrorKey } from '@/lib/utils/error-handler'
+import { useErrorToast } from '@/lib/hooks/use-error-toast'
 import { CreateModelRequest, ModelDefaults, ModelTestResult, UpdateClaudeAgentModelRequest } from '@/lib/types/models'
 
 export const MODEL_QUERY_KEYS = {
@@ -33,6 +33,7 @@ export function useCreateModel() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const { t } = useTranslation()
+  const errorToast = useErrorToast()
 
   return useMutation({
     mutationFn: (data: CreateModelRequest) => modelsApi.create(data),
@@ -43,13 +44,7 @@ export function useCreateModel() {
         description: t('models.saveSuccess'),
       })
     },
-    onError: (error: unknown) => {
-      toast({
-        title: t('common.error'),
-        description: getApiErrorKey(error, t('common.error')),
-        variant: 'destructive',
-      })
-    },
+    onError: (error) => errorToast(error),
   })
 }
 
@@ -57,6 +52,7 @@ export function useDeleteModel() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const { t } = useTranslation()
+  const errorToast = useErrorToast()
 
   return useMutation({
     mutationFn: (id: string) => modelsApi.delete(id),
@@ -69,13 +65,7 @@ export function useDeleteModel() {
         description: t('models.deleteSuccess'),
       })
     },
-    onError: (error: unknown) => {
-      toast({
-        title: t('common.error'),
-        description: getApiErrorKey(error, t('common.error')),
-        variant: 'destructive',
-      })
-    },
+    onError: (error) => errorToast(error),
   })
 }
 
@@ -90,6 +80,7 @@ export function useUpdateModelDefaults() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const { t } = useTranslation()
+  const errorToast = useErrorToast()
 
   return useMutation({
     mutationFn: (data: Partial<ModelDefaults>) => modelsApi.updateDefaults(data),
@@ -100,13 +91,7 @@ export function useUpdateModelDefaults() {
         description: t('models.saveSuccess'),
       })
     },
-    onError: (error: unknown) => {
-      toast({
-        title: t('common.error'),
-        description: getApiErrorKey(error, t('common.error')),
-        variant: 'destructive',
-      })
-    },
+    onError: (error) => errorToast(error),
   })
 }
 
@@ -129,6 +114,7 @@ export function useUpdateClaudeAgentModel() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const { t } = useTranslation()
+  const errorToast = useErrorToast()
 
   return useMutation({
     mutationFn: (data: UpdateClaudeAgentModelRequest) => modelsApi.updateClaudeAgentModel(data),
@@ -139,13 +125,7 @@ export function useUpdateClaudeAgentModel() {
         description: t('models.saveSuccess'),
       })
     },
-    onError: (error: unknown) => {
-      toast({
-        title: t('common.error'),
-        description: getApiErrorKey(error, t('common.error')),
-        variant: 'destructive',
-      })
-    },
+    onError: (error) => errorToast(error),
   })
 }
 
@@ -153,6 +133,7 @@ export function useAutoAssignDefaults() {
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const { t } = useTranslation()
+  const errorToast = useErrorToast()
 
   return useMutation({
     mutationFn: () => modelsApi.autoAssign(),
@@ -180,13 +161,7 @@ export function useAutoAssignDefaults() {
         })
       }
     },
-    onError: (error: unknown) => {
-      toast({
-        title: t('common.error'),
-        description: getApiErrorKey(error, t('common.error')),
-        variant: 'destructive',
-      })
-    },
+    onError: (error) => errorToast(error),
   })
 }
 
