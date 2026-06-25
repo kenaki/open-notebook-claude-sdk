@@ -1,3 +1,5 @@
+import { toast } from 'sonner'
+
 /**
  * Utility to map backend English error messages to i18n keys.
  */
@@ -74,6 +76,10 @@ export function getApiErrorMessage(
 
   // No mapping: return backend message directly (backend is responsible for making it user-friendly)
   return message;
+}
+
+export function toastApiError(err: unknown, t: (key: string) => string, fallbackKey?: string): void {
+  toast.error(getApiErrorMessage(err, t, fallbackKey))
 }
 
 /**
