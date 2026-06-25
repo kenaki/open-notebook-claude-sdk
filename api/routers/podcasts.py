@@ -12,6 +12,7 @@ from api.podcast_service import (
     PodcastGenerationResponse,
     PodcastService,
 )
+from api.routers._helpers import episode_to_response
 
 router = APIRouter()
 
@@ -117,18 +118,12 @@ async def list_podcast_episodes():
 
             response_episodes.append(
                 PodcastEpisodeResponse(
-                    id=str(episode.id),
-                    name=episode.name,
-                    episode_profile=episode.episode_profile,
-                    speaker_profile=episode.speaker_profile,
-                    briefing=episode.briefing,
-                    audio_file=episode.audio_file,
-                    audio_url=audio_url,
-                    transcript=episode.transcript,
-                    outline=episode.outline,
-                    created=str(episode.created) if episode.created else None,
-                    job_status=job_status,
-                    error_message=error_message,
+                    **episode_to_response(
+                        episode,
+                        job_status=job_status,
+                        error_message=error_message,
+                        audio_url=audio_url,
+                    )
                 )
             )
 
@@ -168,18 +163,12 @@ async def get_podcast_episode(episode_id: str):
                 audio_url = f"/api/podcasts/episodes/{episode.id}/audio"
 
         return PodcastEpisodeResponse(
-            id=str(episode.id),
-            name=episode.name,
-            episode_profile=episode.episode_profile,
-            speaker_profile=episode.speaker_profile,
-            briefing=episode.briefing,
-            audio_file=episode.audio_file,
-            audio_url=audio_url,
-            transcript=episode.transcript,
-            outline=episode.outline,
-            created=str(episode.created) if episode.created else None,
-            job_status=job_status,
-            error_message=error_message,
+            **episode_to_response(
+                episode,
+                job_status=job_status,
+                error_message=error_message,
+                audio_url=audio_url,
+            )
         )
 
     except Exception as e:

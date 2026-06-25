@@ -10,10 +10,9 @@ from langchain_core.runnables import RunnableConfig
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from api.routers._helpers import ensure_prefix, get_or_404
+from api.routers._helpers import ensure_prefix, get_or_404, session_to_response
 from api.upload_utils import resolve_within, save_uploaded_file
 from open_notebook.config import CHAT_MEDIA_FOLDER
-from open_notebook.database.repository import ensure_record_id, repo_query
 from open_notebook.domain.notebook import (
     ChatSession,
     Note,
@@ -332,16 +331,12 @@ async def get_sessions(notebook_id: str = Query(..., description="Notebook ID"))
 
             results.append(
                 ChatSessionResponse(
-                    id=session.id or "",
-                    title=session.title or "Untitled Session",
-                    notebook_id=notebook_id,
-                    created=str(session.created),
-                    updated=str(session.updated),
-                    message_count=msg_count,
-                    model_override=getattr(session, "model_override", None),
-                    parent_session_id=getattr(session, "parent_session_id", None),
-                    quote=getattr(session, "quote", None),
-                    tags=getattr(session, "tags", []) or [],
+                    **session_to_response(
+                        session,
+                        notebook_id=notebook_id,
+                        message_count=msg_count,
+                        default_title="Untitled Session",
+                    )
                 )
             )
 
@@ -375,16 +370,12 @@ async def create_session(request: CreateSessionRequest):
         await session.relate_to_notebook(request.notebook_id)
 
         return ChatSessionResponse(
-            id=session.id or "",
-            title=session.title or "",
-            notebook_id=request.notebook_id,
-            created=str(session.created),
-            updated=str(session.updated),
-            message_count=0,
-            model_override=session.model_override,
-            parent_session_id=session.parent_session_id,
-            quote=session.quote,
-            tags=session.tags or [],
+            **session_to_response(
+                session,
+                notebook_id=request.notebook_id,
+                message_count=0,
+                default_title="",
+            )
         )
     except Exception as e:
         logger.error(f"Error creating chat session: {str(e)}")
@@ -417,12 +408,7 @@ async def get_session(session_id: str):
                 messages.append(await _build_chat_message(msg, len(messages)))
 
         # Find notebook_id (we need to query the relationship)
-        notebook_query = await repo_query(
-            "SELECT out FROM refers_to WHERE in = $session_id",
-            {"session_id": ensure_record_id(full_session_id)},
-        )
-
-        notebook_id = notebook_query[0]["out"] if notebook_query else None
+        notebook_id = await session.get_notebook_id()
 
         if not notebook_id:
             # This might be an old session created before API migration
@@ -431,17 +417,13 @@ async def get_session(session_id: str):
             )
 
         return ChatSessionWithMessagesResponse(
-            id=session.id or "",
-            title=session.title or "Untitled Session",
-            notebook_id=notebook_id,
-            created=str(session.created),
-            updated=str(session.updated),
-            message_count=len(messages),
+            **session_to_response(
+                session,
+                notebook_id=notebook_id,
+                message_count=len(messages),
+                default_title="Untitled Session",
+            ),
             messages=messages,
-            model_override=getattr(session, "model_override", None),
-            parent_session_id=getattr(session, "parent_session_id", None),
-            quote=getattr(session, "quote", None),
-            tags=getattr(session, "tags", []) or [],
         )
     except Exception as e:
         logger.error(f"Error fetching session: {str(e)}")
@@ -475,26 +457,18 @@ async def update_session(session_id: str, request: UpdateSessionRequest):
         await session.save()
 
         # Find notebook_id
-        notebook_query = await repo_query(
-            "SELECT out FROM refers_to WHERE in = $session_id",
-            {"session_id": ensure_record_id(full_session_id)},
-        )
-        notebook_id = notebook_query[0]["out"] if notebook_query else None
+        notebook_id = await session.get_notebook_id()
 
         # Get message count from LangGraph state
         msg_count = await get_session_message_count(chat_graph, full_session_id)
 
         return ChatSessionResponse(
-            id=session.id or "",
-            title=session.title or "",
-            notebook_id=notebook_id,
-            created=str(session.created),
-            updated=str(session.updated),
-            message_count=msg_count,
-            model_override=session.model_override,
-            parent_session_id=getattr(session, "parent_session_id", None),
-            quote=getattr(session, "quote", None),
-            tags=getattr(session, "tags", []) or [],
+            **session_to_response(
+                session,
+                notebook_id=notebook_id,
+                message_count=msg_count,
+                default_title="",
+            )
         )
     except Exception as e:
         logger.error(f"Error updating session: {str(e)}")
@@ -525,13 +499,10 @@ async def execute_chat(request: ExecuteChatRequest):
         session = await get_or_404(ChatSession, full_session_id, "Session")
 
         # Fetch notebook linked to this session
-        notebook_query = await repo_query(
-            "SELECT out FROM refers_to WHERE in = $session_id",
-            {"session_id": ensure_record_id(full_session_id)},
-        )
         notebook = None
-        if notebook_query:
-            notebook = await Notebook.get(notebook_query[0]["out"])
+        notebook_id = await session.get_notebook_id()
+        if notebook_id:
+            notebook = await Notebook.get(notebook_id)
 
         # Determine model override (per-request override takes precedence over session-level)
         model_override = (

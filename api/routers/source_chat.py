@@ -132,14 +132,10 @@ async def get_source_chat_sessions(source_id: str = Path(..., description="Sourc
         source = await get_or_404(Source, full_source_id, "Source")
 
         # Get sessions that refer to this source - first get relations, then sessions
-        relations = await repo_query(
-            "SELECT in FROM refers_to WHERE out = $source_id",
-            {"source_id": ensure_record_id(full_source_id)},
-        )
+        session_ids = await ChatSession.get_ids_for_source(full_source_id)
 
         sessions = []
-        for relation in relations:
-            session_id_raw = relation.get("in")
+        for session_id_raw in session_ids:
             if session_id_raw:
                 session_id = str(session_id_raw)
 
@@ -195,15 +191,8 @@ async def get_source_chat_session(
         session = await get_or_404(ChatSession, full_session_id, "Session")
 
         # Verify session is related to this source
-        relation_query = await repo_query(
-            "SELECT * FROM refers_to WHERE in = $session_id AND out = $source_id",
-            {
-                "session_id": ensure_record_id(full_session_id),
-                "source_id": ensure_record_id(full_source_id),
-            },
-        )
-
-        if not relation_query:
+        linked_session_ids = await ChatSession.get_ids_for_source(full_source_id)
+        if not any(str(sid) == full_session_id for sid in linked_session_ids):
             raise HTTPException(
                 status_code=404, detail="Session not found for this source"
             )
@@ -281,15 +270,8 @@ async def update_source_chat_session(
         session = await get_or_404(ChatSession, full_session_id, "Session")
 
         # Verify session is related to this source
-        relation_query = await repo_query(
-            "SELECT * FROM refers_to WHERE in = $session_id AND out = $source_id",
-            {
-                "session_id": ensure_record_id(full_session_id),
-                "source_id": ensure_record_id(full_source_id),
-            },
-        )
-
-        if not relation_query:
+        linked_session_ids = await ChatSession.get_ids_for_source(full_source_id)
+        if not any(str(sid) == full_session_id for sid in linked_session_ids):
             raise HTTPException(
                 status_code=404, detail="Session not found for this source"
             )
@@ -339,15 +321,8 @@ async def delete_source_chat_session(
         session = await get_or_404(ChatSession, full_session_id, "Session")
 
         # Verify session is related to this source
-        relation_query = await repo_query(
-            "SELECT * FROM refers_to WHERE in = $session_id AND out = $source_id",
-            {
-                "session_id": ensure_record_id(full_session_id),
-                "source_id": ensure_record_id(full_source_id),
-            },
-        )
-
-        if not relation_query:
+        linked_session_ids = await ChatSession.get_ids_for_source(full_source_id)
+        if not any(str(sid) == full_session_id for sid in linked_session_ids):
             raise HTTPException(
                 status_code=404, detail="Session not found for this source"
             )
@@ -447,15 +422,8 @@ async def send_message_to_source_chat(
         session = await get_or_404(ChatSession, full_session_id, "Session")
 
         # Verify session is related to this source
-        relation_query = await repo_query(
-            "SELECT * FROM refers_to WHERE in = $session_id AND out = $source_id",
-            {
-                "session_id": ensure_record_id(full_session_id),
-                "source_id": ensure_record_id(full_source_id),
-            },
-        )
-
-        if not relation_query:
+        linked_session_ids = await ChatSession.get_ids_for_source(full_source_id)
+        if not any(str(sid) == full_session_id for sid in linked_session_ids):
             raise HTTPException(
                 status_code=404, detail="Session not found for this source"
             )
