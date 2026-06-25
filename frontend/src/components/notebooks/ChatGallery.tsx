@@ -32,6 +32,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/hooks/use-translation'
+import { EmptyState } from '@/components/common/EmptyState'
 import { useNotebookWorkspaceStrict } from '@/components/notebooks/NotebookWorkspaceProvider'
 import {
   useChatGalleryViewStore,
@@ -308,7 +309,18 @@ export function ChatGallery() {
         )}
 
         {mains.length === 0 ? (
-          <EmptyState onStart={startNewMainChat} />
+          <EmptyState
+            icon={MessageSquare}
+            title={t('gallery.emptyTitle')}
+            description={t('gallery.emptyHelper')}
+            action={
+              <Button onClick={startNewMainChat} className="mt-5 gap-2">
+                <Plus className="h-4 w-4" />
+                {t('gallery.startNewMainChat')}
+              </Button>
+            }
+            className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card/40 px-6 py-16"
+          />
         ) : filteredMains.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border bg-card/40 px-6 py-12 text-center text-sm text-muted-foreground">
             {t('gallery.noResults')}
@@ -1071,19 +1083,3 @@ function DeleteButton({ label, onDelete }: { label: string; onDelete: () => void
   )
 }
 
-function EmptyState({ onStart }: { onStart: () => void }) {
-  const { t } = useTranslation()
-  return (
-    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card/40 px-6 py-16 text-center">
-      <span className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-accent-soft text-primary">
-        <MessageSquare className="h-6 w-6" />
-      </span>
-      <h3 className="text-sm font-semibold text-foreground">{t('gallery.emptyTitle')}</h3>
-      <p className="mt-1 max-w-sm text-sm text-muted-foreground">{t('gallery.emptyHelper')}</p>
-      <Button onClick={onStart} className="mt-5 gap-2">
-        <Plus className="h-4 w-4" />
-        {t('gallery.startNewMainChat')}
-      </Button>
-    </div>
-  )
-}

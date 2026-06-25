@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useTranslation as useI18nTranslation } from 'react-i18next'
-import { Loader2 } from 'lucide-react'
+import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import {
   i18nEvents,
   I18N_LANGUAGE_CHANGE_END,
@@ -83,7 +83,7 @@ export function LanguageLoadingOverlay() {
       style={{ opacity: isChanging ? 1 : 0 }}
     >
       <div className="flex flex-col items-center gap-3">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <LoadingSpinner size="lg" className="text-primary" />
         <span className="text-sm text-muted-foreground">{loadingText}</span>
       </div>
     </div>

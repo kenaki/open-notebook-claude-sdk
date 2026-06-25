@@ -408,7 +408,7 @@ function CredentialFormDialog({
               {t('common.cancel')}
             </Button>
             <Button type="submit" disabled={!isValid || isSubmitting}>
-              {isSubmitting && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              {isSubmitting && <LoadingSpinner size="sm" className="mr-2" />}
               {isEditing ? t('common.save') : t('apiKeys.addConfig')}
             </Button>
           </div>
@@ -662,7 +662,7 @@ function DiscoverModelsDialog({
             onClick={handleRegister}
             disabled={totalSelected === 0 || registerModels.isPending}
           >
-            {registerModels.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+            {registerModels.isPending && <LoadingSpinner size="sm" className="mr-2" />}
             {t('common.add')} ({totalSelected})
           </Button>
         </DialogFooter>
@@ -756,7 +756,7 @@ function DeleteCredentialDialog({
           </Button>
           {credential.model_count > 0 && migrateToId && (
             <Button onClick={handleMigrate} disabled={deleteCredential.isPending}>
-              {deleteCredential.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              {deleteCredential.isPending && <LoadingSpinner size="sm" className="mr-2" />}
               Migrate & Delete
             </Button>
           )}
@@ -765,7 +765,7 @@ function DeleteCredentialDialog({
             onClick={credential.model_count > 0 ? handleDeleteWithModels : handleDeleteOnly}
             disabled={deleteCredential.isPending}
           >
-            {deleteCredential.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+            {deleteCredential.isPending && <LoadingSpinner size="sm" className="mr-2" />}
             {credential.model_count > 0 ? 'Delete with Models' : t('common.delete')}
           </Button>
         </DialogFooter>
@@ -861,7 +861,7 @@ function CredentialItem({
               disabled={isTestPending || !!credential.decryption_error}
               title={t('apiKeys.testConnection')}
             >
-              {isTestPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plug className="h-4 w-4" />}
+              {isTestPending ? <LoadingSpinner size="sm" /> : <Plug className="h-4 w-4" />}
               <span className="hidden sm:inline text-xs">Test</span>
             </Button>
             <Button

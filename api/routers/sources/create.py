@@ -1,0 +1,393 @@
+import asyncio
+import os
+from typing import Any, List, Optional
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from loguru import logger
+from surreal_commands import execute_command_sync
+
+from api.command_service import CommandService
+from api.models import SourceCreate, SourceResponse
+from api.routers.sources._helpers import source_to_response
+from api.upload_utils import save_uploaded_file
+from commands.source_commands import SourceProcessingInput
+from open_notebook.config import UPLOADS_FOLDER
+from open_notebook.database.repository import ensure_record_id, repo_query
+from open_notebook.domain.notebook import Asset, Notebook, Source
+from open_notebook.domain.transformation import Transformation
+from open_notebook.exceptions import InvalidInputError
+from pathlib import Path
+
+router = APIRouter()
+
+
+def parse_source_form_data(
+    type: str = Form(...),
+    notebook_id: Optional[str] = Form(None),
+    notebooks: Optional[str] = Form(None),
+    url: Optional[str] = Form(None),
+    content: Optional[str] = Form(None),
+    title: Optional[str] = Form(None),
+    transformations: Optional[str] = Form(None),
+    embed: str = Form("false"),
+    delete_source: str = Form("false"),
+    async_processing: str = Form("false"),
+    file: Optional[UploadFile] = File(None),
+) -> tuple[SourceCreate, Optional[UploadFile]]:
+    """Parse form data into SourceCreate model and return upload file separately."""
+    import json
+
+    def str_to_bool(value: str) -> bool:
+        return value.lower() in ("true", "1", "yes", "on")
+
+    notebooks_list = None
+    if notebooks:
+        try:
+            notebooks_list = json.loads(notebooks)
+        except json.JSONDecodeError:
+            logger.error(f"Invalid JSON in notebooks field: {notebooks}")
+            raise ValueError("Invalid JSON in notebooks field")
+
+    transformations_list = []
+    if transformations:
+        try:
+            transformations_list = json.loads(transformations)
+        except json.JSONDecodeError:
+            logger.error(f"Invalid JSON in transformations field: {transformations}")
+            raise ValueError("Invalid JSON in transformations field")
+
+    try:
+        source_data = SourceCreate(
+            type=type,
+            notebook_id=notebook_id,
+            notebooks=notebooks_list,
+            url=url,
+            content=content,
+            title=title,
+            file_path=None,
+            transformations=transformations_list,
+            embed=str_to_bool(embed),
+            delete_source=str_to_bool(delete_source),
+            async_processing=str_to_bool(async_processing),
+        )
+    except Exception as e:
+        logger.error(f"Failed to create SourceCreate instance: {e}")
+        raise
+
+    return source_data, file
+
+
+async def _submit_source_command(
+    source: Source,
+    content_state: dict,
+    notebook_ids: Optional[List[str]],
+    transformations: List[str],
+    embed: bool,
+) -> str:
+    """Submit a source processing command and update source.command. Returns command_id."""
+    import commands.source_commands  # noqa: F401
+
+    command_input = SourceProcessingInput(
+        source_id=str(source.id),
+        content_state=content_state,
+        notebook_ids=notebook_ids,
+        transformations=transformations,
+        embed=embed,
+    )
+    command_id = await CommandService.submit_command_job(
+        "open_notebook",
+        "process_source",
+        command_input.model_dump(),
+    )
+    source.command = ensure_record_id(command_id)
+    await source.save()
+    return command_id
+
+
+def _build_content_state(source_data: SourceCreate, file_path: Optional[str]) -> dict[str, Any]:
+    """Validate source type fields and return the content_state dict for processing."""
+    if source_data.type == "link":
+        if not source_data.url:
+            raise HTTPException(status_code=400, detail="URL is required for link type")
+        return {"url": source_data.url}
+
+    if source_data.type == "upload":
+        final_file_path = file_path or source_data.file_path
+        if not final_file_path:
+            raise HTTPException(
+                status_code=400,
+                detail="File upload or file_path is required for upload type",
+            )
+        uploads_resolved = Path(UPLOADS_FOLDER).resolve()
+        file_resolved = Path(final_file_path).resolve()
+        if not str(file_resolved).startswith(str(uploads_resolved) + os.sep):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid file path: must be within the uploads directory",
+            )
+        return {"file_path": final_file_path, "delete_source": source_data.delete_source}
+
+    if source_data.type == "text":
+        if not source_data.content:
+            raise HTTPException(status_code=400, detail="Content is required for text type")
+        return {"content": source_data.content}
+
+    raise HTTPException(
+        status_code=400,
+        detail="Invalid source type. Must be link, upload, or text",
+    )
+
+
+@router.post("/sources", response_model=SourceResponse)
+async def create_source(
+    form_data: tuple[SourceCreate, Optional[UploadFile]] = Depends(parse_source_form_data),
+):
+    """Create a new source with support for both JSON and multipart form data."""
+    source_data, upload_file = form_data
+    file_path = None
+
+    try:
+        for notebook_id in source_data.notebooks or []:
+            notebook = await Notebook.get(notebook_id)
+            if not notebook:
+                raise HTTPException(status_code=404, detail=f"Notebook {notebook_id} not found")
+
+        if upload_file and source_data.type == "upload":
+            try:
+                file_path = await save_uploaded_file(upload_file)
+            except Exception as e:
+                logger.error(f"File upload failed: {e}")
+                raise HTTPException(status_code=400, detail=f"File upload failed: {str(e)}")
+
+        content_state = _build_content_state(source_data, file_path)
+
+        transformation_ids = source_data.transformations or []
+        for trans_id in transformation_ids:
+            transformation = await Transformation.get(trans_id)
+            if not transformation:
+                raise HTTPException(status_code=404, detail=f"Transformation {trans_id} not found")
+
+        if source_data.async_processing:
+            logger.info("Using async processing path")
+
+            source_asset = None
+            if source_data.type == "link":
+                source_asset = Asset(url=source_data.url)
+            elif source_data.type == "upload":
+                source_asset = Asset(file_path=file_path or source_data.file_path)
+
+            source = Source(
+                title=source_data.title or "Processing...",
+                topics=[],
+                asset=source_asset,
+            )
+            await source.save()
+
+            for notebook_id in source_data.notebooks or []:
+                await source.add_to_notebook(notebook_id)
+
+            try:
+                command_id = await _submit_source_command(
+                    source,
+                    content_state,
+                    source_data.notebooks,
+                    transformation_ids,
+                    source_data.embed,
+                )
+                logger.info(f"Submitted async processing command: {command_id}")
+
+                return source_to_response(
+                    source,
+                    0,
+                    include_asset=False,
+                    command_id=command_id,
+                    status="new",
+                    processing_info={"async": True, "queued": True},
+                )
+
+            except Exception as e:
+                logger.error(f"Failed to submit async processing command: {e}")
+                try:
+                    await source.delete()
+                except Exception:
+                    pass
+                if file_path and upload_file:
+                    try:
+                        os.unlink(file_path)
+                    except Exception:
+                        pass
+                raise HTTPException(status_code=500, detail=f"Failed to queue processing: {str(e)}")
+
+        else:
+            logger.info("Using sync processing path")
+
+            try:
+                import commands.source_commands  # noqa: F401
+
+                source = Source(title=source_data.title or "Processing...", topics=[])
+                await source.save()
+
+                for notebook_id in source_data.notebooks or []:
+                    await source.add_to_notebook(notebook_id)
+
+                command_input = SourceProcessingInput(
+                    source_id=str(source.id),
+                    content_state=content_state,
+                    notebook_ids=source_data.notebooks,
+                    transformations=transformation_ids,
+                    embed=source_data.embed,
+                )
+
+                result = await asyncio.to_thread(
+                    execute_command_sync,
+                    "open_notebook",
+                    "process_source",
+                    command_input.model_dump(),
+                    timeout=300,
+                )
+
+                if not result.is_success():
+                    logger.error(f"Sync processing failed: {result.error_message}")
+                    try:
+                        await source.delete()
+                    except Exception:
+                        pass
+                    if file_path and upload_file:
+                        try:
+                            os.unlink(file_path)
+                        except Exception:
+                            pass
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Processing failed: {result.error_message}",
+                    )
+
+                if not source.id:
+                    raise HTTPException(status_code=500, detail="Source ID is missing")
+                processed_source = await Source.get(source.id)
+                if not processed_source:
+                    raise HTTPException(status_code=500, detail="Processed source not found")
+
+                embedded_chunks = await processed_source.get_embedded_chunks()
+                return source_to_response(processed_source, embedded_chunks)
+
+            except Exception as e:
+                logger.error(f"Sync processing failed: {e}")
+                if file_path and upload_file:
+                    try:
+                        os.unlink(file_path)
+                    except Exception:
+                        pass
+                raise
+
+    except HTTPException:
+        if file_path and upload_file:
+            try:
+                os.unlink(file_path)
+            except Exception:
+                pass
+        raise
+    except InvalidInputError as e:
+        if file_path and upload_file:
+            try:
+                os.unlink(file_path)
+            except Exception:
+                pass
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error creating source: {str(e)}")
+        if file_path and upload_file:
+            try:
+                os.unlink(file_path)
+            except Exception:
+                pass
+        raise HTTPException(status_code=500, detail=f"Error creating source: {str(e)}")
+
+
+@router.post("/sources/json", response_model=SourceResponse)
+async def create_source_json(source_data: SourceCreate):
+    """Create a new source using JSON payload (legacy endpoint for backward compatibility)."""
+    form_data = (source_data, None)
+    return await create_source(form_data)
+
+
+@router.post("/sources/{source_id}/retry", response_model=SourceResponse)
+async def retry_source_processing(source_id: str):
+    """Retry processing for a failed or stuck source."""
+    try:
+        source = await Source.get(source_id)
+        if not source:
+            raise HTTPException(status_code=404, detail="Source not found")
+
+        if source.command:
+            try:
+                status = await source.get_status()
+                if status in ["running", "queued"]:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Source is already processing. Cannot retry while processing is active.",
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to check current status for source {source_id}: {e}")
+
+        references = await repo_query(
+            "SELECT VALUE out FROM reference WHERE in = $source_id",
+            {"source_id": ensure_record_id(source.id or source_id)},
+        )
+        notebook_ids = [str(nb_id) for nb_id in references] if references else []
+
+        if not notebook_ids:
+            raise HTTPException(
+                status_code=400, detail="Source is not associated with any notebooks"
+            )
+
+        content_state = {}
+        if source.asset:
+            if source.asset.file_path:
+                content_state = {"file_path": source.asset.file_path, "delete_source": False}
+            elif source.asset.url:
+                content_state = {"url": source.asset.url}
+            else:
+                raise HTTPException(
+                    status_code=400, detail="Source asset has no file_path or url"
+                )
+        else:
+            if source.full_text:
+                content_state = {"content": source.full_text}
+            else:
+                raise HTTPException(
+                    status_code=400, detail="Cannot determine source content for retry"
+                )
+
+        try:
+            command_id = await _submit_source_command(
+                source,
+                content_state,
+                notebook_ids,
+                [],
+                True,
+            )
+            logger.info(f"Submitted retry processing command: {command_id} for source {source_id}")
+
+            embedded_chunks = await source.get_embedded_chunks()
+            return source_to_response(
+                source,
+                embedded_chunks,
+                command_id=command_id,
+                status="queued",
+                processing_info={"retry": True, "queued": True},
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to submit retry processing command for source {source_id}: {e}")
+            raise HTTPException(
+                status_code=500, detail=f"Failed to queue retry processing: {str(e)}"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrying source processing for {source_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error retrying source processing: {str(e)}"
+        )

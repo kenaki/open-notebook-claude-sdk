@@ -7,7 +7,8 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
-import { Bot, Send, Loader2, FileText, Lightbulb, StickyNote, Clock, Sparkles, Image as ImageIcon, Video as VideoIcon, X } from 'lucide-react'
+import { Bot, Send, FileText, Lightbulb, StickyNote, Clock, Sparkles, Image as ImageIcon, Video as VideoIcon, X } from 'lucide-react'
+import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
@@ -489,7 +490,7 @@ export function ChatPanel({
               className="px-3.5 py-2.5 bg-muted text-foreground"
               style={{ borderRadius: AI_BUBBLE_RADIUS }}
             >
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <LoadingSpinner size="sm" />
             </div>
           </div>
         )}
@@ -585,7 +586,7 @@ export function ChatPanel({
                 disabled={isStreaming || uploading}
                 onClick={() => videoInputRef.current?.click()}
               >
-                {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <VideoIcon className="h-4 w-4" />}
+                {uploading ? <LoadingSpinner size="sm" /> : <VideoIcon className="h-4 w-4" />}
               </Button>
             </div>
           )}
@@ -602,7 +603,7 @@ export function ChatPanel({
             className="h-8 w-8 flex-shrink-0 rounded-lg bg-[var(--primary-soft)] hover:bg-[var(--primary-soft)]"
           >
             {isStreaming ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <LoadingSpinner size="sm" />
             ) : (
               <Send className="h-4 w-4" />
             )}

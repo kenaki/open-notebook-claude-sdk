@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Progress } from '@/components/ui/progress'
 import { Loader2, AlertCircle, CheckCircle2, XCircle, Clock } from 'lucide-react'
+import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import {
   Accordion,
   AccordionContent,
@@ -202,7 +203,7 @@ export function RebuildEmbeddings() {
             >
               {rebuildMutation.isPending ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <LoadingSpinner size="sm" className="mr-2" />
                   {t('advanced.rebuild.starting')}
                 </>
               ) : (

@@ -27,9 +27,9 @@ class TestAsyncSourceAssetPersistence:
     """
 
     @pytest.mark.asyncio
-    @patch("api.routers.sources.CommandService.submit_command_job", new_callable=AsyncMock)
-    @patch("api.routers.sources.Source.add_to_notebook", new_callable=AsyncMock)
-    @patch("api.routers.sources.Notebook.get", new_callable=AsyncMock)
+    @patch("api.routers.sources.create.CommandService.submit_command_job", new_callable=AsyncMock)
+    @patch("api.routers.sources.create.Source.add_to_notebook", new_callable=AsyncMock)
+    @patch("api.routers.sources.create.Notebook.get", new_callable=AsyncMock)
     async def test_async_link_source_persists_url_asset(
         self, mock_nb_get, mock_add_nb, mock_submit, client
     ):
@@ -64,10 +64,10 @@ class TestAsyncSourceAssetPersistence:
         assert source.asset.file_path is None
 
     @pytest.mark.asyncio
-    @patch("api.routers.sources.CommandService.submit_command_job", new_callable=AsyncMock)
-    @patch("api.routers.sources.Source.add_to_notebook", new_callable=AsyncMock)
-    @patch("api.routers.sources.Notebook.get", new_callable=AsyncMock)
-    @patch("api.routers.sources.save_uploaded_file", new_callable=AsyncMock)
+    @patch("api.routers.sources.create.CommandService.submit_command_job", new_callable=AsyncMock)
+    @patch("api.routers.sources.create.Source.add_to_notebook", new_callable=AsyncMock)
+    @patch("api.routers.sources.create.Notebook.get", new_callable=AsyncMock)
+    @patch("api.routers.sources.create.save_uploaded_file", new_callable=AsyncMock)
     async def test_async_upload_source_persists_file_asset(
         self, mock_upload, mock_nb_get, mock_add_nb, mock_submit, client
     ):
@@ -103,9 +103,9 @@ class TestAsyncSourceAssetPersistence:
         assert source.asset.url is None
 
     @pytest.mark.asyncio
-    @patch("api.routers.sources.CommandService.submit_command_job", new_callable=AsyncMock)
-    @patch("api.routers.sources.Source.add_to_notebook", new_callable=AsyncMock)
-    @patch("api.routers.sources.Notebook.get", new_callable=AsyncMock)
+    @patch("api.routers.sources.create.CommandService.submit_command_job", new_callable=AsyncMock)
+    @patch("api.routers.sources.create.Source.add_to_notebook", new_callable=AsyncMock)
+    @patch("api.routers.sources.create.Notebook.get", new_callable=AsyncMock)
     async def test_async_text_source_has_no_asset(
         self, mock_nb_get, mock_add_nb, mock_submit, client
     ):
@@ -143,9 +143,9 @@ class TestRetrySourceProcessing:
     edge's in/out columns, not a non-existent `source` column (#861)."""
 
     @pytest.mark.asyncio
-    @patch("api.routers.sources.CommandService.submit_command_job", new_callable=AsyncMock)
-    @patch("api.routers.sources.repo_query", new_callable=AsyncMock)
-    @patch("api.routers.sources.Source.get", new_callable=AsyncMock)
+    @patch("api.routers.sources.create.CommandService.submit_command_job", new_callable=AsyncMock)
+    @patch("api.routers.sources.create.repo_query", new_callable=AsyncMock)
+    @patch("api.routers.sources.create.Source.get", new_callable=AsyncMock)
     async def test_retry_finds_notebooks_and_requeues(
         self, mock_get, mock_repo_query, mock_submit, client
     ):
@@ -180,8 +180,8 @@ class TestRetrySourceProcessing:
         assert str(source.command).startswith("command:")
 
     @pytest.mark.asyncio
-    @patch("api.routers.sources.repo_query", new_callable=AsyncMock)
-    @patch("api.routers.sources.Source.get", new_callable=AsyncMock)
+    @patch("api.routers.sources.create.repo_query", new_callable=AsyncMock)
+    @patch("api.routers.sources.create.Source.get", new_callable=AsyncMock)
     async def test_retry_400_only_when_truly_unlinked(
         self, mock_get, mock_repo_query, client
     ):
@@ -203,7 +203,7 @@ class TestGetSourceNotFound:
     must map it to 404 instead of catching it in its generic `except`."""
 
     @pytest.mark.asyncio
-    @patch("api.routers.sources.Source.get", new_callable=AsyncMock)
+    @patch("api.routers.sources.crud.Source.get", new_callable=AsyncMock)
     async def test_get_missing_source_returns_404(self, mock_get, client):
         from open_notebook.exceptions import NotFoundError
 

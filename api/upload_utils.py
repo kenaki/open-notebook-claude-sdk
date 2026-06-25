@@ -86,6 +86,21 @@ def resolve_audio_path(audio_file: str) -> Path:
     return Path(audio_file)
 
 
+def resolve_upload_file(file_path: str) -> tuple[str, str]:
+    """Validate file_path is within UPLOADS_FOLDER and exists; return (resolved_path, filename).
+
+    Raises PermissionError if the path escapes UPLOADS_FOLDER.
+    Raises FileNotFoundError if the file does not exist.
+    """
+    safe_root = os.path.realpath(UPLOADS_FOLDER)
+    resolved_path = os.path.realpath(file_path)
+    if not resolved_path.startswith(safe_root):
+        raise PermissionError(f"Path escapes upload directory: {resolved_path}")
+    if not os.path.exists(resolved_path):
+        raise FileNotFoundError(f"File not found: {resolved_path}")
+    return resolved_path, os.path.basename(resolved_path)
+
+
 def resolve_within(folder: str, filename: str) -> str:
     """Resolve ``filename`` inside ``folder`` with a path-traversal guard.
 

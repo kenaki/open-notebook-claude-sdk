@@ -1,6 +1,7 @@
 'use client'
 
-import { AlertCircle, Lightbulb, Loader2 } from 'lucide-react'
+import { AlertCircle, Lightbulb } from 'lucide-react'
+import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 
 import { EpisodeProfilesPanel } from '@/components/podcasts/EpisodeProfilesPanel'
 import { SpeakerProfilesPanel } from '@/components/podcasts/SpeakerProfilesPanel'
@@ -99,7 +100,7 @@ export function TemplatesTab() {
 
       {isLoading ? (
         <div className="flex items-center gap-3 rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" />
+          <LoadingSpinner size="sm" />
           {t('podcasts.loadingTemplates')}
         </div>
       ) : (

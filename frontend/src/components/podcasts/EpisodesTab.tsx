@@ -1,7 +1,8 @@
 'use client'
 
 import { useCallback, useState } from 'react'
-import { AlertCircle, Loader2, RefreshCcw } from 'lucide-react'
+import { AlertCircle, RefreshCcw } from 'lucide-react'
+import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 
 import { useDeletePodcastEpisode, usePodcastEpisodes, useRetryPodcastEpisode } from '@/lib/hooks/use-podcasts'
 import { EpisodeCard } from '@/components/podcasts/EpisodeCard'
@@ -100,7 +101,7 @@ export function EpisodesTab() {
             disabled={isFetching}
           >
             {isFetching ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              <LoadingSpinner size="sm" className="mr-2" />
             ) : (
               <RefreshCcw className="mr-2 h-4 w-4" />
             )}
@@ -129,7 +130,7 @@ export function EpisodesTab() {
 
       {isLoading ? (
         <div className="flex items-center gap-3 rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" />
+          <LoadingSpinner size="sm" />
           {t('podcasts.loadingEpisodes')}
         </div>
       ) : null}
