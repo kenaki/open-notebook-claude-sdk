@@ -1,4 +1,4 @@
-import { get, post, put, del } from './client'
+import { get, post, put, del, streamFetch } from './client'
 import {
   SourceChatSession,
   SourceChatSessionWithMessages,
@@ -34,37 +34,6 @@ export const sourceChatApi = {
     await del(`/sources/${sourceId}/chat/sessions/${sessionId}`)
   },
 
-  // Messaging with streaming — hand-rolled fetch kept intact for B9
-  sendMessage: (sourceId: string, sessionId: string, data: SendMessageRequest) => {
-    let token = null
-    if (typeof window !== 'undefined') {
-      const authStorage = localStorage.getItem('auth-storage')
-      if (authStorage) {
-        try {
-          const { state } = JSON.parse(authStorage)
-          if (state?.token) {
-            token = state.token
-          }
-        } catch (error) {
-          console.error('Error parsing auth storage:', error)
-        }
-      }
-    }
-
-    const url = `/api/sources/${sourceId}/chat/sessions/${sessionId}/messages`
-
-    return fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token && { 'Authorization': `Bearer ${token}` })
-      },
-      body: JSON.stringify(data)
-    }).then(response => {
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
-      }
-      return response.body
-    })
-  },
+  sendMessage: (sourceId: string, sessionId: string, data: SendMessageRequest) =>
+    streamFetch(`/api/sources/${sourceId}/chat/sessions/${sessionId}/messages`, data),
 }
