@@ -1,4 +1,4 @@
-import apiClient from './client'
+import { get, post, put, del } from './client'
 import {
   NotebookResponse,
   CreateNotebookRequest,
@@ -9,46 +9,36 @@ import {
 
 export const notebooksApi = {
   list: async (params?: { archived?: boolean; order_by?: string }) => {
-    const response = await apiClient.get<NotebookResponse[]>('/notebooks', { params })
-    return response.data
+    return get<NotebookResponse[]>('/notebooks', { params })
   },
 
   get: async (id: string) => {
-    const response = await apiClient.get<NotebookResponse>(`/notebooks/${id}`)
-    return response.data
+    return get<NotebookResponse>(`/notebooks/${id}`)
   },
 
   create: async (data: CreateNotebookRequest) => {
-    const response = await apiClient.post<NotebookResponse>('/notebooks', data)
-    return response.data
+    return post<NotebookResponse>('/notebooks', data)
   },
 
   update: async (id: string, data: UpdateNotebookRequest) => {
-    const response = await apiClient.put<NotebookResponse>(`/notebooks/${id}`, data)
-    return response.data
+    return put<NotebookResponse>(`/notebooks/${id}`, data)
   },
 
   deletePreview: async (id: string) => {
-    const response = await apiClient.get<NotebookDeletePreview>(
-      `/notebooks/${id}/delete-preview`
-    )
-    return response.data
+    return get<NotebookDeletePreview>(`/notebooks/${id}/delete-preview`)
   },
 
   delete: async (id: string, deleteExclusiveSources: boolean = false) => {
-    const response = await apiClient.delete<NotebookDeleteResponse>(`/notebooks/${id}`, {
+    return del<NotebookDeleteResponse>(`/notebooks/${id}`, {
       params: { delete_exclusive_sources: deleteExclusiveSources },
     })
-    return response.data
   },
 
   addSource: async (notebookId: string, sourceId: string) => {
-    const response = await apiClient.post(`/notebooks/${notebookId}/sources/${sourceId}`)
-    return response.data
+    return post(`/notebooks/${notebookId}/sources/${sourceId}`)
   },
 
   removeSource: async (notebookId: string, sourceId: string) => {
-    const response = await apiClient.delete(`/notebooks/${notebookId}/sources/${sourceId}`)
-    return response.data
+    return del(`/notebooks/${notebookId}/sources/${sourceId}`)
   },
 }

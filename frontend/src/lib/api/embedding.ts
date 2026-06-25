@@ -1,4 +1,4 @@
-import apiClient from './client'
+import { get, post } from './client'
 
 export interface EmbedContentRequest {
   item_id: string
@@ -59,21 +59,18 @@ export interface RebuildStatusResponse {
 
 export const embeddingApi = {
   embedContent: async (itemId: string, itemType: 'source' | 'note', asyncProcessing = false): Promise<EmbedContentResponse> => {
-    const response = await apiClient.post<EmbedContentResponse>('/embed', {
+    return post<EmbedContentResponse>('/embed', {
       item_id: itemId,
       item_type: itemType,
-      async_processing: asyncProcessing
+      async_processing: asyncProcessing,
     })
-    return response.data
   },
 
   rebuildEmbeddings: async (request: RebuildEmbeddingsRequest): Promise<RebuildEmbeddingsResponse> => {
-    const response = await apiClient.post<RebuildEmbeddingsResponse>('/embeddings/rebuild', request)
-    return response.data
+    return post<RebuildEmbeddingsResponse>('/embeddings/rebuild', request)
   },
 
   getRebuildStatus: async (commandId: string): Promise<RebuildStatusResponse> => {
-    const response = await apiClient.get<RebuildStatusResponse>(`/embeddings/rebuild/${commandId}/status`)
-    return response.data
-  }
+    return get<RebuildStatusResponse>(`/embeddings/rebuild/${commandId}/status`)
+  },
 }

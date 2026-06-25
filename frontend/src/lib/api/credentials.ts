@@ -1,4 +1,4 @@
-import apiClient from './client'
+import { get, post, put, del } from './client'
 
 // Types for credentials API
 export interface Credential {
@@ -119,16 +119,14 @@ export const credentialsApi = {
    * Get configuration status for all providers
    */
   getStatus: async (): Promise<CredentialStatus> => {
-    const response = await apiClient.get<CredentialStatus>('/credentials/status')
-    return response.data
+    return get<CredentialStatus>('/credentials/status')
   },
 
   /**
    * Get environment variable status for all providers
    */
   getEnvStatus: async (): Promise<EnvStatus> => {
-    const response = await apiClient.get<EnvStatus>('/credentials/env-status')
-    return response.data
+    return get<EnvStatus>('/credentials/env-status')
   },
 
   /**
@@ -136,40 +134,35 @@ export const credentialsApi = {
    */
   list: async (provider?: string): Promise<Credential[]> => {
     const params = provider ? { provider } : {}
-    const response = await apiClient.get<Credential[]>('/credentials', { params })
-    return response.data
+    return get<Credential[]>('/credentials', { params })
   },
 
   /**
    * List credentials for a specific provider
    */
   listByProvider: async (provider: string): Promise<Credential[]> => {
-    const response = await apiClient.get<Credential[]>(`/credentials/by-provider/${provider}`)
-    return response.data
+    return get<Credential[]>(`/credentials/by-provider/${provider}`)
   },
 
   /**
    * Get a specific credential by ID
    */
   get: async (credentialId: string): Promise<Credential> => {
-    const response = await apiClient.get<Credential>(`/credentials/${credentialId}`)
-    return response.data
+    return get<Credential>(`/credentials/${credentialId}`)
   },
 
   /**
    * Create a new credential
    */
   create: async (data: CreateCredentialRequest): Promise<Credential> => {
-    const response = await apiClient.post<Credential>('/credentials', data)
-    return response.data
+    return post<Credential>('/credentials', data)
   },
 
   /**
    * Update an existing credential
    */
   update: async (credentialId: string, data: UpdateCredentialRequest): Promise<Credential> => {
-    const response = await apiClient.put<Credential>(`/credentials/${credentialId}`, data)
-    return response.data
+    return put<Credential>(`/credentials/${credentialId}`, data)
   },
 
   /**
@@ -182,31 +175,21 @@ export const credentialsApi = {
     const params: Record<string, string | boolean> = {}
     if (options?.delete_models) params.delete_models = true
     if (options?.migrate_to) params.migrate_to = options.migrate_to
-    const response = await apiClient.delete<CredentialDeleteResponse>(
-      `/credentials/${credentialId}`,
-      { params }
-    )
-    return response.data
+    return del<CredentialDeleteResponse>(`/credentials/${credentialId}`, { params })
   },
 
   /**
    * Test connection for a credential
    */
   test: async (credentialId: string): Promise<TestConnectionResult> => {
-    const response = await apiClient.post<TestConnectionResult>(
-      `/credentials/${credentialId}/test`
-    )
-    return response.data
+    return post<TestConnectionResult>(`/credentials/${credentialId}/test`)
   },
 
   /**
    * Discover models using a credential's API key
    */
   discover: async (credentialId: string): Promise<DiscoverModelsResponse> => {
-    const response = await apiClient.post<DiscoverModelsResponse>(
-      `/credentials/${credentialId}/discover`
-    )
-    return response.data
+    return post<DiscoverModelsResponse>(`/credentials/${credentialId}/discover`)
   },
 
   /**
@@ -216,28 +199,20 @@ export const credentialsApi = {
     credentialId: string,
     data: RegisterModelsRequest
   ): Promise<RegisterModelsResponse> => {
-    const response = await apiClient.post<RegisterModelsResponse>(
-      `/credentials/${credentialId}/register-models`,
-      data
-    )
-    return response.data
+    return post<RegisterModelsResponse>(`/credentials/${credentialId}/register-models`, data)
   },
 
   /**
    * Migrate from ProviderConfig to individual credentials
    */
   migrateFromProviderConfig: async (): Promise<MigrationResult> => {
-    const response = await apiClient.post<MigrationResult>(
-      '/credentials/migrate-from-provider-config'
-    )
-    return response.data
+    return post<MigrationResult>('/credentials/migrate-from-provider-config')
   },
 
   /**
    * Migrate from environment variables to credentials
    */
   migrateFromEnv: async (): Promise<MigrationResult> => {
-    const response = await apiClient.post<MigrationResult>('/credentials/migrate-from-env')
-    return response.data
+    return post<MigrationResult>('/credentials/migrate-from-env')
   },
 }

@@ -1,4 +1,4 @@
-import apiClient from './client'
+import { get, post, put, del } from './client'
 import {
   NotebookChatSession,
   NotebookChatSessionWithMessages,
@@ -14,58 +14,35 @@ import {
 export const chatApi = {
   // Session management
   listSessions: async (notebookId: string) => {
-    const response = await apiClient.get<NotebookChatSession[]>(
-      `/chat/sessions`,
-      { params: { notebook_id: notebookId } }
-    )
-    return response.data
+    return get<NotebookChatSession[]>(`/chat/sessions`, { params: { notebook_id: notebookId } })
   },
 
   createSession: async (data: CreateNotebookChatSessionRequest) => {
-    const response = await apiClient.post<NotebookChatSession>(
-      `/chat/sessions`,
-      data
-    )
-    return response.data
+    return post<NotebookChatSession>(`/chat/sessions`, data)
   },
 
   getSession: async (sessionId: string) => {
-    const response = await apiClient.get<NotebookChatSessionWithMessages>(
-      `/chat/sessions/${sessionId}`
-    )
-    return response.data
+    return get<NotebookChatSessionWithMessages>(`/chat/sessions/${sessionId}`)
   },
 
   updateSession: async (sessionId: string, data: UpdateNotebookChatSessionRequest) => {
-    const response = await apiClient.put<NotebookChatSession>(
-      `/chat/sessions/${sessionId}`,
-      data
-    )
-    return response.data
+    return put<NotebookChatSession>(`/chat/sessions/${sessionId}`, data)
   },
 
   deleteSession: async (sessionId: string) => {
-    await apiClient.delete(`/chat/sessions/${sessionId}`)
+    await del(`/chat/sessions/${sessionId}`)
   },
 
   // Messaging (synchronous, no streaming)
   sendMessage: async (data: SendNotebookChatMessageRequest) => {
-    const response = await apiClient.post<{
+    return post<{
       session_id: string
       messages: NotebookChatMessage[]
-    }>(
-      `/chat/execute`,
-      data
-    )
-    return response.data
+    }>(`/chat/execute`, data)
   },
 
   buildContext: async (data: BuildContextRequest) => {
-    const response = await apiClient.post<BuildContextResponse>(
-      `/chat/context`,
-      data
-    )
-    return response.data
+    return post<BuildContextResponse>(`/chat/context`, data)
   },
 
   // Upload an image/video to attach to a chat message (Plan D / Chunk 12).
@@ -74,8 +51,7 @@ export const chatApi = {
   uploadMedia: async (file: File) => {
     const formData = new FormData()
     formData.append('file', file)
-    const response = await apiClient.post<MediaItem>(`/chat/media`, formData)
-    return response.data
+    return post<MediaItem>(`/chat/media`, formData)
   },
 }
 

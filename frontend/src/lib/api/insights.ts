@@ -1,4 +1,4 @@
-import apiClient from './client'
+import { get, post, del } from './client'
 
 export interface SourceInsightResponse {
   id: string
@@ -30,32 +30,23 @@ export interface CommandJobStatusResponse {
 
 export const insightsApi = {
   listForSource: async (sourceId: string) => {
-    const response = await apiClient.get<SourceInsightResponse[]>(`/sources/${sourceId}/insights`)
-    return response.data
+    return get<SourceInsightResponse[]>(`/sources/${sourceId}/insights`)
   },
 
   get: async (insightId: string) => {
-    const response = await apiClient.get<SourceInsightResponse>(`/insights/${insightId}`)
-    return response.data
+    return get<SourceInsightResponse>(`/insights/${insightId}`)
   },
 
   create: async (sourceId: string, data: CreateSourceInsightRequest) => {
-    const response = await apiClient.post<InsightCreationResponse>(
-      `/sources/${sourceId}/insights`,
-      data
-    )
-    return response.data
+    return post<InsightCreationResponse>(`/sources/${sourceId}/insights`, data)
   },
 
   delete: async (insightId: string) => {
-    await apiClient.delete(`/insights/${insightId}`)
+    await del(`/insights/${insightId}`)
   },
 
   getCommandStatus: async (commandId: string) => {
-    const response = await apiClient.get<CommandJobStatusResponse>(
-      `/commands/jobs/${commandId}`
-    )
-    return response.data
+    return get<CommandJobStatusResponse>(`/commands/jobs/${commandId}`)
   },
 
   /**
@@ -90,5 +81,5 @@ export const insightsApi = {
     // Timeout
     console.warn('Command polling timed out')
     return false
-  }
+  },
 }

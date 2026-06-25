@@ -1,5 +1,5 @@
-import apiClient from './client'
 import { getApiUrl } from '@/lib/config'
+import { get, post, put, del } from './client'
 import {
   PodcastEpisode,
   EpisodeProfile,
@@ -32,95 +32,62 @@ export async function resolvePodcastAssetUrl(path?: string | null): Promise<stri
 
 export const podcastsApi = {
   listEpisodes: async () => {
-    const response = await apiClient.get<PodcastEpisode[]>('/podcasts/episodes')
-    return response.data
+    return get<PodcastEpisode[]>('/podcasts/episodes')
   },
 
   deleteEpisode: async (episodeId: string) => {
-    await apiClient.delete(`/podcasts/episodes/${episodeId}`)
+    await del(`/podcasts/episodes/${episodeId}`)
   },
 
   retryEpisode: async (episodeId: string) => {
-    const response = await apiClient.post<{ job_id: string; message: string }>(
-      `/podcasts/episodes/${episodeId}/retry`
-    )
-    return response.data
+    return post<{ job_id: string; message: string }>(`/podcasts/episodes/${episodeId}/retry`)
   },
 
   listEpisodeProfiles: async () => {
-    const response = await apiClient.get<EpisodeProfile[]>('/episode-profiles')
-    return response.data
+    return get<EpisodeProfile[]>('/episode-profiles')
   },
 
   createEpisodeProfile: async (payload: EpisodeProfileInput) => {
-    const response = await apiClient.post<EpisodeProfile>(
-      '/episode-profiles',
-      payload
-    )
-    return response.data
+    return post<EpisodeProfile>('/episode-profiles', payload)
   },
 
   updateEpisodeProfile: async (profileId: string, payload: EpisodeProfileInput) => {
-    const response = await apiClient.put<EpisodeProfile>(
-      `/episode-profiles/${profileId}`,
-      payload
-    )
-    return response.data
+    return put<EpisodeProfile>(`/episode-profiles/${profileId}`, payload)
   },
 
   deleteEpisodeProfile: async (profileId: string) => {
-    await apiClient.delete(`/episode-profiles/${profileId}`)
+    await del(`/episode-profiles/${profileId}`)
   },
 
   duplicateEpisodeProfile: async (profileId: string) => {
-    const response = await apiClient.post<EpisodeProfile>(
-      `/episode-profiles/${profileId}/duplicate`
-    )
-    return response.data
+    return post<EpisodeProfile>(`/episode-profiles/${profileId}/duplicate`)
   },
 
   listSpeakerProfiles: async () => {
-    const response = await apiClient.get<SpeakerProfile[]>('/speaker-profiles')
-    return response.data
+    return get<SpeakerProfile[]>('/speaker-profiles')
   },
 
   createSpeakerProfile: async (payload: SpeakerProfileInput) => {
-    const response = await apiClient.post<SpeakerProfile>(
-      '/speaker-profiles',
-      payload
-    )
-    return response.data
+    return post<SpeakerProfile>('/speaker-profiles', payload)
   },
 
   updateSpeakerProfile: async (profileId: string, payload: SpeakerProfileInput) => {
-    const response = await apiClient.put<SpeakerProfile>(
-      `/speaker-profiles/${profileId}`,
-      payload
-    )
-    return response.data
+    return put<SpeakerProfile>(`/speaker-profiles/${profileId}`, payload)
   },
 
   deleteSpeakerProfile: async (profileId: string) => {
-    await apiClient.delete(`/speaker-profiles/${profileId}`)
+    await del(`/speaker-profiles/${profileId}`)
   },
 
   duplicateSpeakerProfile: async (profileId: string) => {
-    const response = await apiClient.post<SpeakerProfile>(
-      `/speaker-profiles/${profileId}/duplicate`
-    )
-    return response.data
+    return post<SpeakerProfile>(`/speaker-profiles/${profileId}/duplicate`)
   },
 
   generatePodcast: async (payload: PodcastGenerationRequest) => {
-    const response = await apiClient.post<PodcastGenerationResponse>(
-      '/podcasts/generate',
-      payload
-    )
-    return response.data
+    return post<PodcastGenerationResponse>('/podcasts/generate', payload)
   },
 
   listLanguages: async () => {
-    const response = await apiClient.get<Language[]>('/languages')
-    return response.data
+    return get<Language[]>('/languages')
   },
 }

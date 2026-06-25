@@ -1,4 +1,4 @@
-import apiClient from './client'
+import { get, post, put, del } from './client'
 import {
   SourceChatSession,
   SourceChatSessionWithMessages,
@@ -12,42 +12,30 @@ export const sourceChatApi = {
   createSession: async (sourceId: string, data: Omit<CreateSourceChatSessionRequest, 'source_id'>) => {
     // Extract clean ID without "source:" prefix for the request body
     const cleanId = sourceId.startsWith('source:') ? sourceId.slice(7) : sourceId
-    const response = await apiClient.post<SourceChatSession>(
+    return post<SourceChatSession>(
       `/sources/${sourceId}/chat/sessions`,
-      { ...data, source_id: cleanId }  // Include source_id in the request body
+      { ...data, source_id: cleanId }
     )
-    return response.data
   },
 
   listSessions: async (sourceId: string) => {
-    const response = await apiClient.get<SourceChatSession[]>(
-      `/sources/${sourceId}/chat/sessions`
-    )
-    return response.data
+    return get<SourceChatSession[]>(`/sources/${sourceId}/chat/sessions`)
   },
 
   getSession: async (sourceId: string, sessionId: string) => {
-    const response = await apiClient.get<SourceChatSessionWithMessages>(
-      `/sources/${sourceId}/chat/sessions/${sessionId}`
-    )
-    return response.data
+    return get<SourceChatSessionWithMessages>(`/sources/${sourceId}/chat/sessions/${sessionId}`)
   },
 
   updateSession: async (sourceId: string, sessionId: string, data: UpdateSourceChatSessionRequest) => {
-    const response = await apiClient.put<SourceChatSession>(
-      `/sources/${sourceId}/chat/sessions/${sessionId}`,
-      data
-    )
-    return response.data
+    return put<SourceChatSession>(`/sources/${sourceId}/chat/sessions/${sessionId}`, data)
   },
 
   deleteSession: async (sourceId: string, sessionId: string) => {
-    await apiClient.delete(`/sources/${sourceId}/chat/sessions/${sessionId}`)
+    await del(`/sources/${sourceId}/chat/sessions/${sessionId}`)
   },
 
-  // Messaging with streaming
+  // Messaging with streaming — hand-rolled fetch kept intact for B9
   sendMessage: (sourceId: string, sessionId: string, data: SendMessageRequest) => {
-    // Get auth token using the same logic as apiClient interceptor
     let token = null
     if (typeof window !== 'undefined') {
       const authStorage = localStorage.getItem('auth-storage')
@@ -63,11 +51,8 @@ export const sourceChatApi = {
       }
     }
 
-    // Use relative URL to leverage Next.js rewrites
-    // This works both in dev (Next.js proxy) and production (Docker network)
     const url = `/api/sources/${sourceId}/chat/sessions/${sessionId}/messages`
 
-    // Use fetch with ReadableStream for SSE
     return fetch(url, {
       method: 'POST',
       headers: {
@@ -81,5 +66,5 @@ export const sourceChatApi = {
       }
       return response.body
     })
-  }
+  },
 }

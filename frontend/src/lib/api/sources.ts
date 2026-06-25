@@ -1,13 +1,13 @@
 import type { AxiosResponse } from 'axios'
 
-import apiClient from './client'
-import { 
-  SourceListResponse, 
-  SourceDetailResponse, 
+import apiClient, { get, post, put, del } from './client'
+import {
+  SourceListResponse,
+  SourceDetailResponse,
   SourceResponse,
   SourceStatusResponse,
-  CreateSourceRequest, 
-  UpdateSourceRequest 
+  CreateSourceRequest,
+  UpdateSourceRequest
 } from '@/lib/types/api'
 
 export const sourcesApi = {
@@ -18,22 +18,20 @@ export const sourcesApi = {
     sort_by?: 'created' | 'updated'
     sort_order?: 'asc' | 'desc'
   }) => {
-    const response = await apiClient.get<SourceListResponse[]>('/sources', { params })
-    return response.data
+    return get<SourceListResponse[]>('/sources', { params })
   },
 
   get: async (id: string) => {
-    const response = await apiClient.get<SourceDetailResponse>(`/sources/${id}`)
-    return response.data
+    return get<SourceDetailResponse>(`/sources/${id}`)
   },
 
   create: async (data: CreateSourceRequest & { file?: File }) => {
     // Always use FormData to match backend expectations
     const formData = new FormData()
-    
+
     // Add basic fields
     formData.append('type', data.type)
-    
+
     if (data.notebooks !== undefined) {
       formData.append('notebooks', JSON.stringify(data.notebooks))
     }
@@ -52,32 +50,29 @@ export const sourcesApi = {
     if (data.transformations !== undefined) {
       formData.append('transformations', JSON.stringify(data.transformations))
     }
-    
+
     const dataWithFile = data as CreateSourceRequest & { file?: File }
     if (dataWithFile.file instanceof File) {
       formData.append('file', dataWithFile.file)
     }
-    
+
     formData.append('embed', String(data.embed ?? false))
     formData.append('delete_source', String(data.delete_source ?? false))
     formData.append('async_processing', String(data.async_processing ?? false))
-    
-    const response = await apiClient.post<SourceResponse>('/sources', formData)
-    return response.data
+
+    return post<SourceResponse>('/sources', formData)
   },
 
   update: async (id: string, data: UpdateSourceRequest) => {
-    const response = await apiClient.put<SourceListResponse>(`/sources/${id}`, data)
-    return response.data
+    return put<SourceListResponse>(`/sources/${id}`, data)
   },
 
   delete: async (id: string) => {
-    await apiClient.delete(`/sources/${id}`)
+    await del(`/sources/${id}`)
   },
 
   status: async (id: string) => {
-    const response = await apiClient.get<SourceStatusResponse>(`/sources/${id}/status`)
-    return response.data
+    return get<SourceStatusResponse>(`/sources/${id}/status`)
   },
 
   upload: async (file: File, notebook_id: string) => {
@@ -86,20 +81,19 @@ export const sourcesApi = {
     formData.append('notebook_id', notebook_id)
     formData.append('type', 'upload')
     formData.append('async_processing', 'true')
-    
-    const response = await apiClient.post<SourceResponse>('/sources', formData, {
+
+    return post<SourceResponse>('/sources', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
     })
-    return response.data
   },
 
   retry: async (id: string) => {
-    const response = await apiClient.post<SourceResponse>(`/sources/${id}/retry`)
-    return response.data
+    return post<SourceResponse>(`/sources/${id}/retry`)
   },
 
+  // Needs full AxiosResponse<Blob> for binary download — stays on raw apiClient
   downloadFile: async (id: string): Promise<AxiosResponse<Blob>> => {
     return apiClient.get(`/sources/${id}/download`, {
       responseType: 'blob',

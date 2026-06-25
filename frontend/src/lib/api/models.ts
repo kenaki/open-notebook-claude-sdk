@@ -1,4 +1,4 @@
-import apiClient from './client'
+import { get, post, put, del } from './client'
 import {
   Model,
   CreateModelRequest,
@@ -16,53 +16,45 @@ import {
 
 export const modelsApi = {
   list: async () => {
-    const response = await apiClient.get<Model[]>('/models')
-    return response.data
+    return get<Model[]>('/models')
   },
 
   get: async (id: string) => {
-    const response = await apiClient.get<Model>(`/models/${id}`)
-    return response.data
+    return get<Model>(`/models/${id}`)
   },
 
   create: async (data: CreateModelRequest) => {
-    const response = await apiClient.post<Model>('/models', data)
-    return response.data
+    return post<Model>('/models', data)
   },
 
   delete: async (id: string) => {
-    await apiClient.delete(`/models/${id}`)
+    await del(`/models/${id}`)
   },
 
   getDefaults: async () => {
-    const response = await apiClient.get<ModelDefaults>('/models/defaults')
-    return response.data
+    return get<ModelDefaults>('/models/defaults')
   },
 
   updateDefaults: async (data: Partial<ModelDefaults>) => {
-    const response = await apiClient.put<ModelDefaults>('/models/defaults', data)
-    return response.data
+    return put<ModelDefaults>('/models/defaults', data)
   },
 
   /**
    * Get the Claude Agent (subscription chat) model configuration and options
    */
   getClaudeAgentModel: async () => {
-    const response = await apiClient.get<ClaudeAgentModelConfig>('/models/claude-agent')
-    return response.data
+    return get<ClaudeAgentModelConfig>('/models/claude-agent')
   },
 
   /**
    * Set which Claude model the Claude Agent uses (empty = follow CC default)
    */
   updateClaudeAgentModel: async (data: UpdateClaudeAgentModelRequest) => {
-    const response = await apiClient.put<ClaudeAgentModelConfig>('/models/claude-agent', data)
-    return response.data
+    return put<ClaudeAgentModelConfig>('/models/claude-agent', data)
   },
 
   getProviders: async () => {
-    const response = await apiClient.get<ProviderAvailability>('/models/providers')
-    return response.data
+    return get<ProviderAvailability>('/models/providers')
   },
 
   // Model Discovery API
@@ -70,55 +62,48 @@ export const modelsApi = {
    * Discover available models from a provider without registering them
    */
   discoverModels: async (provider: string) => {
-    const response = await apiClient.get<DiscoveredModel[]>(`/models/discover/${provider}`)
-    return response.data
+    return get<DiscoveredModel[]>(`/models/discover/${provider}`)
   },
 
   /**
    * Sync models for a specific provider (discover and register)
    */
   syncProvider: async (provider: string) => {
-    const response = await apiClient.post<ProviderSyncResult>(`/models/sync/${provider}`)
-    return response.data
+    return post<ProviderSyncResult>(`/models/sync/${provider}`)
   },
 
   /**
    * Sync models for all configured providers
    */
   syncAll: async () => {
-    const response = await apiClient.post<AllProvidersSyncResult>('/models/sync')
-    return response.data
+    return post<AllProvidersSyncResult>('/models/sync')
   },
 
   /**
    * Get count of registered models for a provider
    */
   getProviderModelCount: async (provider: string) => {
-    const response = await apiClient.get<ProviderModelCount>(`/models/count/${provider}`)
-    return response.data
+    return get<ProviderModelCount>(`/models/count/${provider}`)
   },
 
   /**
    * Get all models for a specific provider
    */
   getByProvider: async (provider: string) => {
-    const response = await apiClient.get<Model[]>(`/models/by-provider/${provider}`)
-    return response.data
+    return get<Model[]>(`/models/by-provider/${provider}`)
   },
 
   /**
    * Auto-assign default models based on available models
    */
   autoAssign: async () => {
-    const response = await apiClient.post<AutoAssignResult>('/models/auto-assign')
-    return response.data
+    return post<AutoAssignResult>('/models/auto-assign')
   },
 
   /**
    * Test an individual model configuration
    */
   testModel: async (modelId: string): Promise<ModelTestResult> => {
-    const response = await apiClient.post<ModelTestResult>(`/models/${modelId}/test`)
-    return response.data
+    return post<ModelTestResult>(`/models/${modelId}/test`)
   },
 }

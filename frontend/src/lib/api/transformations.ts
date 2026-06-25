@@ -1,4 +1,4 @@
-import apiClient from './client'
+import { get, post, put, del } from './client'
 import {
   Transformation,
   CreateTransformationRequest,
@@ -10,41 +10,34 @@ import {
 
 export const transformationsApi = {
   list: async () => {
-    const response = await apiClient.get<Transformation[]>('/transformations')
-    return response.data
+    return get<Transformation[]>('/transformations')
   },
 
   get: async (id: string) => {
-    const response = await apiClient.get<Transformation>(`/transformations/${id}`)
-    return response.data
+    return get<Transformation>(`/transformations/${id}`)
   },
 
   create: async (data: CreateTransformationRequest) => {
-    const response = await apiClient.post<Transformation>('/transformations', data)
-    return response.data
+    return post<Transformation>('/transformations', data)
   },
 
   update: async (id: string, data: UpdateTransformationRequest) => {
-    const response = await apiClient.put<Transformation>(`/transformations/${id}`, data)
-    return response.data
+    return put<Transformation>(`/transformations/${id}`, data)
   },
 
   delete: async (id: string) => {
-    await apiClient.delete(`/transformations/${id}`)
+    await del(`/transformations/${id}`)
   },
 
   execute: async (data: ExecuteTransformationRequest) => {
-    const response = await apiClient.post<ExecuteTransformationResponse>('/transformations/execute', data)
-    return response.data
+    return post<ExecuteTransformationResponse>('/transformations/execute', data)
   },
 
   getDefaultPrompt: async () => {
-    const response = await apiClient.get<DefaultPrompt>('/transformations/default-prompt')
-    return response.data
+    return get<DefaultPrompt>('/transformations/default-prompt')
   },
 
   updateDefaultPrompt: async (prompt: { transformation_instructions: string }) => {
-    const response = await apiClient.put<DefaultPrompt>('/transformations/default-prompt', prompt)
-    return response.data
-  }
+    return put<DefaultPrompt>('/transformations/default-prompt', prompt)
+  },
 }
