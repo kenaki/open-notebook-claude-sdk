@@ -9,11 +9,9 @@ from langchain_core.runnables import RunnableConfig
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from api.routers._helpers import ensure_prefix, get_or_404
 from open_notebook.database.repository import ensure_record_id, repo_query
 from open_notebook.domain.notebook import ChatSession, Source
-from open_notebook.exceptions import (
-    NotFoundError,
-)
 from open_notebook.graphs.source_chat import source_chat_graph as source_chat_graph
 from open_notebook.utils.graph_utils import get_session_message_count
 
@@ -94,12 +92,8 @@ async def create_source_chat_session(
     """Create a new chat session for a source."""
     try:
         # Verify source exists
-        full_source_id = (
-            source_id if source_id.startswith("source:") else f"source:{source_id}"
-        )
-        source = await Source.get(full_source_id)
-        if not source:
-            raise HTTPException(status_code=404, detail="Source not found")
+        full_source_id = ensure_prefix(source_id, "source")
+        source = await get_or_404(Source, full_source_id, "Source")
 
         # Create new session with model_override support
         session = ChatSession(
@@ -120,8 +114,6 @@ async def create_source_chat_session(
             updated=str(session.updated),
             message_count=0,
         )
-    except NotFoundError:
-        raise HTTPException(status_code=404, detail="Source not found")
     except Exception as e:
         logger.error(f"Error creating source chat session: {str(e)}")
         raise HTTPException(
@@ -136,12 +128,8 @@ async def get_source_chat_sessions(source_id: str = Path(..., description="Sourc
     """Get all chat sessions for a source."""
     try:
         # Verify source exists
-        full_source_id = (
-            source_id if source_id.startswith("source:") else f"source:{source_id}"
-        )
-        source = await Source.get(full_source_id)
-        if not source:
-            raise HTTPException(status_code=404, detail="Source not found")
+        full_source_id = ensure_prefix(source_id, "source")
+        source = await get_or_404(Source, full_source_id, "Source")
 
         # Get sessions that refer to this source - first get relations, then sessions
         relations = await repo_query(
@@ -181,8 +169,6 @@ async def get_source_chat_sessions(source_id: str = Path(..., description="Sourc
         # Sort sessions by created date (newest first)
         sessions.sort(key=lambda x: x.created, reverse=True)
         return sessions
-    except NotFoundError:
-        raise HTTPException(status_code=404, detail="Source not found")
     except Exception as e:
         logger.error(f"Error fetching source chat sessions: {str(e)}")
         raise HTTPException(
@@ -201,22 +187,12 @@ async def get_source_chat_session(
     """Get a specific source chat session with its messages."""
     try:
         # Verify source exists
-        full_source_id = (
-            source_id if source_id.startswith("source:") else f"source:{source_id}"
-        )
-        source = await Source.get(full_source_id)
-        if not source:
-            raise HTTPException(status_code=404, detail="Source not found")
+        full_source_id = ensure_prefix(source_id, "source")
+        source = await get_or_404(Source, full_source_id, "Source")
 
         # Get session
-        full_session_id = (
-            session_id
-            if session_id.startswith("chat_session:")
-            else f"chat_session:{session_id}"
-        )
-        session = await ChatSession.get(full_session_id)
-        if not session:
-            raise HTTPException(status_code=404, detail="Session not found")
+        full_session_id = ensure_prefix(session_id, "chat_session")
+        session = await get_or_404(ChatSession, full_session_id, "Session")
 
         # Verify session is related to this source
         relation_query = await repo_query(
@@ -278,8 +254,6 @@ async def get_source_chat_session(
             messages=messages,
             context_indicators=context_indicators,
         )
-    except NotFoundError:
-        raise HTTPException(status_code=404, detail="Source or session not found")
     except Exception as e:
         logger.error(f"Error fetching source chat session: {str(e)}")
         raise HTTPException(
@@ -299,22 +273,12 @@ async def update_source_chat_session(
     """Update source chat session title and/or model override."""
     try:
         # Verify source exists
-        full_source_id = (
-            source_id if source_id.startswith("source:") else f"source:{source_id}"
-        )
-        source = await Source.get(full_source_id)
-        if not source:
-            raise HTTPException(status_code=404, detail="Source not found")
+        full_source_id = ensure_prefix(source_id, "source")
+        source = await get_or_404(Source, full_source_id, "Source")
 
         # Get session
-        full_session_id = (
-            session_id
-            if session_id.startswith("chat_session:")
-            else f"chat_session:{session_id}"
-        )
-        session = await ChatSession.get(full_session_id)
-        if not session:
-            raise HTTPException(status_code=404, detail="Session not found")
+        full_session_id = ensure_prefix(session_id, "chat_session")
+        session = await get_or_404(ChatSession, full_session_id, "Session")
 
         # Verify session is related to this source
         relation_query = await repo_query(
@@ -350,8 +314,6 @@ async def update_source_chat_session(
             updated=str(session.updated),
             message_count=msg_count,
         )
-    except NotFoundError:
-        raise HTTPException(status_code=404, detail="Source or session not found")
     except Exception as e:
         logger.error(f"Error updating source chat session: {str(e)}")
         raise HTTPException(
@@ -369,22 +331,12 @@ async def delete_source_chat_session(
     """Delete a source chat session."""
     try:
         # Verify source exists
-        full_source_id = (
-            source_id if source_id.startswith("source:") else f"source:{source_id}"
-        )
-        source = await Source.get(full_source_id)
-        if not source:
-            raise HTTPException(status_code=404, detail="Source not found")
+        full_source_id = ensure_prefix(source_id, "source")
+        source = await get_or_404(Source, full_source_id, "Source")
 
         # Get session
-        full_session_id = (
-            session_id
-            if session_id.startswith("chat_session:")
-            else f"chat_session:{session_id}"
-        )
-        session = await ChatSession.get(full_session_id)
-        if not session:
-            raise HTTPException(status_code=404, detail="Session not found")
+        full_session_id = ensure_prefix(session_id, "chat_session")
+        session = await get_or_404(ChatSession, full_session_id, "Session")
 
         # Verify session is related to this source
         relation_query = await repo_query(
@@ -405,8 +357,6 @@ async def delete_source_chat_session(
         return SuccessResponse(
             success=True, message="Source chat session deleted successfully"
         )
-    except NotFoundError:
-        raise HTTPException(status_code=404, detail="Source or session not found")
     except Exception as e:
         logger.error(f"Error deleting source chat session: {str(e)}")
         raise HTTPException(
@@ -489,22 +439,12 @@ async def send_message_to_source_chat(
     """Send a message to source chat session with SSE streaming response."""
     try:
         # Verify source exists
-        full_source_id = (
-            source_id if source_id.startswith("source:") else f"source:{source_id}"
-        )
-        source = await Source.get(full_source_id)
-        if not source:
-            raise HTTPException(status_code=404, detail="Source not found")
+        full_source_id = ensure_prefix(source_id, "source")
+        source = await get_or_404(Source, full_source_id, "Source")
 
         # Verify session exists and is related to source
-        full_session_id = (
-            session_id
-            if session_id.startswith("chat_session:")
-            else f"chat_session:{session_id}"
-        )
-        session = await ChatSession.get(full_session_id)
-        if not session:
-            raise HTTPException(status_code=404, detail="Session not found")
+        full_session_id = ensure_prefix(session_id, "chat_session")
+        session = await get_or_404(ChatSession, full_session_id, "Session")
 
         # Verify session is related to this source
         relation_query = await repo_query(

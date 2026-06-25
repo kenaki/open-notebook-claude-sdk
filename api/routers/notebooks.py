@@ -10,9 +10,10 @@ from api.models import (
     NotebookResponse,
     NotebookUpdate,
 )
+from api.routers._helpers import get_or_404
 from open_notebook.database.repository import ensure_record_id, repo_query
 from open_notebook.domain.notebook import Notebook, Source
-from open_notebook.exceptions import InvalidInputError, NotFoundError
+from open_notebook.exceptions import InvalidInputError
 
 router = APIRouter()
 
@@ -123,7 +124,7 @@ async def create_notebook(notebook: NotebookCreate):
 async def get_notebook_delete_preview(notebook_id: str):
     """Get a preview of what will be deleted when this notebook is deleted."""
     try:
-        notebook = await Notebook.get(notebook_id)
+        notebook = await get_or_404(Notebook, notebook_id, "Notebook")
 
         preview = await notebook.get_delete_preview()
 
@@ -136,8 +137,6 @@ async def get_notebook_delete_preview(notebook_id: str):
         )
     except HTTPException:
         raise
-    except NotFoundError:
-        raise HTTPException(status_code=404, detail="Notebook not found")
     except Exception as e:
         logger.error(f"Error getting delete preview for notebook {notebook_id}: {e}")
         raise HTTPException(
@@ -187,7 +186,7 @@ async def get_notebook(notebook_id: str):
 async def update_notebook(notebook_id: str, notebook_update: NotebookUpdate):
     """Update a notebook."""
     try:
-        notebook = await Notebook.get(notebook_id)
+        notebook = await get_or_404(Notebook, notebook_id, "Notebook")
 
         # Update only provided fields
         if notebook_update.name is not None:
@@ -238,8 +237,6 @@ async def update_notebook(notebook_id: str, notebook_update: NotebookUpdate):
         )
     except HTTPException:
         raise
-    except NotFoundError:
-        raise HTTPException(status_code=404, detail="Notebook not found")
     except InvalidInputError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -253,9 +250,9 @@ async def update_notebook(notebook_id: str, notebook_update: NotebookUpdate):
 async def add_source_to_notebook(notebook_id: str, source_id: str):
     """Add an existing source to a notebook (create the reference)."""
     try:
-        # Verify the notebook and source exist (raises NotFoundError -> 404)
-        await Notebook.get(notebook_id)
-        await Source.get(source_id)
+        # Verify the notebook and source exist (raises 404 if not found)
+        await get_or_404(Notebook, notebook_id, "Notebook")
+        await get_or_404(Source, source_id, "Source")
 
         # Check if reference already exists (idempotency)
         existing_ref = await repo_query(
@@ -279,8 +276,6 @@ async def add_source_to_notebook(notebook_id: str, source_id: str):
         return {"message": "Source linked to notebook successfully"}
     except HTTPException:
         raise
-    except NotFoundError:
-        raise HTTPException(status_code=404, detail="Notebook or source not found")
     except Exception as e:
         logger.error(
             f"Error linking source {source_id} to notebook {notebook_id}: {str(e)}"
@@ -294,8 +289,8 @@ async def add_source_to_notebook(notebook_id: str, source_id: str):
 async def remove_source_from_notebook(notebook_id: str, source_id: str):
     """Remove a source from a notebook (delete the reference)."""
     try:
-        # Verify the notebook exists (raises NotFoundError -> 404)
-        await Notebook.get(notebook_id)
+        # Verify the notebook exists (raises 404 if not found)
+        await get_or_404(Notebook, notebook_id, "Notebook")
 
         # Delete the reference record linking source to notebook
         await repo_query(
@@ -309,8 +304,6 @@ async def remove_source_from_notebook(notebook_id: str, source_id: str):
         return {"message": "Source removed from notebook successfully"}
     except HTTPException:
         raise
-    except NotFoundError:
-        raise HTTPException(status_code=404, detail="Notebook not found")
     except Exception as e:
         logger.error(
             f"Error removing source {source_id} from notebook {notebook_id}: {str(e)}"
@@ -336,7 +329,7 @@ async def delete_notebook(
     to this notebook (not linked to any other notebooks).
     """
     try:
-        notebook = await Notebook.get(notebook_id)
+        notebook = await get_or_404(Notebook, notebook_id, "Notebook")
 
         result = await notebook.delete(delete_exclusive_sources=delete_exclusive_sources)
 
@@ -348,8 +341,6 @@ async def delete_notebook(
         )
     except HTTPException:
         raise
-    except NotFoundError:
-        raise HTTPException(status_code=404, detail="Notebook not found")
     except Exception as e:
         logger.error(f"Error deleting notebook {notebook_id}: {str(e)}")
         raise HTTPException(

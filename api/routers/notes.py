@@ -4,8 +4,9 @@ from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
 
 from api.models import NoteCreate, NoteResponse, NoteUpdate
+from api.routers._helpers import get_or_404
 from open_notebook.domain.notebook import Note
-from open_notebook.exceptions import InvalidInputError, NotFoundError
+from open_notebook.exceptions import InvalidInputError
 
 router = APIRouter()
 
@@ -20,7 +21,7 @@ async def get_notes(
             # Get notes for a specific notebook
             from open_notebook.domain.notebook import Notebook
 
-            notebook = await Notebook.get(notebook_id)
+            notebook = await get_or_404(Notebook, notebook_id, "Notebook")
             notes = await notebook.get_notes()
         else:
             # Get all notes
@@ -39,8 +40,6 @@ async def get_notes(
         ]
     except HTTPException:
         raise
-    except NotFoundError:
-        raise HTTPException(status_code=404, detail="Notebook not found")
     except Exception as e:
         logger.error(f"Error fetching notes: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error fetching notes: {str(e)}")
@@ -84,8 +83,8 @@ async def create_note(note_data: NoteCreate):
         if note_data.notebook_id:
             from open_notebook.domain.notebook import Notebook
 
-            # Verify the notebook exists (raises NotFoundError -> 404)
-            await Notebook.get(note_data.notebook_id)
+            # Verify the notebook exists (raises 404 if not found)
+            await get_or_404(Notebook, note_data.notebook_id, "Notebook")
             await new_note.add_to_notebook(note_data.notebook_id)
 
         return NoteResponse(
@@ -99,8 +98,6 @@ async def create_note(note_data: NoteCreate):
         )
     except HTTPException:
         raise
-    except NotFoundError:
-        raise HTTPException(status_code=404, detail="Notebook not found")
     except InvalidInputError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -112,7 +109,7 @@ async def create_note(note_data: NoteCreate):
 async def get_note(note_id: str):
     """Get a specific note by ID."""
     try:
-        note = await Note.get(note_id)
+        note = await get_or_404(Note, note_id, "Note")
 
         return NoteResponse(
             id=note.id or "",
@@ -124,8 +121,6 @@ async def get_note(note_id: str):
         )
     except HTTPException:
         raise
-    except NotFoundError:
-        raise HTTPException(status_code=404, detail="Note not found")
     except Exception as e:
         logger.error(f"Error fetching note {note_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error fetching note: {str(e)}")
@@ -135,7 +130,7 @@ async def get_note(note_id: str):
 async def update_note(note_id: str, note_update: NoteUpdate):
     """Update a note."""
     try:
-        note = await Note.get(note_id)
+        note = await get_or_404(Note, note_id, "Note")
 
         # Update only provided fields
         if note_update.title is not None:
@@ -163,8 +158,6 @@ async def update_note(note_id: str, note_update: NoteUpdate):
         )
     except HTTPException:
         raise
-    except NotFoundError:
-        raise HTTPException(status_code=404, detail="Note not found")
     except InvalidInputError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -176,15 +169,13 @@ async def update_note(note_id: str, note_update: NoteUpdate):
 async def delete_note(note_id: str):
     """Delete a note."""
     try:
-        note = await Note.get(note_id)
+        note = await get_or_404(Note, note_id, "Note")
 
         await note.delete()
 
         return {"message": "Note deleted successfully"}
     except HTTPException:
         raise
-    except NotFoundError:
-        raise HTTPException(status_code=404, detail="Note not found")
     except Exception as e:
         logger.error(f"Error deleting note {note_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error deleting note: {str(e)}")

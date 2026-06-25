@@ -10,6 +10,7 @@ from langchain_core.runnables import RunnableConfig
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from api.routers._helpers import ensure_prefix, get_or_404
 from api.upload_utils import resolve_within, save_uploaded_file
 from open_notebook.config import CHAT_MEDIA_FOLDER
 from open_notebook.database.repository import ensure_record_id, repo_query
@@ -19,9 +20,6 @@ from open_notebook.domain.notebook import (
     Notebook,
     Source,
     SourceInsight,
-)
-from open_notebook.exceptions import (
-    NotFoundError,
 )
 from open_notebook.graphs.chat import graph as chat_graph
 from open_notebook.utils.graph_utils import get_session_message_count
@@ -320,9 +318,7 @@ async def get_sessions(notebook_id: str = Query(..., description="Notebook ID"))
     """Get all chat sessions for a notebook."""
     try:
         # Get notebook to verify it exists
-        notebook = await Notebook.get(notebook_id)
-        if not notebook:
-            raise HTTPException(status_code=404, detail="Notebook not found")
+        notebook = await get_or_404(Notebook, notebook_id, "Notebook")
 
         # Get sessions for this notebook
         sessions_list = await notebook.get_chat_sessions()
@@ -350,8 +346,6 @@ async def get_sessions(notebook_id: str = Query(..., description="Notebook ID"))
             )
 
         return results
-    except NotFoundError:
-        raise HTTPException(status_code=404, detail="Notebook not found")
     except Exception as e:
         logger.error(f"Error fetching chat sessions: {str(e)}")
         raise HTTPException(
@@ -364,9 +358,7 @@ async def create_session(request: CreateSessionRequest):
     """Create a new chat session."""
     try:
         # Verify notebook exists
-        notebook = await Notebook.get(request.notebook_id)
-        if not notebook:
-            raise HTTPException(status_code=404, detail="Notebook not found")
+        notebook = await get_or_404(Notebook, request.notebook_id, "Notebook")
 
         # Create new session
         session = ChatSession(
@@ -394,8 +386,6 @@ async def create_session(request: CreateSessionRequest):
             quote=session.quote,
             tags=session.tags or [],
         )
-    except NotFoundError:
-        raise HTTPException(status_code=404, detail="Notebook not found")
     except Exception as e:
         logger.error(f"Error creating chat session: {str(e)}")
         raise HTTPException(
@@ -410,15 +400,8 @@ async def get_session(session_id: str):
     """Get a specific session with its messages."""
     try:
         # Get session
-        # Ensure session_id has proper table prefix
-        full_session_id = (
-            session_id
-            if session_id.startswith("chat_session:")
-            else f"chat_session:{session_id}"
-        )
-        session = await ChatSession.get(full_session_id)
-        if not session:
-            raise HTTPException(status_code=404, detail="Session not found")
+        full_session_id = ensure_prefix(session_id, "chat_session")
+        session = await get_or_404(ChatSession, full_session_id, "Session")
 
         # Get session state from LangGraph to retrieve messages
         # Use sync get_state() in a thread since SqliteSaver doesn't support async
@@ -434,13 +417,6 @@ async def get_session(session_id: str):
                 messages.append(await _build_chat_message(msg, len(messages)))
 
         # Find notebook_id (we need to query the relationship)
-        # Ensure session_id has proper table prefix
-        full_session_id = (
-            session_id
-            if session_id.startswith("chat_session:")
-            else f"chat_session:{session_id}"
-        )
-
         notebook_query = await repo_query(
             "SELECT out FROM refers_to WHERE in = $session_id",
             {"session_id": ensure_record_id(full_session_id)},
@@ -467,8 +443,6 @@ async def get_session(session_id: str):
             quote=getattr(session, "quote", None),
             tags=getattr(session, "tags", []) or [],
         )
-    except NotFoundError:
-        raise HTTPException(status_code=404, detail="Session not found")
     except Exception as e:
         logger.error(f"Error fetching session: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error fetching session: {str(e)}")
@@ -478,15 +452,8 @@ async def get_session(session_id: str):
 async def update_session(session_id: str, request: UpdateSessionRequest):
     """Update session title."""
     try:
-        # Ensure session_id has proper table prefix
-        full_session_id = (
-            session_id
-            if session_id.startswith("chat_session:")
-            else f"chat_session:{session_id}"
-        )
-        session = await ChatSession.get(full_session_id)
-        if not session:
-            raise HTTPException(status_code=404, detail="Session not found")
+        full_session_id = ensure_prefix(session_id, "chat_session")
+        session = await get_or_404(ChatSession, full_session_id, "Session")
 
         update_data = request.model_dump(exclude_unset=True)
 
@@ -508,12 +475,6 @@ async def update_session(session_id: str, request: UpdateSessionRequest):
         await session.save()
 
         # Find notebook_id
-        # Ensure session_id has proper table prefix
-        full_session_id = (
-            session_id
-            if session_id.startswith("chat_session:")
-            else f"chat_session:{session_id}"
-        )
         notebook_query = await repo_query(
             "SELECT out FROM refers_to WHERE in = $session_id",
             {"session_id": ensure_record_id(full_session_id)},
@@ -535,8 +496,6 @@ async def update_session(session_id: str, request: UpdateSessionRequest):
             quote=getattr(session, "quote", None),
             tags=getattr(session, "tags", []) or [],
         )
-    except NotFoundError:
-        raise HTTPException(status_code=404, detail="Session not found")
     except Exception as e:
         logger.error(f"Error updating session: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error updating session: {str(e)}")
@@ -546,21 +505,12 @@ async def update_session(session_id: str, request: UpdateSessionRequest):
 async def delete_session(session_id: str):
     """Delete a chat session."""
     try:
-        # Ensure session_id has proper table prefix
-        full_session_id = (
-            session_id
-            if session_id.startswith("chat_session:")
-            else f"chat_session:{session_id}"
-        )
-        session = await ChatSession.get(full_session_id)
-        if not session:
-            raise HTTPException(status_code=404, detail="Session not found")
+        full_session_id = ensure_prefix(session_id, "chat_session")
+        session = await get_or_404(ChatSession, full_session_id, "Session")
 
         await session.delete()
 
         return SuccessResponse(success=True, message="Session deleted successfully")
-    except NotFoundError:
-        raise HTTPException(status_code=404, detail="Session not found")
     except Exception as e:
         logger.error(f"Error deleting session: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error deleting session: {str(e)}")
@@ -571,15 +521,8 @@ async def execute_chat(request: ExecuteChatRequest):
     """Execute a chat request and get AI response."""
     try:
         # Verify session exists
-        # Ensure session_id has proper table prefix
-        full_session_id = (
-            request.session_id
-            if request.session_id.startswith("chat_session:")
-            else f"chat_session:{request.session_id}"
-        )
-        session = await ChatSession.get(full_session_id)
-        if not session:
-            raise HTTPException(status_code=404, detail="Session not found")
+        full_session_id = ensure_prefix(request.session_id, "chat_session")
+        session = await get_or_404(ChatSession, full_session_id, "Session")
 
         # Fetch notebook linked to this session
         notebook_query = await repo_query(
@@ -646,8 +589,6 @@ async def execute_chat(request: ExecuteChatRequest):
             messages.append(await _build_chat_message(msg, len(messages)))
 
         return ExecuteChatResponse(session_id=request.session_id, messages=messages)
-    except NotFoundError:
-        raise HTTPException(status_code=404, detail="Session not found")
     except Exception as e:
         # Log detailed error with context for debugging
         logger.error(
@@ -664,9 +605,7 @@ async def build_context(request: BuildContextRequest):
     """Build context for a notebook based on context configuration."""
     try:
         # Verify notebook exists
-        notebook = await Notebook.get(request.notebook_id)
-        if not notebook:
-            raise HTTPException(status_code=404, detail="Notebook not found")
+        notebook = await get_or_404(Notebook, request.notebook_id, "Notebook")
 
         context_data: dict[str, list[dict[str, str]]] = {"sources": [], "notes": []}
         total_content = ""

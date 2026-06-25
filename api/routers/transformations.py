@@ -12,6 +12,7 @@ from api.models import (
     TransformationResponse,
     TransformationUpdate,
 )
+from api.routers._helpers import get_or_404
 from open_notebook.ai.models import Model
 from open_notebook.domain.transformation import DefaultPrompts, Transformation
 from open_notebook.exceptions import InvalidInputError, OpenNotebookError
@@ -83,14 +84,12 @@ async def execute_transformation(execute_request: TransformationExecuteRequest):
     """Execute a transformation on input text."""
     try:
         # Validate transformation exists
-        transformation = await Transformation.get(execute_request.transformation_id)
-        if not transformation:
-            raise HTTPException(status_code=404, detail="Transformation not found")
+        transformation = await get_or_404(
+            Transformation, execute_request.transformation_id, "Transformation"
+        )
 
         # Validate model exists
-        model = await Model.get(execute_request.model_id)
-        if not model:
-            raise HTTPException(status_code=404, detail="Model not found")
+        model = await get_or_404(Model, execute_request.model_id, "Model")
 
         # Execute the transformation
         result = await transformation_graph.ainvoke(
@@ -162,9 +161,9 @@ async def update_default_prompt(prompt_update: DefaultPromptUpdate):
 async def get_transformation(transformation_id: str):
     """Get a specific transformation by ID."""
     try:
-        transformation = await Transformation.get(transformation_id)
-        if not transformation:
-            raise HTTPException(status_code=404, detail="Transformation not found")
+        transformation = await get_or_404(
+            Transformation, transformation_id, "Transformation"
+        )
 
         return TransformationResponse(
             id=transformation.id or "",
@@ -193,9 +192,9 @@ async def update_transformation(
 ):
     """Update a transformation."""
     try:
-        transformation = await Transformation.get(transformation_id)
-        if not transformation:
-            raise HTTPException(status_code=404, detail="Transformation not found")
+        transformation = await get_or_404(
+            Transformation, transformation_id, "Transformation"
+        )
 
         # Update only provided fields
         if transformation_update.name is not None:
@@ -236,9 +235,9 @@ async def update_transformation(
 async def delete_transformation(transformation_id: str):
     """Delete a transformation."""
     try:
-        transformation = await Transformation.get(transformation_id)
-        if not transformation:
-            raise HTTPException(status_code=404, detail="Transformation not found")
+        transformation = await get_or_404(
+            Transformation, transformation_id, "Transformation"
+        )
 
         await transformation.delete()
 

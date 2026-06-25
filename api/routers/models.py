@@ -31,9 +31,10 @@ from open_notebook.ai.model_discovery import (
     sync_all_providers,
     sync_provider_models,
 )
+from api.routers._helpers import get_or_404
 from open_notebook.ai.models import DefaultModels, Model
 from open_notebook.domain.credential import Credential
-from open_notebook.exceptions import InvalidInputError, NotFoundError
+from open_notebook.exceptions import InvalidInputError
 
 router = APIRouter()
 
@@ -263,15 +264,13 @@ async def create_model(model_data: ModelCreate):
 async def delete_model(model_id: str):
     """Delete a model configuration."""
     try:
-        model = await Model.get(model_id)
+        model = await get_or_404(Model, model_id, "Model")
 
         await model.delete()
 
         return {"message": "Model deleted successfully"}
     except HTTPException:
         raise
-    except NotFoundError:
-        raise HTTPException(status_code=404, detail="Model not found")
     except Exception as e:
         logger.error(f"Error deleting model {model_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error deleting model: {str(e)}")
@@ -280,14 +279,7 @@ async def delete_model(model_id: str):
 @router.post("/models/{model_id}/test", response_model=ModelTestResponse)
 async def test_model(model_id: str):
     """Test if a specific model is correctly configured and functional."""
-    try:
-        model = await Model.get(model_id)
-        if not model:
-            raise HTTPException(status_code=404, detail="Model not found")
-    except HTTPException:
-        raise
-    except Exception:
-        raise HTTPException(status_code=404, detail="Model not found")
+    model = await get_or_404(Model, model_id, "Model")
 
     try:
         success, message = await test_individual_model(model)

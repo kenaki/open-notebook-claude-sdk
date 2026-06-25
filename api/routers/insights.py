@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from loguru import logger
 
 from api.models import NoteResponse, SaveAsNoteRequest, SourceInsightResponse
+from api.routers._helpers import get_or_404
 from open_notebook.domain.notebook import SourceInsight
 from open_notebook.exceptions import InvalidInputError
 
@@ -12,9 +13,7 @@ router = APIRouter()
 async def get_insight(insight_id: str):
     """Get a specific insight by ID."""
     try:
-        insight = await SourceInsight.get(insight_id)
-        if not insight:
-            raise HTTPException(status_code=404, detail="Insight not found")
+        insight = await get_or_404(SourceInsight, insight_id, "Insight")
 
         # Get source ID from the insight relationship
         source = await insight.get_source()
@@ -38,9 +37,7 @@ async def get_insight(insight_id: str):
 async def delete_insight(insight_id: str):
     """Delete a specific insight."""
     try:
-        insight = await SourceInsight.get(insight_id)
-        if not insight:
-            raise HTTPException(status_code=404, detail="Insight not found")
+        insight = await get_or_404(SourceInsight, insight_id, "Insight")
 
         await insight.delete()
 
@@ -56,9 +53,7 @@ async def delete_insight(insight_id: str):
 async def save_insight_as_note(insight_id: str, request: SaveAsNoteRequest):
     """Convert an insight to a note."""
     try:
-        insight = await SourceInsight.get(insight_id)
-        if not insight:
-            raise HTTPException(status_code=404, detail="Insight not found")
+        insight = await get_or_404(SourceInsight, insight_id, "Insight")
 
         # Use the existing save_as_note method from the domain model
         note = await insight.save_as_note(request.notebook_id)

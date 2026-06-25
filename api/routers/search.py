@@ -121,17 +121,17 @@ async def ask_knowledge_base(ask_request: AskRequest):
 
         if not strategy_model:
             raise HTTPException(
-                status_code=400,
+                status_code=404,
                 detail=f"Strategy model {ask_request.strategy_model} not found",
             )
         if not answer_model:
             raise HTTPException(
-                status_code=400,
+                status_code=404,
                 detail=f"Answer model {ask_request.answer_model} not found",
             )
         if not final_answer_model:
             raise HTTPException(
-                status_code=400,
+                status_code=404,
                 detail=f"Final answer model {ask_request.final_answer_model} not found",
             )
 
@@ -168,17 +168,17 @@ async def ask_knowledge_base_simple(ask_request: AskRequest):
 
         if not strategy_model:
             raise HTTPException(
-                status_code=400,
+                status_code=404,
                 detail=f"Strategy model {ask_request.strategy_model} not found",
             )
         if not answer_model:
             raise HTTPException(
-                status_code=400,
+                status_code=404,
                 detail=f"Answer model {ask_request.answer_model} not found",
             )
         if not final_answer_model:
             raise HTTPException(
-                status_code=400,
+                status_code=404,
                 detail=f"Final answer model {ask_request.final_answer_model} not found",
             )
 
