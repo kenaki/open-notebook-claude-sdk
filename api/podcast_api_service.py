@@ -8,6 +8,7 @@ from typing import Any, Dict, List
 from loguru import logger
 
 from api.client import api_client
+from api.service_utils import _as_list
 
 
 class PodcastAPIService:
@@ -20,7 +21,7 @@ class PodcastAPIService:
     def get_episodes(self) -> List[Dict[Any, Any]]:
         """Get all podcast episodes."""
         result = api_client._make_request("GET", "/api/podcasts/episodes")
-        return result if isinstance(result, list) else [result]
+        return _as_list(result)
 
     def delete_episode(self, episode_id: str) -> bool:
         """Delete a podcast episode."""
@@ -78,7 +79,7 @@ class PodcastAPIService:
     def get_speaker_profiles(self) -> List[Dict[Any, Any]]:
         """Get all speaker profiles."""
         result = api_client._make_request("GET", "/api/speaker-profiles")
-        return result if isinstance(result, list) else [result]
+        return _as_list(result)
 
     def create_speaker_profile(self, profile_data: Dict) -> bool:
         """Create a new speaker profile."""

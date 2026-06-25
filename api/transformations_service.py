@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Union
 from loguru import logger
 
 from api.client import api_client
+from api.service_utils import _unwrap
 from open_notebook.domain.transformation import Transformation
 
 
@@ -43,7 +44,7 @@ class TransformationsService:
     def get_transformation(self, transformation_id: str) -> Transformation:
         """Get a specific transformation."""
         response = api_client.get_transformation(transformation_id)
-        trans_data = response if isinstance(response, dict) else response[0]
+        trans_data = _unwrap(response)
         transformation = Transformation(
             name=trans_data["name"],
             title=trans_data["title"],
@@ -76,7 +77,7 @@ class TransformationsService:
             prompt=prompt,
             apply_default=apply_default,
         )
-        trans_data = response if isinstance(response, dict) else response[0]
+        trans_data = _unwrap(response)
         transformation = Transformation(
             name=trans_data["name"],
             title=trans_data["title"],
@@ -106,7 +107,7 @@ class TransformationsService:
             "apply_default": transformation.apply_default,
         }
         response = api_client.update_transformation(transformation.id, **updates)
-        trans_data = response if isinstance(response, dict) else response[0]
+        trans_data = _unwrap(response)
 
         # Update the transformation object with the response
         transformation.name = trans_data["name"]

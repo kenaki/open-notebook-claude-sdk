@@ -7,6 +7,7 @@ from typing import List, Optional
 from loguru import logger
 
 from api.client import api_client
+from api.service_utils import _unwrap
 from open_notebook.domain.notebook import Note
 
 
@@ -36,9 +37,7 @@ class NotesService:
     def get_note(self, note_id: str) -> Note:
         """Get a specific note."""
         note_response = api_client.get_note(note_id)
-        note_data = (
-            note_response if isinstance(note_response, dict) else note_response[0]
-        )
+        note_data = _unwrap(note_response)
         note = Note(
             title=note_data["title"],
             content=note_data["content"],
@@ -60,9 +59,7 @@ class NotesService:
         note_response = api_client.create_note(
             content=content, title=title, note_type=note_type, notebook_id=notebook_id
         )
-        note_data = (
-            note_response if isinstance(note_response, dict) else note_response[0]
-        )
+        note_data = _unwrap(note_response)
         note = Note(
             title=note_data["title"],
             content=note_data["content"],
@@ -81,9 +78,7 @@ class NotesService:
             "note_type": note.note_type,
         }
         note_response = api_client.update_note(note.id or "", **updates)
-        note_data = (
-            note_response if isinstance(note_response, dict) else note_response[0]
-        )
+        note_data = _unwrap(note_response)
 
         # Update the note object with the response
         note.title = note_data["title"]

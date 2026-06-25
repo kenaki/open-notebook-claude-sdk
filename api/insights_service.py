@@ -7,6 +7,7 @@ from typing import List, Optional
 from loguru import logger
 
 from api.client import api_client
+from api.service_utils import _unwrap
 from open_notebook.domain.notebook import Note, SourceInsight
 
 
@@ -35,11 +36,7 @@ class InsightsService:
     def get_insight(self, insight_id: str) -> SourceInsight:
         """Get a specific insight."""
         insight_response = api_client.get_insight(insight_id)
-        insight_data = (
-            insight_response
-            if isinstance(insight_response, dict)
-            else insight_response[0]
-        )
+        insight_data = _unwrap(insight_response)
         insight = SourceInsight(
             insight_type=insight_data["insight_type"],
             content=insight_data["content"],
@@ -60,9 +57,7 @@ class InsightsService:
     ) -> Note:
         """Convert an insight to a note."""
         note_response = api_client.save_insight_as_note(insight_id, notebook_id)
-        note_data = (
-            note_response if isinstance(note_response, dict) else note_response[0]
-        )
+        note_data = _unwrap(note_response)
         note = Note(
             title=note_data["title"],
             content=note_data["content"],
@@ -80,11 +75,7 @@ class InsightsService:
         insight_response = api_client.create_source_insight(
             source_id, transformation_id, model_id
         )
-        insight_data = (
-            insight_response
-            if isinstance(insight_response, dict)
-            else insight_response[0]
-        )
+        insight_data = _unwrap(insight_response)
         insight = SourceInsight(
             insight_type=insight_data["insight_type"],
             content=insight_data["content"],

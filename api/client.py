@@ -9,6 +9,8 @@ from typing import Any, Dict, List, Optional, Union
 import httpx
 from loguru import logger
 
+from api.service_utils import _as_list
+
 
 class APIClient:
     """Client for Open Notebook API."""
@@ -86,7 +88,7 @@ class APIClient:
             params["archived"] = str(archived).lower()
 
         result = self._make_request("GET", "/api/notebooks", params=params)
-        return result if isinstance(result, list) else [result]
+        return _as_list(result)
 
     def create_notebook(
         self, name: str, description: str = ""
@@ -160,7 +162,7 @@ class APIClient:
         if model_type:
             params["type"] = model_type
         result = self._make_request("GET", "/api/models", params=params)
-        return result if isinstance(result, list) else [result]
+        return _as_list(result)
 
     def create_model(
         self, name: str, provider: str, model_type: str
@@ -193,7 +195,7 @@ class APIClient:
     def get_transformations(self) -> List[Dict[Any, Any]]:
         """Get all transformations."""
         result = self._make_request("GET", "/api/transformations")
-        return result if isinstance(result, list) else [result]
+        return _as_list(result)
 
     def create_transformation(
         self,
@@ -254,7 +256,7 @@ class APIClient:
         if notebook_id:
             params["notebook_id"] = notebook_id
         result = self._make_request("GET", "/api/notes", params=params)
-        return result if isinstance(result, list) else [result]
+        return _as_list(result)
 
     def create_note(
         self,
@@ -362,7 +364,7 @@ class APIClient:
         if notebook_id:
             params["notebook_id"] = notebook_id
         result = self._make_request("GET", "/api/sources", params=params)
-        return result if isinstance(result, list) else [result]
+        return _as_list(result)
 
     def create_source(
         self,
@@ -436,7 +438,7 @@ class APIClient:
     def get_source_insights(self, source_id: str) -> List[Dict[Any, Any]]:
         """Get all insights for a specific source."""
         result = self._make_request("GET", f"/api/sources/{source_id}/insights")
-        return result if isinstance(result, list) else [result]
+        return _as_list(result)
 
     def get_insight(
         self, insight_id: str
@@ -476,7 +478,7 @@ class APIClient:
     def get_episode_profiles(self) -> List[Dict[Any, Any]]:
         """Get all episode profiles."""
         result = self._make_request("GET", "/api/episode-profiles")
-        return result if isinstance(result, list) else [result]
+        return _as_list(result)
 
     def get_episode_profile(
         self, profile_name: str

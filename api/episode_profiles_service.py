@@ -7,6 +7,7 @@ from typing import List
 from loguru import logger
 
 from api.client import api_client
+from api.service_utils import _unwrap
 from open_notebook.podcasts.models import EpisodeProfile
 
 
@@ -40,11 +41,7 @@ class EpisodeProfilesService:
     def get_episode_profile(self, profile_name: str) -> EpisodeProfile:
         """Get a specific episode profile by name."""
         profile_response = api_client.get_episode_profile(profile_name)
-        profile_data = (
-            profile_response
-            if isinstance(profile_response, dict)
-            else profile_response[0]
-        )
+        profile_data = _unwrap(profile_response)
         profile = EpisodeProfile(
             name=profile_data["name"],
             description=profile_data.get("description", ""),
@@ -83,11 +80,7 @@ class EpisodeProfilesService:
             default_briefing=default_briefing,
             num_segments=num_segments,
         )
-        profile_data = (
-            profile_response
-            if isinstance(profile_response, dict)
-            else profile_response[0]
-        )
+        profile_data = _unwrap(profile_response)
         profile = EpisodeProfile(
             name=profile_data["name"],
             description=profile_data.get("description", ""),

@@ -7,6 +7,7 @@ from typing import List, Optional
 from loguru import logger
 
 from api.client import api_client
+from api.service_utils import _unwrap
 from open_notebook.domain.notebook import Notebook
 
 
@@ -36,7 +37,7 @@ class NotebookService:
     def get_notebook(self, notebook_id: str) -> Optional[Notebook]:
         """Get a specific notebook."""
         response = api_client.get_notebook(notebook_id)
-        nb_data = response if isinstance(response, dict) else response[0]
+        nb_data = _unwrap(response)
         nb = Notebook(
             name=nb_data["name"],
             description=nb_data["description"],
@@ -50,7 +51,7 @@ class NotebookService:
     def create_notebook(self, name: str, description: str = "") -> Notebook:
         """Create a new notebook."""
         response = api_client.create_notebook(name, description)
-        nb_data = response if isinstance(response, dict) else response[0]
+        nb_data = _unwrap(response)
         nb = Notebook(
             name=nb_data["name"],
             description=nb_data["description"],
@@ -69,7 +70,7 @@ class NotebookService:
             "archived": notebook.archived,
         }
         response = api_client.update_notebook(notebook.id or "", **updates)
-        nb_data = response if isinstance(response, dict) else response[0]
+        nb_data = _unwrap(response)
         # Update the notebook object with the response
         notebook.name = nb_data["name"]
         notebook.description = nb_data["description"]
