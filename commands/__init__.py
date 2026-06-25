@@ -1,5 +1,6 @@
 """Surreal-commands integration for Open Notebook"""
 
+from .chat_commands import chat_completion_command
 from .embedding_commands import (
     embed_insight_command,
     embed_note_command,
@@ -17,6 +18,7 @@ __all__ = [
     "embed_source_command",
     "rebuild_embeddings_command",
     # Other commands
+    "chat_completion_command",
     "generate_podcast_command",
     "process_source_command",
     "process_text_command",

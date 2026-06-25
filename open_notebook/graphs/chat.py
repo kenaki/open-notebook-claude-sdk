@@ -189,6 +189,11 @@ conn = sqlite3.connect(
     LANGGRAPH_CHECKPOINT_FILE,
     check_same_thread=False,
 )
+# Chat now runs in the worker process while the API only reads this checkpoint.
+# WAL lets a single writer and concurrent readers coexist across processes;
+# busy_timeout avoids spurious "database is locked" under brief contention.
+conn.execute("PRAGMA journal_mode=WAL")
+conn.execute("PRAGMA busy_timeout=5000")
 memory = SqliteSaver(conn)
 
 agent_state = StateGraph(ThreadState)

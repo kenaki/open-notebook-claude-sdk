@@ -275,6 +275,10 @@ conn = sqlite3.connect(
     LANGGRAPH_CHECKPOINT_FILE,
     check_same_thread=False,
 )
+# Source chat now runs in the worker; the API only reads this checkpoint. WAL +
+# busy_timeout keeps cross-process reads safe against the worker's single writer.
+conn.execute("PRAGMA journal_mode=WAL")
+conn.execute("PRAGMA busy_timeout=5000")
 memory = SqliteSaver(conn)
 
 # Create the StateGraph
