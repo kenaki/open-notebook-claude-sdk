@@ -76,6 +76,16 @@ async def save_uploaded_file(
         raise
 
 
+def resolve_audio_path(audio_file: str) -> Path:
+    """Resolve an audio_file string (plain path or file:// URI) to a Path."""
+    if audio_file.startswith("file://"):
+        from urllib.parse import unquote, urlparse
+
+        parsed = urlparse(audio_file)
+        return Path(unquote(parsed.path))
+    return Path(audio_file)
+
+
 def resolve_within(folder: str, filename: str) -> str:
     """Resolve ``filename`` inside ``folder`` with a path-traversal guard.
 

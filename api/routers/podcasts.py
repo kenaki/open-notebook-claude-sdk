@@ -1,6 +1,4 @@
-from pathlib import Path
-from typing import List, Optional
-from urllib.parse import unquote, urlparse
+from typing import Any, List, Optional, Tuple
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
@@ -13,6 +11,7 @@ from api.podcast_service import (
     PodcastService,
 )
 from api.routers._helpers import episode_to_response
+from api.upload_utils import resolve_audio_path
 
 router = APIRouter()
 
@@ -32,11 +31,29 @@ class PodcastEpisodeResponse(BaseModel):
     error_message: Optional[str] = None
 
 
-def _resolve_audio_path(audio_file: str) -> Path:
-    if audio_file.startswith("file://"):
-        parsed = urlparse(audio_file)
-        return Path(unquote(parsed.path))
-    return Path(audio_file)
+async def _episode_job_and_audio_url(
+    episode: Any,
+) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """Derive (job_status, error_message, audio_url) for a podcast episode."""
+    job_status = None
+    error_message = None
+    if episode.command:
+        try:
+            detail = await episode.get_job_detail()
+            job_status = detail["status"]
+            error_message = detail["error_message"]
+        except Exception:
+            job_status = "unknown"
+    else:
+        job_status = "completed" if episode.audio_file else "unknown"
+
+    audio_url = None
+    if episode.audio_file:
+        audio_path = resolve_audio_path(episode.audio_file)
+        if audio_path.exists():
+            audio_url = f"/api/podcasts/episodes/{episode.id}/audio"
+
+    return job_status, error_message, audio_url
 
 
 @router.post("/podcasts/generate", response_model=PodcastGenerationResponse)
@@ -92,29 +109,12 @@ async def list_podcast_episodes():
 
         response_episodes = []
         for episode in episodes:
-            # Skip incomplete episodes without command or audio
             if not episode.command and not episode.audio_file:
                 continue
 
-            # Get job status and error message if available
-            job_status = None
-            error_message = None
-            if episode.command:
-                try:
-                    detail = await episode.get_job_detail()
-                    job_status = detail["status"]
-                    error_message = detail["error_message"]
-                except Exception:
-                    job_status = "unknown"
-            else:
-                # No command but has audio file = completed import
-                job_status = "completed"
-
-            audio_url = None
-            if episode.audio_file:
-                audio_path = _resolve_audio_path(episode.audio_file)
-                if audio_path.exists():
-                    audio_url = f"/api/podcasts/episodes/{episode.id}/audio"
+            job_status, error_message, audio_url = await _episode_job_and_audio_url(
+                episode
+            )
 
             response_episodes.append(
                 PodcastEpisodeResponse(
@@ -142,25 +142,9 @@ async def get_podcast_episode(episode_id: str):
     try:
         episode = await PodcastService.get_episode(episode_id)
 
-        # Get job status and error message if available
-        job_status = None
-        error_message = None
-        if episode.command:
-            try:
-                detail = await episode.get_job_detail()
-                job_status = detail["status"]
-                error_message = detail["error_message"]
-            except Exception:
-                job_status = "unknown"
-        else:
-            # No command but has audio file = completed import
-            job_status = "completed" if episode.audio_file else "unknown"
-
-        audio_url = None
-        if episode.audio_file:
-            audio_path = _resolve_audio_path(episode.audio_file)
-            if audio_path.exists():
-                audio_url = f"/api/podcasts/episodes/{episode.id}/audio"
+        job_status, error_message, audio_url = await _episode_job_and_audio_url(
+            episode
+        )
 
         return PodcastEpisodeResponse(
             **episode_to_response(
@@ -190,7 +174,7 @@ async def stream_podcast_episode_audio(episode_id: str):
     if not episode.audio_file:
         raise HTTPException(status_code=404, detail="Episode has no audio file")
 
-    audio_path = _resolve_audio_path(episode.audio_file)
+    audio_path = resolve_audio_path(episode.audio_file)
     if not audio_path.exists():
         raise HTTPException(status_code=404, detail="Audio file not found on disk")
 
@@ -207,7 +191,6 @@ async def retry_podcast_episode(episode_id: str):
     try:
         episode = await PodcastService.get_episode(episode_id)
 
-        # Validate episode is in a failed state
         detail = await episode.get_job_detail()
         if detail["status"] not in ("failed", "error"):
             raise HTTPException(
@@ -215,7 +198,6 @@ async def retry_podcast_episode(episode_id: str):
                 detail=f"Episode is not in a failed state (current: {detail['status']})",
             )
 
-        # Extract params for re-submission
         ep_profile_name = episode.episode_profile.get("name")
         sp_profile_name = episode.speaker_profile.get("name")
         episode_name = episode.name
@@ -227,19 +209,16 @@ async def retry_podcast_episode(episode_id: str):
                 detail="Cannot retry: episode or speaker profile name missing from stored data",
             )
 
-        # Delete audio file if any
         if episode.audio_file:
-            audio_path = _resolve_audio_path(episode.audio_file)
+            audio_path = resolve_audio_path(episode.audio_file)
             if audio_path.exists():
                 try:
                     audio_path.unlink()
                 except Exception as e:
                     logger.warning(f"Failed to delete audio file {audio_path}: {e}")
 
-        # Delete the failed episode
         await episode.delete()
 
-        # Submit a new job
         job_id = await PodcastService.submit_generation_job(
             episode_profile_name=ep_profile_name,
             speaker_profile_name=sp_profile_name,
@@ -262,12 +241,10 @@ async def retry_podcast_episode(episode_id: str):
 async def delete_podcast_episode(episode_id: str):
     """Delete a podcast episode and its associated audio file"""
     try:
-        # Get the episode first to check if it exists and get the audio file path
         episode = await PodcastService.get_episode(episode_id)
 
-        # Delete the physical audio file if it exists
         if episode.audio_file:
-            audio_path = _resolve_audio_path(episode.audio_file)
+            audio_path = resolve_audio_path(episode.audio_file)
             if audio_path.exists():
                 try:
                     audio_path.unlink()
@@ -275,7 +252,6 @@ async def delete_podcast_episode(episode_id: str):
                 except Exception as e:
                     logger.warning(f"Failed to delete audio file {audio_path}: {e}")
 
-        # Delete the episode from the database
         await episode.delete()
 
         logger.info(f"Deleted podcast episode: {episode_id}")
