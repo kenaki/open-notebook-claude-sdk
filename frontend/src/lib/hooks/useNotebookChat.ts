@@ -8,6 +8,7 @@ import { chatApi } from '@/lib/api/chat'
 import { QUERY_KEYS } from '@/lib/api/query-client'
 import {
   NotebookChatMessage,
+  NotebookChatSession,
   NotebookChatSessionWithMessages,
   SourceListResponse,
   NoteResponse,
@@ -16,6 +17,15 @@ import {
 import { ContextSelections } from '@/lib/types/notebook-context'
 import { useBuildNotebookContext } from './useBuildNotebookContext'
 import { useNotebookChatSessions } from './useNotebookChatSessions'
+
+// Stable empty fallback for the sessions query. Using a `data: sessions = []`
+// destructuring default would mint a NEW array every render while the query is
+// loading, churning the identity of `chat.sessions`; effects/memos keyed on it
+// (DeepDiveWorkspace's openChat, ChatDock's syncChats) would then re-run every
+// render and, via their non-idempotent store writes, spin into an infinite
+// update loop on a cold deep-dive load. A module constant keeps the reference
+// stable across renders.
+const EMPTY_SESSIONS: NotebookChatSession[] = []
 
 interface UseNotebookChatParams {
   notebookId: string
@@ -66,7 +76,7 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections,
 
   // Fetch sessions for this notebook.
   const {
-    data: sessions = [],
+    data: sessions = EMPTY_SESSIONS,
     isLoading: loadingSessions,
     refetch: refetchSessions
   } = useQuery({
