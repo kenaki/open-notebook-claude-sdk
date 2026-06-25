@@ -2,7 +2,7 @@
 
 import { AppShell } from '@/components/layout/AppShell'
 import { NotebookHeader } from '../components/NotebookHeader'
-import { ChatGallery } from '@/components/notebooks/ChatGallery'
+import { ChatGallery } from '@/components/notebooks/chat-gallery'
 import { GallerySkeleton } from '@/components/notebooks/GallerySkeleton'
 import { useNotebookWorkspace } from '@/components/notebooks/NotebookWorkspaceProvider'
 import { Button } from '@/components/ui/button'
