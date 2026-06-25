@@ -14,7 +14,7 @@ import {
 } from '@/lib/types/api'
 import { ModelSelector } from './ModelSelector'
 import { ContextIndicator } from '@/components/common/ContextIndicator'
-import { SessionManager } from '@/components/source/SessionManager'
+import { SessionManager } from './SessionManager'
 import { useModalManager } from '@/lib/hooks/use-modal-manager'
 import { toast } from 'sonner'
 import { useTranslation } from '@/lib/hooks/use-translation'

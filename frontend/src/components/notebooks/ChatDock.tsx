@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo } from 'react'
-import { ChatPanel } from '@/components/source/ChatPanel'
+import { ChatPanel } from '@/components/source/chat'
 import { ChatModelPicker } from '@/components/notebooks/ChatModelPicker'
 import { SideChatDefaultMenu } from '@/components/notebooks/SideChatDefaultMenu'
 import { SideChatsMenu } from '@/components/notebooks/SideChatsMenu'

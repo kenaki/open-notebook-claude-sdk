@@ -5,9 +5,9 @@ import { useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft } from 'lucide-react'
 import { useSourceChat } from '@/lib/hooks/useSourceChat'
-import { ChatPanel } from '@/components/source/ChatPanel'
+import { ChatPanel } from '@/components/source/chat'
 import { useNavigation } from '@/lib/hooks/use-navigation'
-import { SourceDetailContent } from '@/components/source/SourceDetailContent'
+import { SourceDetailContent } from '@/components/source/detail'
 
 export default function SourceDetailPage() {
   const router = useRouter()

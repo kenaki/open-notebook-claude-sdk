@@ -15,7 +15,7 @@ import {
 import { formatRelative } from '@/lib/utils/format'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { SourceDetailResponse } from '@/lib/types/api'
-import { NotebookAssociations } from '@/components/source/NotebookAssociations'
+import { NotebookAssociations } from './NotebookAssociations'
 
 interface SourceDetailsTabProps {
   source: SourceDetailResponse

@@ -1,7 +1,7 @@
 'use client'
 
 import { ArrowLeftToLine, ArrowUpToLine, X, Quote } from 'lucide-react'
-import { ChatPanel } from '@/components/source/ChatPanel'
+import { ChatPanel } from '@/components/source/chat'
 import { ChatModelPicker } from '@/components/notebooks/ChatModelPicker'
 import { DeleteChatButton } from '@/components/notebooks/DeleteChatButton'
 import { deriveChatTitle } from '@/components/notebooks/ChatDock'

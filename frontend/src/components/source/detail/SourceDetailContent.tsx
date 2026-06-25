@@ -25,10 +25,10 @@ import {
 } from 'lucide-react'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { useSourceDetail } from '@/lib/hooks/useSourceDetail'
-import { SourceInsightDialog } from '@/components/source/SourceInsightDialog'
-import { SourceContentTab } from '@/components/source/SourceContentTab'
-import { SourceInsightsTab } from '@/components/source/SourceInsightsTab'
-import { SourceDetailsTab } from '@/components/source/SourceDetailsTab'
+import { SourceInsightDialog } from './SourceInsightDialog'
+import { SourceContentTab } from './SourceContentTab'
+import { SourceInsightsTab } from './SourceInsightsTab'
+import { SourceDetailsTab } from './SourceDetailsTab'
 
 interface SourceDetailContentProps {
   sourceId: string
