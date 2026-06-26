@@ -40,7 +40,7 @@ Questions → announce "✅ Chunk A.n complete — safe to clear context" → st
 | Chunk | Title | Status | Owner / session | Notes |
 |------:|-------|--------|-----------------|-------|
 | 1 | chat_completion command + heavy-lane + WAL + register | ☑ done | main session | verified committed (bundled in 827bf48) |
-| 2 | `/chat/execute` → 202 submit (+ chat.ts/api types) | ☐ todo | | |
+| 2 | `/chat/execute` → 202 submit (+ chat.ts/api types) | ☑ done | main session | commit bbce67b; tsc+pytest green |
 | 3 | source_chat send → 202 submit | ☐ todo | | |
 | 4 | status API: active `list_command_jobs` + `commands.ts` | ☐ todo | | unblocks Track B |
 | 5 | shared `jobs-store.ts` (Zustand + persist) | ☐ todo | | unblocks B & C2/C3 |
@@ -49,6 +49,9 @@ Legend: ☐ todo · ◐ in progress · ☑ done · ⏸ blocked · ⊘ deferred.
 ## Changelog (this track)
 - 2026-06-25 — A1 implemented in main session (uncommitted): `chat_commands.py`, `_heavy_lane.py`, WAL
   pragmas on both chat graphs, `__init__.py` registration.
+- 2026-06-26 — A2 ☑: `execute_chat` → 202 submit via CommandService; `ExecuteChatJobResponse` added
+  to schemas.py + types/api.ts; `chatApi.sendMessage` return type updated; command_service guard-import
+  upgraded to full `commands` package. compat `messages` shim on response type keeps tsc green (Track C / C2 cleans up).
 
 ## Chunks (verbatim)
 

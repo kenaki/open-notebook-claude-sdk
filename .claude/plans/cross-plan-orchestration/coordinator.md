@@ -13,9 +13,8 @@
 
 ## SESSION HANDOFF (read first)
 
-**State:** Plan authored 2026-06-25. Nothing executed yet. Readability refactor is 100% landed
-(gate cleared). `background-jobs` A1 is committed-in-tree (verify only). `document-foundation` is
-NOT yet authored (Wave 0 / P3 creates it).
+**State (2026-06-26):** Wave 0 fully ☑ (P1 bg-re-anchor ☑, P2 chatF-re-anchor ☑, P3 doc-foundation authored ☑, P4 bg-A1 verified ☑).
+Wave 1 in progress: bg A2 ☑ (commit bbce67b). A3/C1/df-A1 still ☐.
 
 **Orchestrator resume prompt (paste into a fresh Opus chat to drive a wave):**
 
@@ -183,11 +182,11 @@ Legend: ☐ todo · ◐ in-flight · ☑ done. Update the per-plan coordinator's
 
 | Wave | Chunk | Plan · ID | Model | Status |
 |---:|---|---|:--:|:--:|
-| 0 | P1 re-anchor bg docs | (meta) | 🔵 | ☐ |
-| 0 | P2 re-anchor chatF docs | (meta) | 🔵 | ☐ |
-| 0 | P3 author document-foundation | (meta/chunk-plan) | 🟣 | ☐ |
+| 0 | P1 re-anchor bg docs | (meta) | 🔵 | ☑ |
+| 0 | P2 re-anchor chatF docs | (meta) | 🔵 | ☑ |
+| 0 | P3 author document-foundation | (meta/chunk-plan) | 🟣 | ☑ |
 | 0 | P4 verify bg A1 | background-jobs · A1 | 🔵 | ☑ |
-| 1 | A2 | background-jobs | 🔵 | ☐ |
+| 1 | A2 | background-jobs | 🔵 | ☑ |
 | 1 | A3 | background-jobs | 🔵 | ☐ |
 | 1 | C1 | background-jobs | 🔵 | ☐ |
 | 1 | A1 | document-foundation | 🔵 | ☐ |
@@ -240,3 +239,11 @@ does not duplicate chunk specs.
 - 2026-06-25 — Meta-coordinator authored. Readability refactor confirmed 100% landed (gate cleared).
   Scope = all plans except voice-chat. Wave 0 prep + lane model + cross-lane shared-file rules +
   global wave schedule recorded. Lane-B rows in Waves 1–5 provisional pending P3.
+- 2026-06-26 — P3 ☑: document-foundation/ authored, supersedes source-chaptering/ and
+  pdf-viewer-citations.md. Migration 19 (Track A1) + migration 20 (Phase3). Post-refactor layout
+  confirmed: sources.py → package; SourceContentTab.tsx owns ReactMarkdown render (C3 anchor);
+  PassageSelectionMenu in notebooks/workspace/ (C4 anchor). 5 files: coordinator.md +
+  a-foundation.md + b-pipeline.md + c-surfaces.md + standalone.md. Wave 0 / P3 ☑.
+- 2026-06-26 — Wave 0 fully ☑ (P1+P2 re-anchor commits 961d6c4/9a43913 confirmed; P3+P4 already
+  marked). bg A2 ☑ (bbce67b): `/chat/execute` → 202+job_id, ExecuteChatJobResponse BE+FE,
+  command_service guard-import upgraded; tsc+pytest green. Wave 1 in progress (A3, C1, df-A1 next).
