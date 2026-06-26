@@ -210,6 +210,11 @@ export interface SourceChatMessage {
   // Image/video attachments (Plan D / Chunk 12). On human turns these are what the
   // user attached; AI messages echo `[]`. Absent on old sessions.
   media?: MediaItem[]
+  // Background-jobs C1: optimistic placeholders inserted by C2/C3 while the
+  // worker generates. `pending` shows a spinner; `error` shows a failure bubble.
+  // Never present on messages fetched from the backend.
+  pending?: boolean
+  error?: boolean
 }
 
 export interface SourceChatContextIndicator {
@@ -267,6 +272,11 @@ export interface NotebookChatMessage {
   // Image/video attachments (Plan D / Chunk 12). On human turns these are what the
   // user attached; AI messages echo `[]`. Absent on old sessions.
   media?: MediaItem[]
+  // Background-jobs C1: optimistic placeholders inserted by C2 while the
+  // worker generates. `pending` shows a spinner; `error` shows a failure bubble.
+  // Never present on messages fetched from the backend.
+  pending?: boolean
+  error?: boolean
 }
 
 export interface NotebookChatSessionWithMessages extends NotebookChatSession {

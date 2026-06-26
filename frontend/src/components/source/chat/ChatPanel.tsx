@@ -61,6 +61,7 @@ interface ChatPanelProps {
   pending?: MediaItem[]
   onAddPending?: (item: MediaItem) => void
   onRemovePending?: (index: number) => void
+  onRetry?: (messageId: string) => void
 }
 
 export function ChatPanel({
@@ -95,6 +96,7 @@ export function ChatPanel({
   pending,
   onAddPending,
   onRemovePending,
+  onRetry,
 }: ChatPanelProps) {
   const { t } = useTranslation()
   const [internalInput, setInternalInput] = useState('')
@@ -182,6 +184,7 @@ export function ChatPanel({
       notebookId={notebookId}
       onReferenceClick={handleReferenceClick}
       onSuggestion={handleSuggestion}
+      onRetry={onRetry}
     />
   )
 

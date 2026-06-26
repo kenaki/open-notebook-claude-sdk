@@ -515,6 +515,9 @@ export const enUS = {
     sideChatsCount: "Side chats ({count})",
     noChats: "No chats yet",
     renameChat: "Rename",
+    generating: "Generating…",
+    generationFailed: "Failed to generate a response",
+    retry: "Retry",
   },
   searchPage: {
     askAndSearch: "Ask and Search",

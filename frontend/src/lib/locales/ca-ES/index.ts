@@ -514,6 +514,9 @@ export const caES = {
     sessionCreated: "S'ha creat la sessió de xat",
     sessionUpdated: "S'ha actualitzat la sessió",
     sessionDeleted: "S'ha suprimit la sessió",
+    generating: "Generating…",
+    generationFailed: "Failed to generate a response",
+    retry: "Retry",
   },
   searchPage: {
     askAndSearch: "Pregunta i cerca",

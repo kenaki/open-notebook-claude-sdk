@@ -514,6 +514,9 @@ export const jaJP = {
     sessionCreated: "チャットセッションを作成しました",
     sessionUpdated: "セッションを更新しました",
     sessionDeleted: "セッションを削除しました",
+    generating: "Generating…",
+    generationFailed: "Failed to generate a response",
+    retry: "Retry",
   },
   searchPage: {
     askAndSearch: "質問と検索",

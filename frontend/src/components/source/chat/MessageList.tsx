@@ -39,6 +39,7 @@ interface MessageListProps {
   notebookId?: string
   onReferenceClick: (type: string, id: string) => void
   onSuggestion: (prompt: string) => void
+  onRetry?: (messageId: string) => void
 }
 
 export function MessageList({
@@ -53,6 +54,7 @@ export function MessageList({
   notebookId,
   onReferenceClick,
   onSuggestion,
+  onRetry,
 }: MessageListProps) {
   const { t } = useTranslation()
   const scrollAreaRef = useRef<HTMLDivElement>(null)
@@ -93,6 +95,57 @@ export function MessageList({
           messages.map((message, index) => {
             const isHuman = message.type === 'human'
             const showDivider = isHuman && index > 0
+
+            // Pending placeholder: spinner bubble while the worker generates.
+            if (message.pending) {
+              return (
+                <div
+                  key={message.id}
+                  data-msg-id={message.id}
+                  style={MSG_SCROLL_MARGIN}
+                  className="flex justify-start"
+                >
+                  <div
+                    className="px-3.5 py-2.5 bg-muted text-foreground"
+                    style={{ borderRadius: AI_BUBBLE_RADIUS }}
+                  >
+                    <LoadingSpinner size="sm" />
+                    <span className="sr-only">{t('chat.generating')}</span>
+                  </div>
+                </div>
+              )
+            }
+
+            // Error placeholder: failure bubble with optional retry affordance.
+            if (message.error) {
+              return (
+                <div
+                  key={message.id}
+                  data-msg-id={message.id}
+                  style={MSG_SCROLL_MARGIN}
+                  className="flex justify-start"
+                >
+                  <div className="flex flex-col gap-1.5 items-start">
+                    <div
+                      className="px-3.5 py-2.5 text-sm text-destructive bg-destructive/10"
+                      style={{ borderRadius: AI_BUBBLE_RADIUS }}
+                    >
+                      {t('chat.generationFailed')}
+                    </div>
+                    {onRetry && (
+                      <button
+                        type="button"
+                        onClick={() => onRetry(message.id)}
+                        className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2 transition-colors"
+                      >
+                        {t('chat.retry')}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )
+            }
+
             return (
               <div
                 key={message.id}
