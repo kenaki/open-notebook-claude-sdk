@@ -309,6 +309,12 @@ export interface SendNotebookChatMessageRequest {
   media?: MediaItem[]
 }
 
+export interface ExecuteChatJobResponse {
+  job_id: string
+  session_id: string
+  messages: NotebookChatMessage[]  // compat shim: Track C (C2) removes this access; backend omits it
+}
+
 export interface BuildContextRequest {
   notebook_id: string
   context_config: {

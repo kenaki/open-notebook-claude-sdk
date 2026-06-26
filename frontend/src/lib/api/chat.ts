@@ -5,9 +5,9 @@ import {
   CreateNotebookChatSessionRequest,
   UpdateNotebookChatSessionRequest,
   SendNotebookChatMessageRequest,
-  NotebookChatMessage,
   BuildContextRequest,
   BuildContextResponse,
+  ExecuteChatJobResponse,
   MediaItem,
 } from '@/lib/types/api'
 
@@ -33,12 +33,9 @@ export const chatApi = {
     await del(`/chat/sessions/${sessionId}`)
   },
 
-  // Messaging (synchronous, no streaming)
+  // Messaging — submits to background worker, returns {job_id, session_id}
   sendMessage: async (data: SendNotebookChatMessageRequest) => {
-    return post<{
-      session_id: string
-      messages: NotebookChatMessage[]
-    }>(`/chat/execute`, data)
+    return post<ExecuteChatJobResponse>(`/chat/execute`, data)
   },
 
   buildContext: async (data: BuildContextRequest) => {

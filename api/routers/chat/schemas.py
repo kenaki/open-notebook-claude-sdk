@@ -141,6 +141,11 @@ class ExecuteChatResponse(BaseModel):
     messages: List[ChatMessage] = Field(..., description="Updated message list")
 
 
+class ExecuteChatJobResponse(BaseModel):
+    job_id: str = Field(..., description="Background job ID")
+    session_id: str = Field(..., description="Chat session ID")
+
+
 class BuildContextRequest(BaseModel):
     notebook_id: str = Field(..., description="Notebook ID")
     context_config: Dict[str, Any] = Field(..., description="Context configuration")

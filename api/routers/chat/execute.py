@@ -1,38 +1,31 @@
-import asyncio
+import json
 import traceback
 from typing import Any, Dict, List
 
 from fastapi import APIRouter, HTTPException
-from langchain_core.messages import HumanMessage
-from langchain_core.runnables import RunnableConfig
 from loguru import logger
 
+from api.command_service import CommandService
 from api.routers._helpers import ensure_prefix, get_or_404
-from api.routers.chat.citations import _build_chat_message
 from api.routers.chat.schemas import (
     BuildContextRequest,
     BuildContextResponse,
-    ChatMessage,
+    ExecuteChatJobResponse,
     ExecuteChatRequest,
-    ExecuteChatResponse,
 )
 from open_notebook.domain.notebook import ChatSession, Note, Notebook, Source
-from open_notebook.graphs.chat import graph as chat_graph
 
 router = APIRouter()
 
 
-@router.post("/chat/execute", response_model=ExecuteChatResponse)
+@router.post("/chat/execute", response_model=ExecuteChatJobResponse, status_code=202)
 async def execute_chat(request: ExecuteChatRequest):
-    """Execute a chat request and get AI response."""
+    """Submit a chat request to the background worker and return a job ID."""
     try:
         full_session_id = ensure_prefix(request.session_id, "chat_session")
         session = await get_or_404(ChatSession, full_session_id, "Session")
 
-        notebook = None
         notebook_id = await session.get_notebook_id()
-        if notebook_id:
-            notebook = await Notebook.get(notebook_id)
 
         # Per-request override takes precedence over session-level override
         model_override = (
@@ -41,55 +34,29 @@ async def execute_chat(request: ExecuteChatRequest):
             else getattr(session, "model_override", None)
         )
 
-        # Use sync get_state() in a thread since SqliteSaver doesn't support async
-        current_state = await asyncio.to_thread(
-            chat_graph.get_state,
-            config=RunnableConfig(configurable={"thread_id": full_session_id}),
+        job_id = await CommandService.submit_command_job(
+            "open_notebook",
+            "chat_completion",
+            {
+                "session_id": full_session_id,
+                "message": request.message,
+                "context": json.dumps(request.context),
+                "model_override": model_override,
+                "media": [m.model_dump() for m in request.media] if request.media else [],
+                "kind": "notebook",
+                "notebook_id": notebook_id,
+                "label": request.message[:60],
+            },
         )
 
-        state_values = current_state.values if current_state else {}
-        state_values["messages"] = state_values.get("messages", [])
-        state_values["context"] = request.context
-        state_values["notebook"] = notebook
-        state_values["model_override"] = model_override
-        state_values["quote"] = getattr(session, "quote", None)
-
-        # Media attachments ride on additional_kwargs so they (a) round-trip through
-        # the LangGraph checkpoint and (b) reach the model: Esperanto inlines images
-        # as multimodal blocks, the agent path references them as files.
-        additional_kwargs: Dict[str, Any] = {}
-        if request.media:
-            additional_kwargs["media"] = [m.model_dump() for m in request.media]
-        user_message = HumanMessage(
-            content=request.message, additional_kwargs=additional_kwargs
-        )
-        state_values["messages"].append(user_message)
-
-        result = chat_graph.invoke(
-            input=state_values,  # type: ignore[arg-type]
-            config=RunnableConfig(
-                configurable={
-                    "thread_id": full_session_id,
-                    "model_id": model_override,
-                }
-            ),
-        )
-
-        await session.save()
-
-        messages: List[ChatMessage] = []
-        for msg in result.get("messages", []):
-            messages.append(await _build_chat_message(msg, len(messages)))
-
-        return ExecuteChatResponse(session_id=request.session_id, messages=messages)
+        return ExecuteChatJobResponse(job_id=job_id, session_id=request.session_id)
     except Exception as e:
         logger.error(
-            f"Error executing chat: {str(e)}\n"
+            f"Error submitting chat job: {str(e)}\n"
             f"  Session ID: {request.session_id}\n"
-            f"  Model override: {request.model_override}\n"
             f"  Traceback:\n{traceback.format_exc()}"
         )
-        raise HTTPException(status_code=500, detail=f"Error executing chat: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error submitting chat job: {str(e)}")
 
 
 @router.post("/chat/context", response_model=BuildContextResponse)
