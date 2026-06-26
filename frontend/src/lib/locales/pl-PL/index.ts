@@ -514,6 +514,9 @@ export const plPL = {
     sessionCreated: "Utworzono sesję czatu",
     sessionUpdated: "Zaktualizowano sesję",
     sessionDeleted: "Usunięto sesję",
+    generating: "Generating…",
+    generationFailed: "Failed to generate a response",
+    retry: "Retry",
   },
   searchPage: {
     askAndSearch: "Pytaj i szukaj",

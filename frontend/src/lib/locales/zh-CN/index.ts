@@ -514,6 +514,9 @@ export const zhCN = {
     sessionCreated: "聊天会话已创建",
     sessionUpdated: "会话已更新",
     sessionDeleted: "会话已删除",
+    generating: "Generating…",
+    generationFailed: "Failed to generate a response",
+    retry: "Retry",
   },
   searchPage: {
     askAndSearch: "提问与搜索",

@@ -514,6 +514,9 @@ export const itIT = {
     sessionCreated: "Sessione chat creata",
     sessionUpdated: "Sessione aggiornata",
     sessionDeleted: "Sessione eliminata",
+    generating: "Generating…",
+    generationFailed: "Failed to generate a response",
+    retry: "Retry",
   },
   searchPage: {
     askAndSearch: "Chiedi e cerca",

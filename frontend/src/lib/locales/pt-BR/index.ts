@@ -514,6 +514,9 @@ export const ptBR = {
     sessionCreated: "Sessão de chat criada",
     sessionUpdated: "Sessão atualizada",
     sessionDeleted: "Sessão excluída",
+    generating: "Generating…",
+    generationFailed: "Failed to generate a response",
+    retry: "Retry",
   },
   searchPage: {
     askAndSearch: "Perguntar e Buscar",

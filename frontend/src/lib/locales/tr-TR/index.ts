@@ -514,6 +514,9 @@ export const trTR = {
     sessionCreated: "Sohbet oturumu oluşturuldu",
     sessionUpdated: "Oturum güncellendi",
     sessionDeleted: "Oturum silindi",
+    generating: "Generating…",
+    generationFailed: "Failed to generate a response",
+    retry: "Retry",
   },
   searchPage: {
     askAndSearch: "Sor ve Ara",

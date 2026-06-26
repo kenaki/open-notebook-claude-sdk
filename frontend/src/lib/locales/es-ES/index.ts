@@ -514,6 +514,9 @@ export const esES = {
     sessionCreated: "Sesión de chat creada",
     sessionUpdated: "Sesión actualizada",
     sessionDeleted: "Sesión eliminada",
+    generating: "Generating…",
+    generationFailed: "Failed to generate a response",
+    retry: "Retry",
   },
   searchPage: {
     askAndSearch: "Preguntar y buscar",

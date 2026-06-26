@@ -517,6 +517,9 @@ export const deDE = {
     sessionCreated: "Chat-Sitzung erstellt",
     sessionUpdated: "Sitzung aktualisiert",
     sessionDeleted: "Sitzung gelöscht",
+    generating: "Generating…",
+    generationFailed: "Failed to generate a response",
+    retry: "Retry",
   },
   searchPage: {
     askAndSearch: "Fragen und Suchen",

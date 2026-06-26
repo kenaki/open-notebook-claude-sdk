@@ -514,6 +514,9 @@ export const bnIN = {
     sessionCreated: "চ্যাট সেশন তৈরি হয়েছে",
     sessionUpdated: "সেশন আপডেট হয়েছে",
     sessionDeleted: "সেশন মুছে ফেলা হয়েছে",
+    generating: "Generating…",
+    generationFailed: "Failed to generate a response",
+    retry: "Retry",
   },
   searchPage: {
     askAndSearch: "জিজ্ঞাসা ও অনুসন্ধান",
