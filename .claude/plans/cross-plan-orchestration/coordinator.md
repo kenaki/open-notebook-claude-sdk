@@ -14,7 +14,7 @@
 ## SESSION HANDOFF (read first)
 
 **State (2026-06-26):** Wave 0 fully ☑ (P1 bg-re-anchor ☑, P2 chatF-re-anchor ☑, P3 doc-foundation authored ☑, P4 bg-A1 verified ☑).
-Wave 1 in progress: bg A2 ☑ (commit bbce67b). A3/C1/df-A1 still ☐.
+Wave 1 in progress: bg A2 ☑ (bbce67b), bg C1 ☑ (3295a27). bg A3 + df A1 still ☐ (next wave folds in bg A4+A5).
 
 **Orchestrator resume prompt (paste into a fresh Opus chat to drive a wave):**
 
@@ -188,7 +188,7 @@ Legend: ☐ todo · ◐ in-flight · ☑ done. Update the per-plan coordinator's
 | 0 | P4 verify bg A1 | background-jobs · A1 | 🔵 | ☑ |
 | 1 | A2 | background-jobs | 🔵 | ☑ |
 | 1 | A3 | background-jobs | 🔵 | ☐ |
-| 1 | C1 | background-jobs | 🔵 | ☐ |
+| 1 | C1 | background-jobs | 🔵 | ☑ |
 | 1 | A1 | document-foundation | 🔵 | ☐ |
 | 2 | A4 | background-jobs | 🔵 | ☐ |
 | 2 | A5 | background-jobs | 🔵 | ☐ |

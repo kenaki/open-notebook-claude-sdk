@@ -39,7 +39,7 @@ read referenced files → implement → verify → commit → mark ☑ here AND 
 ## Status table (this track)
 | Chunk | Title | Status | Owner / session | Notes |
 |------:|-------|--------|-----------------|-------|
-| 1 | shared pending/error chat bubble + message types | ☐ todo | | dep-free |
+| 1 | shared pending/error chat bubble + message types | ☑ done | worktree-bg-jobs-c1 | merged to feature/multipanelchat |
 | 2 | notebook send/receive refactor | ☐ todo | | dep A2, A5, C1 |
 | 3 | source-chat → cache-backed + job-tracked | ☐ todo | | dep A3, A5, C1 |
 Legend: ☐ todo · ◐ in progress · ☑ done · ⏸ blocked · ⊘ deferred.
