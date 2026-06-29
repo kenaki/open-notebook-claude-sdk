@@ -115,6 +115,8 @@ export function ChatDock({ notebookId, chat, contextStats }: ChatDockProps) {
       handleOpen(session.id)
     }
     const wasNew = sessions.find((s) => s.id === target)?.title === newChatLabel
+    // sendMessageTo submits the job (202) and returns immediately; isStreaming
+    // (chat.getIsSending) derives from the jobs-store for the rest of the lifecycle.
     const result = await chat.sendMessageTo(target, message, undefined, media)
     // Only finalize on success: clearing pending media / renaming on a failed
     // send would discard the user's staged attachments and draft (Track A / A2).

@@ -59,13 +59,19 @@ export function PoppedChatPanel({
   const newChatLabel = t('chat.newChat')
   const quote = workspaceChat?.quote ?? null
 
-  const handleSend = async (message: string, media?: MediaItem[]) => {
+  const handleSend = async (message: string, media?: MediaItem[]): Promise<{ ok: boolean }> => {
     const wasNew = session.title === newChatLabel
-    await chat.sendMessageTo(session.id, message, undefined, media)
-    clearPending(session.id)
-    if (wasNew) {
-      chat.renameSession(session.id, deriveChatTitle(message, media, t))
+    const result = await chat.sendMessageTo(session.id, message, undefined, media)
+    // Only finalise on successful submit: clearing pending media or renaming on
+    // a failed send would discard the user's staged attachments and draft
+    // ({ok:false} contract — mirrors ChatDock.handleSend).
+    if (result.ok) {
+      clearPending(session.id)
+      if (wasNew) {
+        chat.renameSession(session.id, deriveChatTitle(message, media, t))
+      }
     }
+    return result
   }
 
   return (

@@ -6,6 +6,7 @@ import { toastApiError } from '@/lib/utils/error-handler'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { chatApi } from '@/lib/api/chat'
 import { QUERY_KEYS } from '@/lib/api/query-client'
+import { useJobsStore } from '@/lib/stores/jobs-store'
 import {
   NotebookChatMessage,
   NotebookChatSession,
@@ -42,10 +43,14 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections,
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
-  // Per-session in-flight flag (multiple popped chats can send concurrently).
+  // Per-session in-flight flag for the brief submit round-trip (before the job
+  // is registered in the store). After registration, getIsSending derives from
+  // useJobsStore.hasActiveForSession — no cross-panel bleed.
   const [sendingBySession, setSendingBySession] = useState<Record<string, boolean>>({})
   // Pending model override for when user changes model before a session exists.
   const [pendingModelOverride, setPendingModelOverride] = useState<string | null>(null)
+  // Subscribe to all jobs so getIsSending re-derives on any status change.
+  const storeJobs = useJobsStore((s) => s.jobs)
 
   const { buildContext, tokenCount, charCount } = useBuildNotebookContext({
     notebookId,
@@ -120,9 +125,20 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections,
       sessionId ? (sessionDataById[sessionId]?.messages ?? []) : [],
     [sessionDataById]
   )
+  // True while the 202 submit is in-flight OR while a background job for this
+  // session is active (new/running). Keyed strictly by sessionId so multiple
+  // popped panels don't bleed into each other.
   const getIsSending = useCallback(
-    (sessionId: string | null): boolean => (sessionId ? !!sendingBySession[sessionId] : false),
-    [sendingBySession]
+    (sessionId: string | null): boolean => {
+      if (!sessionId) return false
+      if (sendingBySession[sessionId]) return true
+      return storeJobs.some(
+        (j) =>
+          j.sessionId === sessionId &&
+          (j.status === 'new' || j.status === 'running')
+      )
+    },
+    [sendingBySession, storeJobs]
   )
 
   // Auto-select most recent session when sessions are loaded.
@@ -189,23 +205,46 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections,
 
       try {
         const context = await buildContext()
-        const response = await chatApi.sendMessage({
+        // Submit to the background worker (202). The response carries the job_id;
+        // the answer arrives later via the Track-B poller invalidating this session.
+        const { job_id } = await chatApi.sendMessage({
           session_id: sessionId,
           message,
           context,
           model_override: modelOverride ?? (cachedSession?.model_override ?? undefined),
           media: media && media.length ? media : undefined
         })
-        patchSessionMessages(sessionId, () => response.messages)
-        queryClient.invalidateQueries({ queryKey: QUERY_KEYS.notebookChatSession(sessionId) })
+        // Register in the global jobs store so getIsSending + the tray track this.
+        useJobsStore.getState().register({
+          jobId: job_id,
+          kind: 'notebook_chat',
+          sessionId,
+          notebookId,
+          label: message.slice(0, 60),
+          status: 'new',
+          startedAt: new Date().toISOString(),
+        })
+        // Insert a pending assistant placeholder into the cache. The poller (Track B)
+        // replaces it by invalidating the session query on job completion.
+        patchSessionMessages(sessionId, (prev) => [
+          ...prev,
+          {
+            id: `pending-${job_id}`,
+            type: 'ai' as const,
+            content: '',
+            pending: true,
+            timestamp: new Date().toISOString(),
+          },
+        ])
         return { ok: true }
       } catch (err: unknown) {
         toastApiError(err, t, 'apiErrors.failedToSendMessage')
-        // Remove optimistic message on error. The caller reads { ok: false } to
-        // restore the user's draft + staged media (Track A / A2).
+        // Submission failed: strip the optimistic user message so the caller can
+        // restore the draft + staged media ({ok:false} contract from Track A / A2).
         patchSessionMessages(sessionId, (prev) => prev.filter((msg) => !msg.id.startsWith('temp-')))
         return { ok: false }
       } finally {
+        // Clear the brief submit-round-trip flag; store job status takes over.
         setSendingBySession((prev) => ({ ...prev, [sessionId!]: false }))
       }
     },
