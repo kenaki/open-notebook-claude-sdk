@@ -61,8 +61,8 @@ context" → stop.
 | Chunk | Title | Status | Notes |
 |------:|-------|--------|-------|
 | A1 | Migration 19 + SourceSection model + page/section fields | ☑ | commit 34ec0bd; source_section + source.page_offset/page_labels + source_embedding.section verified live in DB |
-| A2 | Docling extraction + page provenance | ☐ | Verify on Spark (GPU, aarch64+CUDA) |
-| A3 | Chaptering: section tree + get_sections/get_outline + tagged chunks + backfill | ☐ | |
+| A2 | Docling extraction + page provenance | ☑ | commit 7e13d72; content-core[docling]>=1.14.1 + _extract_docling_page_map() + page_map on SourceState + PyMuPDF fallback. Q-docling-install resolved (docling 2.x installed). ⚠ GPU spot-check on real textbook still pending (manual) |
+| A3 | Chaptering: section tree + get_sections/get_outline + tagged chunks + backfill | ☑ | commit 6ba9f40; section_commands.py (build_sections+backfill_sections), Source.get_sections/get_outline, graph rewired save_source→submit_sections→trigger_transformations, embed_source stamps section. pytest test_domain 31 pass; worker registers 16 cmds; api starts clean. ⚠ live-ingest spot-check (real textbook→tree) pending (manual). wave3 2026-06-29 |
 
 Legend: ☐ todo · ◐ in progress · ☑ done · ⏸ blocked
 

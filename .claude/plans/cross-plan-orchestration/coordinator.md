@@ -13,9 +13,26 @@
 
 ## SESSION HANDOFF (read first)
 
-**State (2026-06-29, orchestrated run):** Wave 0 ☑. **Wave 1 ☑ COMPLETE** (bg A2 bbce67b, bg C1 3295a27, bg A3 1ef7325, df A1 34ec0bd).
-**Wave 2 partial:** bg A4 ☑ (484ef18), bg A5 ☑ (831aede). Still ☐ in W2: df A2 (Docling), df Phase1 (PDFViewer).
-**Now unblocked for next wave:** bg Track B (B1 needs A4✓+A5✓), bg C2 (A2✓+A5✓+C1✓), bg C3 (A3✓+A5✓+C1✓), df A2 (A1✓), df Phase1 (dep-free).
+**State (2026-06-29, resumed orchestrator — reconciled):** Wave 0 ☑. **Wave 1 ☑.** **Wave 2 ☑ COMPLETE**
+(bg A4 484ef18, bg A5 831aede, df A2 7e13d72, df Phase1 1608053). **Wave 3 partial:** bg B1 ☑ (82257ae),
+bg C2 ☑ (5171514). Still ☐ in W3: **bg C3** (source-chat job-tracked), **df A3** (chaptering/section tree).
+> ⚠ Reconciliation note: df A2, df Phase1, bg B1, bg C2 were all committed by prior sessions AFTER the
+> last doc-update commit (d053b8f) but never recorded in any status table. Verified against `git log`
+> (file sets match chunk specs) + tree-health (backend imports clean, SourceSection live, docling imports).
+> Manual spot-checks still owed: df A2 GPU extraction on a real textbook, df Phase1 in-browser PDF render.
+**Wave 3 ☑ COMPLETE** (bg B1 82257ae, bg C2 5171514, bg C3 e9bcafe, df A3 6ba9f40). Merged-tree verify:
+backend pytest test_domain 31 pass + worker 16 cmds + api clean; frontend tsc clean (only pre-existing
+`@testing-library` test-file noise). **Track A (document-foundation) FULLY ☑; bg Track A + Track C FULLY ☑.**
+
+**Next runnable wave = Wave 4 (≤4):**
+- **bg B2** — JobTray + JobTrayItem + JobStatusBadge + mount (dep B1✓) — FE, Track-B files
+- **bg B3** — completion/failure toasts + job-origin helper (dep B1✓) — FE, Track-B files
+- **df C1** — GET /sources/{id}/sections + schemas + has_sections (dep A3✓) — BE api/routers/sources + FE-disjoint
+- **df B1 🚧 HUMAN GATE** — vision-verifier plumbing + is-Qwen-vision pilot (dep A1✓+A3✓). ⚠ Spike needs
+  the live Spark + Ollama; STOPS for GO/NO-GO before df B2. Will PARK at its gate; bg B2/B3 + df C1 proceed.
+> ⚠ bg B2 + bg B3 both edit `(dashboard)/layout.tsx` (mount) and may both add to `components/jobs/*` — they
+> are the SAME track (B), sequential, NOT file-disjoint → run B2 then B3 (one worktree), not concurrently.
+> Concurrency this wave: { bg B2→B3 } ‖ { df C1 } ‖ { df B1 pilot, parks }.
 ⚠ **Migration-counter caveat (for chatF B1 executor):** the version counter is **positional** (= list length), not filename-derived. df A1 appended `19.surrealql` as list position 18 → DB now at version 18. When chatF B1 adds migration **18**, it MUST be **appended at the END of both lists** (becoming the highest position), NOT inserted between 17 and 19 — inserting positionally would re-run 19 and skip the new 18. Filenames are labels only.
 
 **Orchestrator resume prompt (paste into a fresh Opus chat to drive a wave):**
@@ -194,12 +211,12 @@ Legend: ☐ todo · ◐ in-flight · ☑ done. Update the per-plan coordinator's
 | 1 | A1 | document-foundation | 🔵 | ☑ |
 | 2 | A4 | background-jobs | 🔵 | ☑ |
 | 2 | A5 | background-jobs | 🔵 | ☑ |
-| 2 | A2 | document-foundation | 🔵 | ☐ |
-| 2 | Phase1 | document-foundation | 🔵 | ☐ |
-| 3 | B1 | background-jobs | 🔵 | ☐ |
-| 3 | C2 | background-jobs | 🔵 | ☐ |
-| 3 | C3 | background-jobs | 🔵 | ☐ |
-| 3 | A3 | document-foundation | 🔵 | ☐ |
+| 2 | A2 | document-foundation | 🔵 | ☑ |
+| 2 | Phase1 | document-foundation | 🔵 | ☑ |
+| 3 | B1 | background-jobs | 🔵 | ☑ |
+| 3 | C2 | background-jobs | 🔵 | ☑ |
+| 3 | C3 | background-jobs | 🔵 | ☑ |
+| 3 | A3 | document-foundation | 🔵 | ☑ |
 | 4 | B2 | background-jobs | 🔵 | ☐ |
 | 4 | B3 | background-jobs | 🔵 | ☐ |
 | 4 | B1 🚧 | document-foundation | 🟣 | ☐ |
@@ -238,6 +255,19 @@ does not duplicate chunk specs.
 - **ds4-deepseek-v4-flash** — research/decision-gated; orthogonal.
 
 ## Changelog
+- 2026-06-29 (later, wave 3) — **Wave 3 ☑.** Fanned out bg C3 ‖ df A3 (2× Sonnet, feature-based
+  worktrees). Both detected their worktree was main-based and re-seeded onto feature/multipanelchat HEAD
+  (orchestrator integrated via cherry-pick — clean, file-disjoint). **bg C3 (e9bcafe)** source-chat
+  cache+job-tracked; **df A3 (6ba9f40)** chaptering/section tree + commands. Merged-tree verify green
+  (pytest 31; worker 14→16 cmds; api clean; tsc clean modulo pre-existing test-file noise). Doc-foundation
+  Track A complete; bg Tracks A+C complete. Follow-ups filed (Q-section-delete-cleanup, Q-page-map-provenance).
+  Next = Wave 4: bg B2→B3 ‖ df C1 ‖ df B1🚧 (parks at Qwen-vision gate).
+- 2026-06-29 (later) — **Resumed orchestrator reconciliation.** Recorded 4 chunks that had landed in git
+  but were never marked in any status table: **df A2 (7e13d72)**, **df Phase1 (1608053)**, **bg B1 (82257ae)**,
+  **bg C2 (5171514)**. → **Wave 2 ☑ COMPLETE; Wave 3 half-done** (bg B1 ✓, bg C2 ✓). Updated all four
+  affected docs (bg coordinator + b/c track files; df coordinator + a-foundation + standalone) and this
+  meta table. Tree-health verified: backend imports clean (SourceSection live), docling imports. **Next
+  wave = bg C3 ‖ df A3.**
 - 2026-06-25 — Meta-coordinator authored. Readability refactor confirmed 100% landed (gate cleared).
   Scope = all plans except voice-chat. Wave 0 prep + lane model + cross-lane shared-file rules +
   global wave schedule recorded. Lane-B rows in Waves 1–5 provisional pending P3.

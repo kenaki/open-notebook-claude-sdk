@@ -53,16 +53,27 @@ self-locates from the Status table + `git log`. (Authoritative copy lives in eac
 | A | 3 | source_chat send → 202 submit | ☑ done | wave1 2026-06-29 | commit 1ef7325; POST→202 verified in openapi |
 | A | 4 | status API: `list_command_jobs` active + `commands.ts` client | ☑ done | wave1 2026-06-29 | commit 484ef18; SQL runs, GET /commands/active→200 |
 | A | 5 | shared `jobs-store.ts` (Zustand + persist) | ☑ done | wave1 2026-06-29 | commit 831aede; tsc clean. **Track B fully unblocked** |
-| B | 1 | `use-jobs-poller` + `JobsRuntime` + mount | ☐ todo | | dep A4, A5 |
-| B | 2 | `JobTray` + `JobTrayItem` + `JobStatusBadge` + mount | ☐ todo | | dep B1 |
-| B | 3 | completion/failure toasts + `job-origin` helper | ☐ todo | | dep B1 |
+| B | 1 | `use-jobs-poller` + `JobsRuntime` + mount | ☑ done | wave3 2026-06-29 | commit 82257ae; use-jobs-poller.ts (237L) + JobsRuntime + layout mount |
+| B | 2 | `JobTray` + `JobTrayItem` + `JobStatusBadge` + mount | ☐ todo | | dep B1 ✓ |
+| B | 3 | completion/failure toasts + `job-origin` helper | ☐ todo | | dep B1 ✓ |
 | C | 1 | shared pending/error chat bubble + message types | ☑ done | worktree-bg-jobs-c1 | commit 3295a27; merged to feature/multipanelchat |
-| C | 2 | notebook send/receive refactor | ☐ todo | | dep A2, A5, C1 |
-| C | 3 | source-chat → cache-backed + job-tracked | ☐ todo | | dep A3, A5, C1 |
+| C | 2 | notebook send/receive refactor | ☑ done | wave3 2026-06-29 | commit 5171514; useNotebookChat sendMessageTo → job submit + placeholder |
+| C | 3 | source-chat → cache-backed + job-tracked | ☑ done | wave3 2026-06-29 | commit e9bcafe; cache-backed + job-tracked source chat (mirrors C2). tsc clean. ⚠ live-flow smoke pending |
 | D | 1 | `jobs.*` i18n keys across 14 locales | ☐ todo | | dep B, C |
 Legend: ☐ todo · ◐ in progress · ☑ done · ⏸ blocked · ⊘ deferred.
 
 ## Changelog (cross-track)
+- 2026-06-29 — Wave-3 completion: **C3 ☑ (e9bcafe)** source-chat moved off useState+SSE onto the
+  TanStack cache + job model (mirrors C2); `source-chat.ts` send → 202 `{job_id,session_id}`, optimistic
+  user msg + `source_chat` job register + `pending-<job_id>` placeholder, SSE reader deleted. Verified:
+  frontend `tsc` clean (only pre-existing `@testing-library` test-file errors); B1 poller already
+  invalidates `sourceChatSession(targetId,sessionId)` on completion (use-jobs-poller.ts:204). **Track C
+  now fully ☑ (C1+C2+C3); Track A ☑.** Remaining: Track B B2/B3 (dep B1✓), Track D D1 (dep B,C).
+- 2026-06-29 — Reconciliation (resumed orchestrator): **B1 ☑ (82257ae)** use-jobs-poller + JobsRuntime +
+  layout mount; **C2 ☑ (5171514)** notebook send/receive refactor (sendMessageTo → 202 job submit +
+  pending placeholder, store-derived sending in ChatDock/PoppedChatPanel). Both were committed by prior
+  sessions but never recorded — now reflected in both status tables. **Next runnable: B2, B3 (dep B1 ✓)
+  and C3 (dep A3/A5/C1 ✓).**
 - 2026-06-25 — Plan authored from approved [design.md](design.md). Track A Chunk 1 already implemented in
   the main session (uncommitted on `feature/multipanelchat`): `commands/chat_commands.py`,
   `commands/_heavy_lane.py`, WAL pragmas on both chat graphs, `commands/__init__.py` registration.

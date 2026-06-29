@@ -130,8 +130,8 @@ Legend: ☐ todo · ◐ in progress · ☑ done · ⏸ blocked · ⊘ deferred
 | Track | Chunk | Title | Status | Notes |
 |-------|------:|-------|--------|-------|
 | A | A1 | Migration 19 + SourceSection model + page/section fields | ☑ | commit 34ec0bd; mig19 schema LIVE in DB (source_section + page_offset/page_labels + source_embedding.section). wave1 2026-06-29 |
-| A | A2 | Docling extraction + page provenance (folds pdf Phase 2) | ☐ | Verify on Spark (GPU) |
-| A | A3 | Chaptering: section tree + get_sections/get_outline + tagged chunks + backfill | ☐ | |
+| A | A2 | Docling extraction + page provenance (folds pdf Phase 2) | ☑ | commit 7e13d72; content-core[docling] dep + page_map provenance + PyMuPDF fallback. wave2 2026-06-29. ⚠ GPU spot-check on real textbook still pending (manual) |
+| A | A3 | Chaptering: section tree + get_sections/get_outline + tagged chunks + backfill | ☑ | commit 6ba9f40; build_sections+backfill_sections commands, section tree + get_sections/get_outline, chunk→section stamping, graph rewire. pytest 31 pass; worker 16 cmds; api clean. ⚠ live-ingest spot-check pending. **Track A fully ☑ → B & C unblocked; Phase3 unblocked.** wave3 2026-06-29 |
 | B | B1 🚧 | Vision-verifier plumbing + **validation-gate pilot** | ☐ | **HUMAN GATE** — needs A ☑; GO/NO-GO before B2 |
 | B | B2 | Per-chapter verify-clean background command | ☐ | Needs B1 GO |
 | B | B3 | Per-section summaries + doc abstract | ☐ | |
@@ -141,8 +141,8 @@ Legend: ☐ todo · ◐ in progress · ☑ done · ⏸ blocked · ⊘ deferred
 | C | C2 | Frontend types + getSections API client | ☐ | |
 | C | C3 | TOC sidebar + per-chapter rendering (SourceContentTab) | ☐ | Anchors in SourceContentTab.tsx |
 | C | C4 | Interaction: selection actions + per-chapter AI + citation→jump | ☐ | |
-| — | Phase1 | PDFViewer.tsx inline viewer (FE-only, dep-free) | ☐ | Independent — any time |
-| — | Phase3 | page_number/bbox + vector_search + #p=N citations (mig 20) | ☐ | Needs A2 ☑ + Phase1 ☑ |
+| — | Phase1 | PDFViewer.tsx inline viewer (FE-only, dep-free) | ☑ | commit 1608053; @react-pdf-viewer + PDFViewer.tsx + Original PDF tab + 14 locales + next.config worker. wave2 2026-06-29. ⚠ browser render spot-check still pending (manual) |
+| — | Phase3 | page_number/bbox + vector_search + #p=N citations (mig 20) | ☐ | Needs A2 ✓ + A3 + Phase1 ✓ |
 | — | Phase4 | Annotations (source_annotation, mig 21, highlight plugin) | ⊘ | **DEFERRED** — do not start until Phase1+Phase3 ☑ |
 
 ---
@@ -297,11 +297,34 @@ mv .claude/plans/pdf-viewer-citations.md .claude/plans/archived/pdf-viewer-citat
 - **Q-qwen-vision** — Is the deployed Ollama Qwen the vision build? Does Esperanto+Ollama forward image_url blocks? *Default:* B1 pilot answers this. If NO: fall back to cloud vision (Claude) for verify-only or text-only dual-parse cross-check; adjust B2 design accordingly.
 - **Q-section-content-payload** — Return `content` inline in the sections endpoint or lazy per-section fetch? *Default:* `summary` always inline; `content` only on demand (keep tree payload light). Revisit if UX needs it.
 - **Q-viewer-peer-dep** — @react-pdf-viewer React 19/Next 16 compatibility. *Default:* Phase1 validates; fallback to react-pdf + custom highlight layer. Resolve in Phase1.
+- **Q-section-delete-cleanup** *(new, from A3)* — `Source.delete()` does not remove orphaned `source_section`
+  rows. *Default:* add `DELETE source_section WHERE source = $source_id` to `Source.delete()` (or a DB
+  trigger). Low severity; fold into B (which already edits notebook.py) or a small follow-up. Tracked.
+- **Q-page-map-provenance** *(new, from A3)* — `page_map` (Docling per-block page_no) is **transient graph
+  state**, not persisted; the fire-and-forget `build_sections` command therefore can't read it and falls
+  back to PyMuPDF page-text search (page_start/end = None when the file was auto-deleted). **Phase3 impact:**
+  Phase3 must source `page_number` from `page_map` on the **ingest/graph path** (where it exists) rather than
+  from `build_sections`, or persist `page_map` for the backfill path. Resolve in Phase3 design.
 
 ---
 
 ## Changelog
 
+- 2026-06-29 — Wave-3: **A3 ☑ (6ba9f40)** — chaptering. `commands/section_commands.py`
+  (`build_sections` + `backfill_sections`), `Source.get_sections()`/`get_outline()`, graph rewired
+  `save_source → submit_sections → trigger_transformations` (fire-and-forget), `embed_source` stamps
+  `section` on `source_embedding`. Boundary detection = PyMuPDF `get_toc()` → Docling heading fallback →
+  single section (Decision #4). Verified: `pytest tests/test_domain.py` 31 pass; worker registers 16
+  commands (build_sections+backfill_sections); api starts clean. Live-ingest spot-check pending (manual,
+  on punch-list). **Track A FULLY ☑ → Track B, Track C, and Phase3 all unblocked.** Two follow-ups filed:
+  Q-section-delete-cleanup, Q-page-map-provenance (see Open Questions).
+- 2026-06-29 — Reconciliation (resumed orchestrator): **A2 ☑ (7e13d72)** Docling extraction +
+  page_map provenance (`content-core[docling]`, `_extract_docling_page_map()`, PyMuPDF fallback;
+  Q-docling-install resolved — docling 2.x imports clean); **Phase1 ☑ (1608053)** inline PDFViewer
+  (@react-pdf-viewer + Original PDF tab + next.config worker alias + 14 locales). Both committed by
+  prior sessions but never recorded — now reflected in all status tables. Outstanding **manual**
+  spot-checks (not blocking): A2 GPU extraction on a real textbook; Phase1 in-browser PDF render.
+  **A3 now runnable (deps A1 ✓ + A2 ✓); Phase3 unblocked once A3 ☑.**
 - 2026-06-26 — Document-foundation plan authored. Supersedes source-chaptering/ and
   pdf-viewer-citations.md. Migration 19 for Track A, 20 for Phase3. Post-refactor paths confirmed
   (sources.py → package; SourceDetailContent → detail/; SourceContentTab owns ReactMarkdown render;

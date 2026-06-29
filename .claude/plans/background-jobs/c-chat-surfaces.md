@@ -40,8 +40,8 @@ read referenced files → implement → verify → commit → mark ☑ here AND 
 | Chunk | Title | Status | Owner / session | Notes |
 |------:|-------|--------|-----------------|-------|
 | 1 | shared pending/error chat bubble + message types | ☑ done | worktree-bg-jobs-c1 | merged to feature/multipanelchat |
-| 2 | notebook send/receive refactor | ☐ todo | | dep A2, A5, C1 |
-| 3 | source-chat → cache-backed + job-tracked | ☐ todo | | dep A3, A5, C1 |
+| 2 | notebook send/receive refactor | ☑ done | wave3 2026-06-29 | commit 5171514; sendMessageTo → chatApi.sendMessage 202 + register job + pending placeholder; ChatDock/PoppedChatPanel store-derived sending |
+| 3 | source-chat → cache-backed + job-tracked | ☑ done | wave3 2026-06-29 | commit e9bcafe; useSourceChat → cache (QUERY_KEYS.sourceChatSession) + patchSourceSessionMessages, source-chat.ts sendMessage→202{job_id,session_id}, register source_chat job + pending placeholder, SSE reader removed. tsc clean. ⚠ live app-flow smoke (send→placeholder→persist→tray) pending (manual). B1 poller already invalidates sourceChatSession on completion ✓ |
 Legend: ☐ todo · ◐ in progress · ☑ done · ⏸ blocked · ⊘ deferred.
 
 ## Changelog (this track)
