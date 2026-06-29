@@ -452,6 +452,9 @@ export const frFR = {
     processingBatchSources: "Traitement de {count} sources. Cela peut prendre quelques instants.",
     processingSource: "Votre source est en cours de traitement. Cela peut prendre quelques instants.",
     maxFilesAllowed: "Maximum {count} fichiers autorisés par lot",
+    viewPdf: "Original PDF",
+    loadingPdf: "Loading PDF...",
+    pdfLoadError: "Failed to load PDF",
   },
   chat: {
     chatSettings: "Chat settings",

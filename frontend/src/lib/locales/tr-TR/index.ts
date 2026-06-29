@@ -452,6 +452,9 @@ export const trTR = {
     processingBatchSources: "{count} kaynak işleniyor. Bu birkaç dakika sürebilir.",
     processingSource: "Kaynağınız işleniyor. Bu birkaç dakika sürebilir.",
     maxFilesAllowed: "Toplu işlem başına en fazla {count} dosya",
+    viewPdf: "Original PDF",
+    loadingPdf: "Loading PDF...",
+    pdfLoadError: "Failed to load PDF",
   },
   chat: {
     chatSettings: "Chat settings",

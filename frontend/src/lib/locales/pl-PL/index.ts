@@ -452,6 +452,9 @@ export const plPL = {
     processingBatchSources: "Przetwarzanie źródeł: {count}. Może to chwilę potrwać.",
     processingSource: "Twoje źródło jest przetwarzane. Może to chwilę potrwać.",
     maxFilesAllowed: "Maksymalna liczba plików w partii: {count}",
+    viewPdf: "Original PDF",
+    loadingPdf: "Loading PDF...",
+    pdfLoadError: "Failed to load PDF",
   },
   chat: {
     chatSettings: "Chat settings",

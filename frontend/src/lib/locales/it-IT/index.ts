@@ -452,6 +452,9 @@ export const itIT = {
     processingBatchSources: "Elaborazione di {count} fonti. Potrebbe richiedere qualche istante.",
     processingSource: "La tua fonte è in elaborazione. Potrebbe richiedere qualche istante.",
     maxFilesAllowed: "Massimo {count} file consentiti per batch",
+    viewPdf: "Original PDF",
+    loadingPdf: "Loading PDF...",
+    pdfLoadError: "Failed to load PDF",
   },
   chat: {
     chatSettings: "Chat settings",

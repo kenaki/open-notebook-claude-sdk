@@ -455,6 +455,9 @@ export const deDE = {
     processingBatchSources: "{count} Quellen werden verarbeitet. Das kann einen Moment dauern.",
     processingSource: "Deine Quelle wird verarbeitet. Das kann einen Moment dauern.",
     maxFilesAllowed: "Maximal {count} Dateien pro Sammelimport erlaubt",
+    viewPdf: "Original PDF",
+    loadingPdf: "Loading PDF...",
+    pdfLoadError: "Failed to load PDF",
   },
   chat: {
     chatSettings: "Chat settings",

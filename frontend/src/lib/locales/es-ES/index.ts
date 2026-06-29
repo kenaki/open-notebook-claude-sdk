@@ -452,6 +452,9 @@ export const esES = {
     processingBatchSources: "Procesando {count} fuentes. Esto puede tomar unos momentos.",
     processingSource: "Tu fuente está siendo procesada. Esto puede tomar unos momentos.",
     maxFilesAllowed: "Máximo {count} archivos permitidos por lote",
+    viewPdf: "Original PDF",
+    loadingPdf: "Loading PDF...",
+    pdfLoadError: "Failed to load PDF",
   },
   chat: {
     chatSettings: "Chat settings",

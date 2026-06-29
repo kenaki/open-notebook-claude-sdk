@@ -452,6 +452,9 @@ export const jaJP = {
     processingBatchSources: "{count}件のソースを処理中。しばらくお待ちください。",
     processingSource: "ソースを処理中です。しばらくお待ちください。",
     maxFilesAllowed: "一括処理は最大{count}件までです",
+    viewPdf: "Original PDF",
+    loadingPdf: "Loading PDF...",
+    pdfLoadError: "Failed to load PDF",
   },
   chat: {
     chatSettings: "Chat settings",

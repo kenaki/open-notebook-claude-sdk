@@ -452,6 +452,9 @@ export const ptBR = {
     processingBatchSources: "Processando {count} fontes. Isso pode levar alguns momentos.",
     processingSource: "Sua fonte está sendo processada. Isso pode levar alguns momentos.",
     maxFilesAllowed: "Máximo de {count} arquivos permitidos por lote",
+    viewPdf: "Original PDF",
+    loadingPdf: "Loading PDF...",
+    pdfLoadError: "Failed to load PDF",
   },
   chat: {
     chatSettings: "Chat settings",

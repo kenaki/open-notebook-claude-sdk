@@ -21,6 +21,20 @@ const nextConfig: NextConfig = {
     proxyClientMaxBodySize: '100mb',
   } as NextConfig['experimental'],
 
+  // PDF.js worker alias for @react-pdf-viewer (Next.js 16 / webpack 5)
+  // Aliases the legacy .js worker entry to the ESM build so webpack
+  // can bundle it without "Can't resolve" errors.
+  // The PDFViewer component uses a CDN workerUrl at runtime; this alias
+  // only affects webpack module resolution (import side).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  webpack: (config: any) => {
+    config.resolve = config.resolve || {}
+    config.resolve.alias = config.resolve.alias || {}
+    config.resolve.alias['pdfjs-dist/build/pdf.worker.min.js'] =
+      'pdfjs-dist/build/pdf.worker.min.mjs'
+    return config
+  },
+
   // API Rewrites: Proxy /api/* requests to FastAPI backend
   // This simplifies reverse proxy configuration - users only need to proxy to port 8502
   // Next.js handles internal routing to the API backend on port 5055

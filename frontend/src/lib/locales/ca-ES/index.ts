@@ -452,6 +452,9 @@ export const caES = {
     processingBatchSources: "S'estan processant {count} fonts. Això pot trigar uns moments.",
     processingSource: "S'està processant la teva font. Això pot trigar uns moments.",
     maxFilesAllowed: "Màxim {count} fitxers per lot",
+    viewPdf: "Original PDF",
+    loadingPdf: "Loading PDF...",
+    pdfLoadError: "Failed to load PDF",
   },
   chat: {
     chatSettings: "Chat settings",

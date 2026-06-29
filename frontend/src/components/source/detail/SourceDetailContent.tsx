@@ -29,6 +29,12 @@ import { SourceInsightDialog } from './SourceInsightDialog'
 import { SourceContentTab } from './SourceContentTab'
 import { SourceInsightsTab } from './SourceInsightsTab'
 import { SourceDetailsTab } from './SourceDetailsTab'
+import { PDFViewer } from '@/components/common/PDFViewer'
+import type { SourceDetailResponse } from '@/lib/types/api'
+
+/** Returns true when the source's uploaded file is a PDF. */
+const isPdfAsset = (source: SourceDetailResponse): boolean =>
+  source.asset?.file_path?.toLowerCase().endsWith('.pdf') ?? false
 
 interface SourceDetailContentProps {
   sourceId: string
@@ -184,12 +190,15 @@ export function SourceDetailContent({
       {/* Tabs Content */}
       <div className="flex-1 overflow-y-auto px-2">
         <Tabs defaultValue="content" className="w-full">
-          <TabsList className="grid w-full grid-cols-3 sticky top-0 z-10">
+          <TabsList className={`grid w-full ${isPdfAsset(source) ? 'grid-cols-4' : 'grid-cols-3'} sticky top-0 z-10`}>
             <TabsTrigger value="content">{t('sources.content')}</TabsTrigger>
             <TabsTrigger value="insights">
               {t('common.insights')} {insights.length > 0 && `(${insights.length})`}
             </TabsTrigger>
             <TabsTrigger value="details">{t('sources.details')}</TabsTrigger>
+            {isPdfAsset(source) && (
+              <TabsTrigger value="pdf">{t('sources.viewPdf')}</TabsTrigger>
+            )}
           </TabsList>
 
           <TabsContent value="content" className="mt-6">
@@ -225,6 +234,12 @@ export function SourceDetailContent({
               onAssociationsSave={fetchSource}
             />
           </TabsContent>
+
+          {isPdfAsset(source) && (
+            <TabsContent value="pdf" className="mt-6">
+              <PDFViewer sourceId={source.id} />
+            </TabsContent>
+          )}
         </Tabs>
       </div>
 

@@ -452,6 +452,9 @@ export const ruRU = {
     processingBatchSources: "Обработка источников: {count}. Это может занять некоторое время.",
     processingSource: "Источник обрабатывается. Это может занять некоторое время.",
     maxFilesAllowed: "Максимальное количество файлов в пакете: {count}",
+    viewPdf: "Original PDF",
+    loadingPdf: "Loading PDF...",
+    pdfLoadError: "Failed to load PDF",
   },
   chat: {
     chatSettings: "Chat settings",

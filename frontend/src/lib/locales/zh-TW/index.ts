@@ -452,6 +452,9 @@ export const zhTW = {
     processingBatchSources: "正在處理 {count} 個來源，請稍候...",
     processingSource: "正在處理您的來源，請稍候...",
     maxFilesAllowed: "每批最多允許 {count} 個檔案",
+    viewPdf: "Original PDF",
+    loadingPdf: "Loading PDF...",
+    pdfLoadError: "Failed to load PDF",
   },
   chat: {
     chatSettings: "Chat settings",

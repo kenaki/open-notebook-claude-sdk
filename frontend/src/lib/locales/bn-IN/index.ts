@@ -452,6 +452,9 @@ export const bnIN = {
     processingBatchSources: "{count}টি উৎস প্রক্রিয়াকরণ করা হচ্ছে। এটি কিছু মুহূর্ত সময় নিতে পারে।",
     processingSource: "আপনার উৎস প্রক্রিয়াকরণ করা হচ্ছে। এটি কিছু মুহূর্ত সময় নিতে পারে।",
     maxFilesAllowed: "ব্যাচে সর্বোচ্চ {count}টি ফাইল অনুমোদিত",
+    viewPdf: "Original PDF",
+    loadingPdf: "Loading PDF...",
+    pdfLoadError: "Failed to load PDF",
   },
   chat: {
     chatSettings: "Chat settings",
