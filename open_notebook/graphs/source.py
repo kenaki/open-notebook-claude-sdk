@@ -1,5 +1,6 @@
+import asyncio
 import operator
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from content_core import extract_content
 from content_core.common import ProcessSourceState
@@ -7,7 +8,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 from loguru import logger
-from typing_extensions import Annotated, TypedDict
+from typing_extensions import Annotated, NotRequired, TypedDict
 
 from open_notebook.ai.models import Model, ModelManager
 from open_notebook.domain.content_settings import ContentSettings
@@ -24,11 +25,48 @@ class SourceState(TypedDict):
     source: Source
     transformation: Annotated[list, operator.add]
     embed: bool
+    # A2: per-block page provenance from Docling (None for non-PDF or on fallback)
+    page_map: NotRequired[Optional[List[Dict]]]
 
 
 class TransformationState(TypedDict):
     source: Source
     transformation: Transformation
+
+
+# ---------------------------------------------------------------------------
+# A2: Docling page-provenance extraction (sync; called via asyncio.to_thread)
+# ---------------------------------------------------------------------------
+
+def _extract_docling_page_map(file_path: str) -> Tuple[str, List[Dict]]:
+    """
+    Run Docling on a PDF file and return (structured_markdown, page_map).
+
+    page_map is a list of {"text": str, "page_no": int} dicts — one entry per
+    text block — where page_no is Docling's 1-indexed physical page number.
+    Raises on any failure so the caller can fall back gracefully.
+    """
+    from docling.document_converter import DocumentConverter  # lazy import
+
+    converter = DocumentConverter()
+    result = converter.convert(file_path)
+    doc = result.document
+
+    full_text: str = doc.export_to_markdown()
+
+    page_map: List[Dict] = []
+    for item, _level in doc.iterate_items():
+        text = getattr(item, "text", None)
+        prov_list = getattr(item, "prov", None)
+        if text and prov_list:
+            try:
+                page_no: int = prov_list[0].page_no
+                page_map.append({"text": text, "page_no": page_no})
+            except (AttributeError, IndexError):
+                # Malformed provenance on this block — skip silently
+                pass
+
+    return full_text, page_map
 
 
 async def content_process(state: SourceState) -> dict:
@@ -104,7 +142,39 @@ async def content_process(state: SourceState) -> dict:
             "The content may be empty, inaccessible, or in an unsupported format."
         )
 
-    return {"content_state": processed_state}
+    # ------------------------------------------------------------------
+    # A2: For PDF sources, additionally run Docling directly to capture
+    #     structured markdown (full_text) and per-block page provenance
+    #     (page_map).  Non-PDF sources are unchanged.
+    #     On ANY Docling failure: log + keep existing content + page_map=None.
+    # ------------------------------------------------------------------
+    page_map: Optional[List[Dict]] = None
+    if (
+        processed_state.identified_type == "application/pdf"
+        and processed_state.file_path
+    ):
+        try:
+            full_text, page_map = await asyncio.to_thread(
+                _extract_docling_page_map, processed_state.file_path
+            )
+            # Replace content with Docling's structured markdown (richer
+            # heading/table/list structure compared to the PyMuPDF plain-text path)
+            processed_state.content = full_text
+            logger.info(
+                f"Docling extraction: {len(page_map)} blocks, {len(full_text)} chars"
+            )
+        except ImportError:
+            logger.warning(
+                "Docling not installed — PDF uses existing extraction path; "
+                "page_map=None.  Install via: uv sync (content-core[docling] in pyproject.toml)"
+            )
+        except Exception as exc:
+            logger.warning(
+                f"Docling extraction failed ({exc!r}) — falling back to existing "
+                "extraction content; page_map=None"
+            )
+
+    return {"content_state": processed_state, "page_map": page_map}
 
 
 async def save_source(state: SourceState) -> dict:
