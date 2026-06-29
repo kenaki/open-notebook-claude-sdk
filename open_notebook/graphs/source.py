@@ -10,6 +10,8 @@ from langgraph.types import Send
 from loguru import logger
 from typing_extensions import Annotated, NotRequired, TypedDict
 
+from surreal_commands import submit_command
+
 from open_notebook.ai.models import Model, ModelManager
 from open_notebook.domain.content_settings import ContentSettings
 from open_notebook.domain.notebook import Asset, Source
@@ -251,18 +253,61 @@ async def transform_content(state: TransformationState) -> Optional[dict]:
     }
 
 
+async def submit_sections(state: SourceState) -> dict:
+    """
+    A3: Fire-and-forget build_sections for PDF sources.
+
+    Submits a build_sections command immediately after save_source so that the
+    section tree is built asynchronously (retriable, visible in the job tray).
+    Non-PDF sources and sources without full_text are skipped silently.
+    """
+    source = state.get("source")
+    if not source:
+        return {}
+
+    # Decision #12: chaptering is for PDFs / long documents only in v1
+    content_state = state.get("content_state")
+    is_pdf = False
+    if content_state is not None and hasattr(content_state, "identified_type"):
+        is_pdf = content_state.identified_type == "application/pdf"
+    elif source.asset and source.asset.file_path:
+        is_pdf = source.asset.file_path.lower().endswith(".pdf")
+
+    if not is_pdf:
+        return {}
+
+    if not source.full_text or not source.full_text.strip():
+        return {}
+
+    try:
+        cmd_id = submit_command(
+            "open_notebook",
+            "build_sections",
+            {"source_id": str(source.id)},
+        )
+        logger.info(f"Submitted build_sections for source {source.id}: {cmd_id}")
+    except Exception as exc:
+        # Non-fatal: chaptering failure must not block the ingest pipeline
+        logger.warning(f"Failed to submit build_sections for {source.id}: {exc}")
+
+    return {}
+
+
 # Create and compile the workflow
 workflow = StateGraph(SourceState)
 
 # Add nodes
 workflow.add_node("content_process", content_process)
 workflow.add_node("save_source", save_source)
+workflow.add_node("submit_sections", submit_sections)  # A3: chaptering fire-and-forget
 workflow.add_node("transform_content", transform_content)
 # Define the graph edges
 workflow.add_edge(START, "content_process")
 workflow.add_edge("content_process", "save_source")
+# A3: submit chaptering job after save, then fan out transformations
+workflow.add_edge("save_source", "submit_sections")
 workflow.add_conditional_edges(
-    "save_source", trigger_transformations, ["transform_content"]
+    "submit_sections", trigger_transformations, ["transform_content"]
 )
 workflow.add_edge("transform_content", END)
 

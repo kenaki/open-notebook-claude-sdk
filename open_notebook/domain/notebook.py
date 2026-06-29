@@ -495,6 +495,101 @@ class Source(ObjectModel):
             logger.exception(e)
             raise DatabaseOperationError("Failed to fetch insights for source")
 
+    async def get_sections(self) -> List[Dict]:
+        """
+        Return source_section records as a nested tree.
+
+        Each node dict contains all section fields plus a 'children' key
+        holding a list of child nodes (recursive).  Roots are returned in
+        document order (ORDER BY order in the query).
+        """
+        try:
+            rows = await repo_query(
+                "SELECT * FROM source_section WHERE source = $sid ORDER BY order",
+                {"sid": ensure_record_id(self.id)},
+            )
+        except Exception as exc:
+            logger.error(f"Error fetching sections for source {self.id}: {exc}")
+            logger.exception(exc)
+            raise DatabaseOperationError("Failed to fetch sections for source")
+
+        if not rows:
+            return []
+
+        # Build id → node map; add 'children' list to each node
+        by_id: Dict[str, Dict] = {}
+        for row in rows:
+            node = dict(row)
+            node["id"] = str(row["id"])
+            node["children"] = []
+            by_id[node["id"]] = node
+
+        # Wire children; collect roots
+        roots: List[Dict] = []
+        for row in rows:
+            node = by_id[str(row["id"])]
+            parent = row.get("parent")
+            if parent:
+                parent_id = str(parent)
+                if parent_id in by_id:
+                    by_id[parent_id]["children"].append(node)
+                else:
+                    roots.append(node)  # orphan → treat as root
+            else:
+                roots.append(node)
+
+        return roots
+
+    async def get_outline(self) -> List[Dict]:
+        """
+        Return section outline (no content) as a nested tree.
+
+        Each node: {id, title, level, order, page_start, page_end, summary, children}.
+        Used for the agent context (chapter-summary outline) and the TOC sidebar.
+        """
+        try:
+            rows = await repo_query(
+                "SELECT id, title, level, order, page_start, page_end, summary, parent "
+                "FROM source_section WHERE source = $sid ORDER BY order",
+                {"sid": ensure_record_id(self.id)},
+            )
+        except Exception as exc:
+            logger.error(f"Error fetching outline for source {self.id}: {exc}")
+            logger.exception(exc)
+            raise DatabaseOperationError("Failed to fetch outline for source")
+
+        if not rows:
+            return []
+
+        by_id: Dict[str, Dict] = {}
+        for row in rows:
+            node = {
+                "id": str(row["id"]),
+                "title": row.get("title", ""),
+                "level": row.get("level", 1),
+                "order": row.get("order", 0),
+                "page_start": row.get("page_start"),
+                "page_end": row.get("page_end"),
+                "summary": row.get("summary"),
+                "children": [],
+            }
+            by_id[node["id"]] = node
+
+        roots: List[Dict] = []
+        for row in rows:
+            node = by_id[str(row["id"])]
+            parent = row.get("parent")
+            if parent:
+                parent_id = str(parent)
+                if parent_id in by_id:
+                    by_id[parent_id]["children"].append(node)
+                else:
+                    roots.append(node)
+            else:
+                roots.append(node)
+
+        return roots
+
     async def add_to_notebook(self, notebook_id: str) -> Any:
         if not notebook_id:
             raise InvalidInputError("Notebook ID must be provided")

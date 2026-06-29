@@ -9,7 +9,13 @@ from open_notebook.ai.models import model_manager
 from open_notebook.database.repository import ensure_record_id, repo_insert, repo_query
 from open_notebook.domain.notebook import Note, Source, SourceInsight
 from open_notebook.exceptions import ConfigurationError
-from open_notebook.utils.chunking import ContentType, chunk_text, detect_content_type
+from open_notebook.utils.chunking import (
+    ContentType,
+    build_section_char_map,
+    chunk_text,
+    detect_content_type,
+    find_chunk_section,
+)
 from open_notebook.utils.embedding import generate_embedding, generate_embeddings
 
 
@@ -451,15 +457,36 @@ async def embed_source_command(input_data: EmbedSourceInput) -> EmbedSourceOutpu
             )
 
         # 6. Bulk INSERT source_embedding records
-        records = [
-            {
-                "source": ensure_record_id(input_data.source_id),
-                "order": idx,
-                "content": chunk,
-                "embedding": embedding,
-            }
-            for idx, (chunk, embedding) in enumerate(zip(chunks, embeddings))
-        ]
+        # A3: stamp section on each record (None when sections not yet built)
+        source_sections_raw = await repo_query(
+            "SELECT id, content FROM source_section WHERE source = $sid ORDER BY order",
+            {"sid": ensure_record_id(input_data.source_id)},
+        )
+        section_map = (
+            build_section_char_map(source.full_text, source_sections_raw)
+            if source_sections_raw and source.full_text
+            else []
+        )
+        logger.debug(
+            f"Section map: {len(section_map)} entries for {total_chunks} chunks"
+        )
+
+        records = []
+        for idx, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
+            section_rid = None
+            if section_map and source.full_text:
+                sec_id = find_chunk_section(chunk, source.full_text, section_map)
+                if sec_id:
+                    section_rid = ensure_record_id(sec_id)
+            records.append(
+                {
+                    "source": ensure_record_id(input_data.source_id),
+                    "order": idx,
+                    "content": chunk,
+                    "embedding": embedding,
+                    "section": section_rid,
+                }
+            )
 
         logger.debug(f"Inserting {len(records)} source_embedding records")
         await repo_insert("source_embedding", records)

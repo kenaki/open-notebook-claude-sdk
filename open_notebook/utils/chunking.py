@@ -492,3 +492,80 @@ def chunk_text(
 
     logger.debug(f"Created {len(chunks)} chunks from {text_tokens} tokens")
     return chunks
+
+
+# ---------------------------------------------------------------------------
+# A3: Section-aware chunk matching helpers
+# ---------------------------------------------------------------------------
+
+
+def build_section_char_map(
+    full_text: str, sections: List[dict]
+) -> List[Tuple[int, int, str]]:
+    """
+    Build a sorted list of ``(char_start, char_end, section_id)`` tuples by
+    locating each section's content within *full_text*.
+
+    *sections* is a flat list of dicts with at least ``'id'`` and ``'content'``
+    keys (as returned by ``repo_query`` over ``source_section``).  Sections with
+    empty content or missing IDs are silently skipped.
+
+    The search advances monotonically through *full_text* to avoid false matches
+    when two sections share a common prefix.
+
+    Phase3 will extend this function to also return per-chunk page numbers.
+    """
+    result: List[Tuple[int, int, str]] = []
+    search_from = 0
+
+    for sec in sections:
+        content = sec.get("content", "") or ""
+        sid = str(sec.get("id", "") or "")
+        if not content or not sid:
+            continue
+
+        # Use up to 80 characters as the search key to balance speed and accuracy
+        search_key = content[:min(80, len(content))].strip()
+        if not search_key:
+            continue
+
+        idx = full_text.find(search_key, search_from)
+        if idx >= 0:
+            result.append((idx, idx + len(content), sid))
+            search_from = idx + 1  # advance monotonically
+
+    return result
+
+
+def find_chunk_section(
+    chunk: str, full_text: str, section_map: List[Tuple[int, int, str]]
+) -> Optional[str]:
+    """
+    Return the section_id of the section that contains *chunk* in *full_text*.
+
+    Locates the chunk by searching for its first 80 characters inside
+    *full_text*, then performs a linear scan over *section_map* to find which
+    ``(char_start, char_end, section_id)`` span contains the chunk's start offset.
+
+    Returns ``None`` if:
+    - *section_map* is empty;
+    - the chunk text cannot be found in *full_text* (e.g. whitespace normalisation
+      by the splitter altered it slightly);
+    - the chunk falls outside all known section spans.
+    """
+    if not section_map:
+        return None
+
+    search_key = chunk[:min(80, len(chunk))].strip()
+    if not search_key:
+        return None
+
+    chunk_start = full_text.find(search_key)
+    if chunk_start < 0:
+        return None
+
+    for start, end, section_id in section_map:
+        if start <= chunk_start < end:
+            return section_id
+
+    return None
