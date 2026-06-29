@@ -74,10 +74,60 @@ class CommandService:
         status_filter: Optional[str] = None,
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
-        """List command jobs with optional filtering"""
-        # This will be implemented with proper SurrealDB queries
-        # For now, return empty list as this is foundation phase
-        return []
+        """List command jobs with optional filtering.
+
+        status_filter="active" expands to status IN ['new','running'].
+        command_filter filters by command name (exact match).
+        """
+        from open_notebook.database.repository import repo_query
+
+        conditions: List[str] = []
+        vars: Dict[str, Any] = {}
+
+        if status_filter == "active":
+            conditions.append("status IN ['new', 'running']")
+        elif status_filter:
+            conditions.append("status = $status_val")
+            vars["status_val"] = status_filter
+
+        if command_filter:
+            conditions.append("name = $name")
+            vars["name"] = command_filter
+
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+        # Clamp to a safe range; embed directly (int — no injection risk).
+        safe_limit = max(1, min(int(limit), 1000))
+
+        query = (
+            "SELECT id, app, name, args, status, result, error_message, created, updated "
+            f"FROM command {where_clause} "
+            f"ORDER BY created DESC LIMIT {safe_limit}"
+        )
+
+        try:
+            rows = await repo_query(query, vars if vars else None)
+            result = []
+            for row in rows:
+                # Rename id → job_id for consistency with CommandJobStatusResponse.
+                # repo_query already stringifies RecordIDs via parse_record_ids.
+                job_id = row.pop("id", None)
+                result.append(
+                    {
+                        "job_id": str(job_id) if job_id is not None else None,
+                        "name": row.get("name"),
+                        "status": row.get("status"),
+                        "result": row.get("result"),
+                        "error_message": row.get("error_message"),
+                        "created": str(row["created"]) if row.get("created") else None,
+                        "updated": str(row["updated"]) if row.get("updated") else None,
+                        "args": row.get("args"),
+                    }
+                )
+            return result
+        except Exception as e:
+            logger.error(f"Failed to list command jobs: {e}")
+            raise
 
     @staticmethod
     async def cancel_command_job(job_id: str) -> bool:

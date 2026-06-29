@@ -342,6 +342,19 @@ export interface BuildContextResponse {
   char_count: number
 }
 
+// Background-jobs A4: row shape returned by GET /commands/jobs and
+// GET /commands/active. Used by commandsApi.listActive() and commandsApi.getJob().
+export interface CommandJobSummary {
+  job_id: string
+  name: string
+  status: string
+  result?: Record<string, unknown> | null
+  error_message?: string | null
+  created?: string | null
+  updated?: string | null
+  args?: Record<string, unknown> | null
+}
+
 // Notebook Multi-Chat Workspace (Plan C) — client-only per-chat workspace state.
 // A "chat" maps onto an existing chat session (Decision 5/8): title + messages
 // come from the session/useNotebookChat; these fields live only in Zustand.

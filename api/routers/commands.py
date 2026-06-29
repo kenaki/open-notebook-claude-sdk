@@ -105,6 +105,27 @@ async def list_command_jobs(
         )
 
 
+@router.get("/commands/active", response_model=List[Dict[str, Any]])
+async def list_active_command_jobs(
+    command_filter: Optional[str] = Query(None, description="Filter by command name"),
+    limit: int = Query(100, description="Maximum number of jobs to return"),
+):
+    """Convenience alias: list only active (new/running) command jobs.
+    Equivalent to GET /commands/jobs?status_filter=active.
+    """
+    try:
+        jobs = await CommandService.list_command_jobs(
+            command_filter=command_filter, status_filter="active", limit=limit
+        )
+        return jobs
+
+    except Exception as e:
+        logger.error(f"Error listing active command jobs: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail="Failed to list active command jobs"
+        )
+
+
 @router.delete("/commands/jobs/{job_id}")
 async def cancel_command_job(job_id: str):
     """Cancel a running command job"""
