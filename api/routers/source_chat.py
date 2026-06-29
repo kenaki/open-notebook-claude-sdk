@@ -2,12 +2,11 @@ import asyncio
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Path
-from fastapi.responses import StreamingResponse
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from api.command_service import CommandService
 from api.routers._helpers import ensure_prefix, get_or_404
-from api.source_chat_service import stream_source_chat_response
 from open_notebook.database.repository import ensure_record_id, repo_query
 from open_notebook.domain.notebook import ChatSession, Source
 from open_notebook.graphs.source_chat import source_chat_graph as source_chat_graph
@@ -78,6 +77,11 @@ class SendMessageRequest(BaseModel):
 class SuccessResponse(BaseModel):
     success: bool = Field(True, description="Operation success status")
     message: str = Field(..., description="Success message")
+
+
+class SendSourceChatJobResponse(BaseModel):
+    job_id: str = Field(..., description="Background job ID")
+    session_id: str = Field(..., description="Chat session ID")
 
 
 @router.post(
@@ -337,17 +341,21 @@ async def delete_source_chat_session(
         )
 
 
-@router.post("/sources/{source_id}/chat/sessions/{session_id}/messages")
+@router.post(
+    "/sources/{source_id}/chat/sessions/{session_id}/messages",
+    response_model=SendSourceChatJobResponse,
+    status_code=202,
+)
 async def send_message_to_source_chat(
     request: SendMessageRequest,
     source_id: str = Path(..., description="Source ID"),
     session_id: str = Path(..., description="Session ID"),
 ):
-    """Send a message to source chat session with SSE streaming response."""
+    """Submit a source-chat message to the background worker; returns job_id + session_id."""
     try:
         # Verify source exists
         full_source_id = ensure_prefix(source_id, "source")
-        source = await get_or_404(Source, full_source_id, "Source")
+        await get_or_404(Source, full_source_id, "Source")
 
         # Verify session exists and is related to source
         full_session_id = ensure_prefix(session_id, "chat_session")
@@ -368,27 +376,23 @@ async def send_message_to_source_chat(
             session, "model_override", None
         )
 
-        # Update session timestamp
-        await session.save()
-
-        # Return streaming response
-        return StreamingResponse(
-            stream_source_chat_response(
-                session_id=full_session_id,
-                source_id=full_source_id,
-                message=request.message,
-                model_override=model_override,
-            ),
-            media_type="text/plain",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "Content-Type": "text/plain; charset=utf-8",
+        job_id = await CommandService.submit_command_job(
+            "open_notebook",
+            "chat_completion",
+            {
+                "session_id": full_session_id,
+                "message": request.message,
+                "model_override": model_override,
+                "kind": "source",
+                "source_id": full_source_id,
+                "label": request.message[:60],
             },
         )
+
+        return SendSourceChatJobResponse(job_id=job_id, session_id=full_session_id)
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error sending message to source chat: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error sending message: {str(e)}")
+        logger.error(f"Error submitting source chat job: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error submitting source chat job: {str(e)}")
