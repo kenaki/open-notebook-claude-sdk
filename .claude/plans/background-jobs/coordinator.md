@@ -50,9 +50,9 @@ self-locates from the Status table + `git log`. (Authoritative copy lives in eac
 |-------|------:|-------|--------|-----------------|-------|
 | A | 1 | chat_completion command + heavy-lane + WAL + register | ☑ done | main session | verified committed (bundled in 827bf48) |
 | A | 2 | `/chat/execute` → 202 submit (+ chat.ts/api types) | ☑ done | main session | commit bbce67b; tsc+pytest green |
-| A | 3 | source_chat send → 202 submit | ☐ todo | | |
-| A | 4 | status API: `list_command_jobs` active + `commands.ts` client | ☐ todo | | unblocks B |
-| A | 5 | shared `jobs-store.ts` (Zustand + persist) | ☐ todo | | unblocks B & C2/C3 |
+| A | 3 | source_chat send → 202 submit | ☑ done | wave1 2026-06-29 | commit 1ef7325; POST→202 verified in openapi |
+| A | 4 | status API: `list_command_jobs` active + `commands.ts` client | ☑ done | wave1 2026-06-29 | commit 484ef18; SQL runs, GET /commands/active→200 |
+| A | 5 | shared `jobs-store.ts` (Zustand + persist) | ☑ done | wave1 2026-06-29 | commit 831aede; tsc clean. **Track B fully unblocked** |
 | B | 1 | `use-jobs-poller` + `JobsRuntime` + mount | ☐ todo | | dep A4, A5 |
 | B | 2 | `JobTray` + `JobTrayItem` + `JobStatusBadge` + mount | ☐ todo | | dep B1 |
 | B | 3 | completion/failure toasts + `job-origin` helper | ☐ todo | | dep B1 |

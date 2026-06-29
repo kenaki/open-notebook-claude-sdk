@@ -13,8 +13,10 @@
 
 ## SESSION HANDOFF (read first)
 
-**State (2026-06-26):** Wave 0 fully ☑ (P1 bg-re-anchor ☑, P2 chatF-re-anchor ☑, P3 doc-foundation authored ☑, P4 bg-A1 verified ☑).
-Wave 1 in progress: bg A2 ☑ (bbce67b), bg C1 ☑ (3295a27). bg A3 + df A1 still ☐ (next wave folds in bg A4+A5).
+**State (2026-06-29, orchestrated run):** Wave 0 ☑. **Wave 1 ☑ COMPLETE** (bg A2 bbce67b, bg C1 3295a27, bg A3 1ef7325, df A1 34ec0bd).
+**Wave 2 partial:** bg A4 ☑ (484ef18), bg A5 ☑ (831aede). Still ☐ in W2: df A2 (Docling), df Phase1 (PDFViewer).
+**Now unblocked for next wave:** bg Track B (B1 needs A4✓+A5✓), bg C2 (A2✓+A5✓+C1✓), bg C3 (A3✓+A5✓+C1✓), df A2 (A1✓), df Phase1 (dep-free).
+⚠ **Migration-counter caveat (for chatF B1 executor):** the version counter is **positional** (= list length), not filename-derived. df A1 appended `19.surrealql` as list position 18 → DB now at version 18. When chatF B1 adds migration **18**, it MUST be **appended at the END of both lists** (becoming the highest position), NOT inserted between 17 and 19 — inserting positionally would re-run 19 and skip the new 18. Filenames are labels only.
 
 **Orchestrator resume prompt (paste into a fresh Opus chat to drive a wave):**
 
@@ -187,11 +189,11 @@ Legend: ☐ todo · ◐ in-flight · ☑ done. Update the per-plan coordinator's
 | 0 | P3 author document-foundation | (meta/chunk-plan) | 🟣 | ☑ |
 | 0 | P4 verify bg A1 | background-jobs · A1 | 🔵 | ☑ |
 | 1 | A2 | background-jobs | 🔵 | ☑ |
-| 1 | A3 | background-jobs | 🔵 | ☐ |
+| 1 | A3 | background-jobs | 🔵 | ☑ |
 | 1 | C1 | background-jobs | 🔵 | ☑ |
-| 1 | A1 | document-foundation | 🔵 | ☐ |
-| 2 | A4 | background-jobs | 🔵 | ☐ |
-| 2 | A5 | background-jobs | 🔵 | ☐ |
+| 1 | A1 | document-foundation | 🔵 | ☑ |
+| 2 | A4 | background-jobs | 🔵 | ☑ |
+| 2 | A5 | background-jobs | 🔵 | ☑ |
 | 2 | A2 | document-foundation | 🔵 | ☐ |
 | 2 | Phase1 | document-foundation | 🔵 | ☐ |
 | 3 | B1 | background-jobs | 🔵 | ☐ |
@@ -247,3 +249,14 @@ does not duplicate chunk specs.
 - 2026-06-26 — Wave 0 fully ☑ (P1+P2 re-anchor commits 961d6c4/9a43913 confirmed; P3+P4 already
   marked). bg A2 ☑ (bbce67b): `/chat/execute` → 202+job_id, ExecuteChatJobResponse BE+FE,
   command_service guard-import upgraded; tsc+pytest green. Wave 1 in progress (A3, C1, df-A1 next).
+- 2026-06-29 — **Orchestrated wave (chunk-plan-execute, Opus orchestrator + Sonnet chunks, 4 worktrees).**
+  Landed bg A3 (1ef7325 source_chat→202), bg A4 (484ef18 list_command_jobs active + commands.ts +
+  /commands/active), bg A5 (831aede jobs-store.ts), df A1 (34ec0bd mig19 + SourceSection). **Wave 1 ☑;
+  Wave 2 A4/A5 ☑.** Verify on merged tree: frontend `tsc` clean; `tests/test_domain.py` 23 pass (8
+  credential-config "failures" are a pre-existing numpy collection-order flake — pass in isolation, not
+  a regression); import smoke clean; on-api/on-worker restart clean (no tracebacks); **migration 19
+  schema verified LIVE in DB** (source_section table + source.page_offset/page_labels +
+  source_embedding.section); A2/A3 routes show 202 in openapi; A4 SQL executes (0 active jobs). df A1
+  integrated by hand (worktrees branch from origin/main, not the feature branch — A3/A4 self-rebased;
+  df A1 didn't, so its async_migrate.py append + notebook.py edits were re-applied onto feature/multipanelchat).
+  Recorded migration-counter caveat for chatF B1 (see SESSION HANDOFF).

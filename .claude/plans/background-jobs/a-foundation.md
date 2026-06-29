@@ -41,9 +41,9 @@ Questions → announce "✅ Chunk A.n complete — safe to clear context" → st
 |------:|-------|--------|-----------------|-------|
 | 1 | chat_completion command + heavy-lane + WAL + register | ☑ done | main session | verified committed (bundled in 827bf48) |
 | 2 | `/chat/execute` → 202 submit (+ chat.ts/api types) | ☑ done | main session | commit bbce67b; tsc+pytest green |
-| 3 | source_chat send → 202 submit | ☐ todo | | |
-| 4 | status API: active `list_command_jobs` + `commands.ts` | ☐ todo | | unblocks Track B |
-| 5 | shared `jobs-store.ts` (Zustand + persist) | ☐ todo | | unblocks B & C2/C3 |
+| 3 | source_chat send → 202 submit | ☑ done | wave1 | commit 1ef7325; POST→202 |
+| 4 | status API: active `list_command_jobs` + `commands.ts` | ☑ done | wave1 | commit 484ef18; SQL runs + /commands/active 200 |
+| 5 | shared `jobs-store.ts` (Zustand + persist) | ☑ done | wave1 | commit 831aede; tsc clean |
 Legend: ☐ todo · ◐ in progress · ☑ done · ⏸ blocked · ⊘ deferred.
 
 ## Changelog (this track)
