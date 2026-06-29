@@ -1,4 +1,4 @@
-import { get, post, put, del, streamFetch } from './client'
+import { get, post, put, del } from './client'
 import {
   SourceChatSession,
   SourceChatSessionWithMessages,
@@ -6,6 +6,12 @@ import {
   UpdateSourceChatSessionRequest,
   SendMessageRequest
 } from '@/lib/types/api'
+
+// Background-jobs C3: the send endpoint now returns 202 + {job_id, session_id}.
+export interface SendSourceChatJobResponse {
+  job_id: string
+  session_id: string
+}
 
 export const sourceChatApi = {
   // Session management
@@ -34,6 +40,11 @@ export const sourceChatApi = {
     await del(`/sources/${sourceId}/chat/sessions/${sessionId}`)
   },
 
+  // Background-jobs C3: POST → 202 {job_id, session_id}; the Track-B poller
+  // delivers the answer by invalidating sourceChatSession on job completion.
   sendMessage: (sourceId: string, sessionId: string, data: SendMessageRequest) =>
-    streamFetch(`/api/sources/${sourceId}/chat/sessions/${sessionId}/messages`, data),
+    post<SendSourceChatJobResponse>(
+      `/sources/${sourceId}/chat/sessions/${sessionId}/messages`,
+      data
+    ),
 }

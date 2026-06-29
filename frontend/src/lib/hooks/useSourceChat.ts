@@ -1,15 +1,17 @@
 'use client'
 
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { toastApiError } from '@/lib/utils/error-handler'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { sourceChatApi } from '@/lib/api/source-chat'
+import { QUERY_KEYS } from '@/lib/api/query-client'
+import { useJobsStore } from '@/lib/stores/jobs-store'
 import {
   SourceChatSession,
   SourceChatMessage,
-  SourceChatContextIndicator,
+  SourceChatSessionWithMessages,
   CreateSourceChatSessionRequest,
   UpdateSourceChatSessionRequest
 } from '@/lib/types/api'
@@ -18,31 +20,43 @@ export function useSourceChat(sourceId: string) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
-  const [messages, setMessages] = useState<SourceChatMessage[]>([])
-  const [isStreaming, setIsStreaming] = useState(false)
-  const [contextIndicators, setContextIndicators] = useState<SourceChatContextIndicator | null>(null)
-  const abortControllerRef = useRef<AbortController | null>(null)
+  // Per-session in-flight flag for the brief submit round-trip (before the job
+  // is registered in the store). After registration, isStreaming derives from
+  // useJobsStore — no stale local state.
+  const [sendingBySession, setSendingBySession] = useState<Record<string, boolean>>({})
+  // Subscribe to all jobs so isStreaming re-derives on any status change.
+  const storeJobs = useJobsStore((s) => s.jobs)
 
   // Fetch sessions
   const { data: sessions = [], isLoading: loadingSessions, refetch: refetchSessions } = useQuery<SourceChatSession[]>({
-    queryKey: ['sourceChatSessions', sourceId],
+    queryKey: QUERY_KEYS.sourceChatSessions(sourceId),
     queryFn: () => sourceChatApi.listSessions(sourceId),
     enabled: !!sourceId
   })
 
-  // Fetch current session with messages
-  const { data: currentSession, refetch: refetchCurrentSession } = useQuery({
-    queryKey: ['sourceChatSession', sourceId, currentSessionId],
+  // Fetch current session with messages (cache-backed; Track-B poller invalidates
+  // this key on job completion to replace the pending placeholder).
+  const { data: currentSession } = useQuery<SourceChatSessionWithMessages>({
+    queryKey: QUERY_KEYS.sourceChatSession(sourceId, currentSessionId!),
     queryFn: () => sourceChatApi.getSession(sourceId, currentSessionId!),
     enabled: !!sourceId && !!currentSessionId
   })
 
-  // Update messages when session changes
-  useEffect(() => {
-    if (currentSession?.messages) {
-      setMessages(currentSession.messages)
-    }
-  }, [currentSession])
+  // Messages and context indicators are derived directly from the cache so they
+  // survive navigation (no local useState copy needed after C3).
+  const messages: SourceChatMessage[] = currentSession?.messages ?? []
+  const contextIndicators = currentSession?.context_indicators ?? null
+
+  // True while the 202 submit is in-flight OR while a background job for this
+  // session is active (new/running).
+  const isStreaming = currentSessionId
+    ? (!!sendingBySession[currentSessionId] ||
+       storeJobs.some(
+         (j) =>
+           j.sessionId === currentSessionId &&
+           (j.status === 'new' || j.status === 'running')
+       ))
+    : false
 
   // Auto-select most recent session when sessions are loaded
   useEffect(() => {
@@ -53,12 +67,26 @@ export function useSourceChat(sourceId: string) {
     }
   }, [sessions, currentSessionId])
 
+  // Patch a single session's cached message list (optimistic updates + placeholder).
+  const patchSourceSessionMessages = useCallback(
+    (sessionId: string, update: (prev: SourceChatMessage[]) => SourceChatMessage[]) => {
+      queryClient.setQueryData<SourceChatSessionWithMessages>(
+        QUERY_KEYS.sourceChatSession(sourceId, sessionId),
+        (old) =>
+          old
+            ? { ...old, messages: update(old.messages ?? []) }
+            : ({ messages: update([]) } as SourceChatSessionWithMessages)
+      )
+    },
+    [queryClient, sourceId]
+  )
+
   // Create session mutation
   const createSessionMutation = useMutation({
-    mutationFn: (data: Omit<CreateSourceChatSessionRequest, 'source_id'>) => 
+    mutationFn: (data: Omit<CreateSourceChatSessionRequest, 'source_id'>) =>
       sourceChatApi.createSession(sourceId, data),
     onSuccess: (newSession) => {
-      queryClient.invalidateQueries({ queryKey: ['sourceChatSessions', sourceId] })
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.sourceChatSessions(sourceId) })
       setCurrentSessionId(newSession.id)
       toast.success(t('chat.sessionCreated'))
     },
@@ -72,8 +100,10 @@ export function useSourceChat(sourceId: string) {
     mutationFn: ({ sessionId, data }: { sessionId: string, data: UpdateSourceChatSessionRequest }) =>
       sourceChatApi.updateSession(sourceId, sessionId, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['sourceChatSessions', sourceId] })
-      queryClient.invalidateQueries({ queryKey: ['sourceChatSession', sourceId, currentSessionId] })
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.sourceChatSessions(sourceId) })
+      if (currentSessionId) {
+        queryClient.invalidateQueries({ queryKey: QUERY_KEYS.sourceChatSession(sourceId, currentSessionId) })
+      }
       toast.success(t('chat.sessionUpdated'))
     },
     onError: (err: unknown) => {
@@ -83,13 +113,12 @@ export function useSourceChat(sourceId: string) {
 
   // Delete session mutation
   const deleteSessionMutation = useMutation({
-    mutationFn: (sessionId: string) => 
+    mutationFn: (sessionId: string) =>
       sourceChatApi.deleteSession(sourceId, sessionId),
     onSuccess: (_, deletedId) => {
-      queryClient.invalidateQueries({ queryKey: ['sourceChatSessions', sourceId] })
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.sourceChatSessions(sourceId) })
       if (currentSessionId === deletedId) {
         setCurrentSessionId(null)
-        setMessages([])
       }
       toast.success(t('chat.sessionDeleted'))
     },
@@ -98,8 +127,10 @@ export function useSourceChat(sourceId: string) {
     }
   })
 
-  // Send message with streaming
-  const sendMessage = useCallback(async (message: string, modelOverride?: string) => {
+  // Send message — submits to the background worker (202), inserts optimistic
+  // user message + pending assistant placeholder into the TanStack cache.
+  // The Track-B poller delivers the answer by invalidating sourceChatSession.
+  const sendMessage = useCallback(async (message: string, modelOverride?: string): Promise<{ ok: boolean }> => {
     let sessionId = currentSessionId
 
     // Auto-create session if none exists
@@ -109,106 +140,73 @@ export function useSourceChat(sourceId: string) {
         const newSession = await sourceChatApi.createSession(sourceId, { title: defaultTitle })
         sessionId = newSession.id
         setCurrentSessionId(sessionId)
-        queryClient.invalidateQueries({ queryKey: ['sourceChatSessions', sourceId] })
+        queryClient.invalidateQueries({ queryKey: QUERY_KEYS.sourceChatSessions(sourceId) })
       } catch (err: unknown) {
         toastApiError(err, t, 'apiErrors.failedToCreateSession')
-        return
+        return { ok: false }
       }
     }
 
-    // Add user message optimistically
+    // Add user message optimistically to the cache
     const userMessage: SourceChatMessage = {
       id: `temp-${Date.now()}`,
       type: 'human',
       content: message,
       timestamp: new Date().toISOString()
     }
-    setMessages(prev => [...prev, userMessage])
-    setIsStreaming(true)
+    patchSourceSessionMessages(sessionId, (prev) => [...prev, userMessage])
+    setSendingBySession((prev) => ({ ...prev, [sessionId!]: true }))
 
     try {
-      const response = await sourceChatApi.sendMessage(sourceId, sessionId, {
+      // Submit to the background worker (202). The response carries the job_id;
+      // the answer arrives later via the Track-B poller invalidating this session.
+      const { job_id } = await sourceChatApi.sendMessage(sourceId, sessionId, {
         message,
         model_override: modelOverride
       })
 
-      if (!response) {
-        throw new Error('No response body')
-      }
+      // Register in the global jobs store so isStreaming + the tray track this.
+      useJobsStore.getState().register({
+        jobId: job_id,
+        kind: 'source_chat',
+        sessionId,
+        targetId: sourceId,
+        label: message.slice(0, 60),
+        status: 'new',
+        startedAt: new Date().toISOString(),
+      })
 
-      const reader = response.getReader()
-      const decoder = new TextDecoder()
-      let aiMessage: SourceChatMessage | null = null
+      // Insert a pending assistant placeholder into the cache. The poller (Track B)
+      // replaces it by invalidating the session query on job completion.
+      patchSourceSessionMessages(sessionId, (prev) => [
+        ...prev,
+        {
+          id: `pending-${job_id}`,
+          type: 'ai' as const,
+          content: '',
+          pending: true,
+          timestamp: new Date().toISOString(),
+        },
+      ])
 
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        const text = decoder.decode(value)
-        const lines = text.split('\n')
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6))
-              
-              if (data.type === 'ai_message') {
-                // Create AI message on first content chunk to avoid empty bubble
-                if (!aiMessage) {
-                  aiMessage = {
-                    id: `ai-${Date.now()}`,
-                    type: 'ai',
-                    content: data.content || '',
-                    timestamp: new Date().toISOString()
-                  }
-                  setMessages(prev => [...prev, aiMessage!])
-                } else {
-                  aiMessage.content += data.content || ''
-                  setMessages(prev =>
-                    prev.map(msg => msg.id === aiMessage!.id
-                      ? { ...msg, content: aiMessage!.content }
-                      : msg
-                    )
-                  )
-                }
-              } else if (data.type === 'context_indicators') {
-                setContextIndicators(data.data)
-              } else if (data.type === 'error') {
-                throw new Error(data.message || 'Stream error')
-              }
-            } catch (e) {
-              if (e instanceof SyntaxError) {
-                console.error('Error parsing SSE data:', e)
-              } else {
-                throw e
-              }
-            }
-          }
-        }
-      }
+      return { ok: true }
     } catch (err: unknown) {
       toastApiError(err, t, 'apiErrors.failedToSendMessage')
-      // Remove optimistic messages on error
-      setMessages(prev => prev.filter(msg => !msg.id.startsWith('temp-')))
+      // Submission failed: strip the optimistic user message so the caller can
+      // restore the draft ({ok:false} contract mirrors C2 notebook-chat pattern).
+      patchSourceSessionMessages(sessionId, (prev) =>
+        prev.filter((msg) => !msg.id.startsWith('temp-'))
+      )
+      return { ok: false }
     } finally {
-      setIsStreaming(false)
-      // Refetch session to get persisted messages
-      refetchCurrentSession()
+      // Clear the brief submit-round-trip flag; store job status takes over.
+      setSendingBySession((prev) => ({ ...prev, [sessionId!]: false }))
     }
-  }, [sourceId, currentSessionId, refetchCurrentSession, queryClient, t])
-
-  // Cancel streaming
-  const cancelStreaming = useCallback(() => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort()
-      setIsStreaming(false)
-    }
-  }, [])
+  }, [sourceId, currentSessionId, patchSourceSessionMessages, queryClient, t])
 
   // Switch session
   const switchSession = useCallback((sessionId: string) => {
     setCurrentSessionId(sessionId)
-    setContextIndicators(null)
   }, [])
 
   // Create session
@@ -235,14 +233,13 @@ export function useSourceChat(sourceId: string) {
     isStreaming,
     contextIndicators,
     loadingSessions,
-    
+
     // Actions
     createSession,
     updateSession,
     deleteSession,
     switchSession,
     sendMessage,
-    cancelStreaming,
     refetchSessions
   }
 }
