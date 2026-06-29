@@ -1,5 +1,6 @@
 import asyncio
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import Any, ClassVar, Dict, List, Literal, Optional, Tuple, Union
 
@@ -355,14 +356,35 @@ class SourceInsight(ObjectModel):
         return note
 
 
+class SourceSection(ObjectModel):
+    table_name = "source_section"
+    source: Optional[str] = None
+    parent: Optional[str] = None
+    order: int = 0
+    level: int = 0
+    title: str = ""
+    content: str = ""
+    cleaned_content: Optional[str] = None
+    summary: Optional[str] = None
+    page_start: Optional[int] = None
+    page_end: Optional[int] = None
+    token_count: Optional[int] = None
+    created: Optional[datetime] = None
+    updated: Optional[datetime] = None
+    nullable_fields = ["parent", "cleaned_content", "summary", "page_start", "page_end", "token_count", "created", "updated"]
+
+
 class Source(ObjectModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     table_name: ClassVar[str] = "source"
+    nullable_fields: ClassVar[set[str]] = {"page_offset", "page_labels"}
     asset: Optional[Asset] = None
     title: Optional[str] = None
     topics: Optional[List[str]] = Field(default_factory=list)
     full_text: Optional[str] = None
+    page_offset: Optional[int] = None
+    page_labels: Optional[dict] = None
     command: Optional[Union[str, RecordID]] = Field(
         default=None, description="Link to surreal-commands processing job"
     )

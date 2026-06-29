@@ -1,0 +1,4 @@
+REMOVE TABLE source_section;
+REMOVE FIELD page_offset  ON TABLE source;
+REMOVE FIELD page_labels  ON TABLE source;
+REMOVE FIELD section      ON TABLE source_embedding;

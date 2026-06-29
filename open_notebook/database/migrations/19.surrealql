@@ -1,0 +1,24 @@
+-- Migration 19: document-foundation — source_section table + page/section fields
+
+-- Chapter/section tree for structured documents (PDFs, long-form content)
+DEFINE TABLE IF NOT EXISTS source_section SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS source        ON TABLE source_section TYPE record<source>;
+DEFINE FIELD IF NOT EXISTS parent        ON TABLE source_section TYPE option<record<source_section>>;
+DEFINE FIELD IF NOT EXISTS order         ON TABLE source_section TYPE int;
+DEFINE FIELD IF NOT EXISTS level         ON TABLE source_section TYPE int;
+DEFINE FIELD IF NOT EXISTS title         ON TABLE source_section TYPE string;
+DEFINE FIELD IF NOT EXISTS content       ON TABLE source_section TYPE string;
+DEFINE FIELD IF NOT EXISTS cleaned_content ON TABLE source_section TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS summary       ON TABLE source_section TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS page_start    ON TABLE source_section TYPE option<int>;
+DEFINE FIELD IF NOT EXISTS page_end      ON TABLE source_section TYPE option<int>;
+DEFINE FIELD IF NOT EXISTS token_count   ON TABLE source_section TYPE option<int>;
+DEFINE FIELD IF NOT EXISTS created       ON TABLE source_section TYPE datetime DEFAULT time::now();
+DEFINE FIELD IF NOT EXISTS updated       ON TABLE source_section TYPE datetime DEFAULT time::now();
+
+-- Physical page anchor for label→index mapping
+DEFINE FIELD IF NOT EXISTS page_offset   ON TABLE source TYPE option<int>;
+DEFINE FIELD IF NOT EXISTS page_labels   ON TABLE source FLEXIBLE TYPE option<object>;
+
+-- Section link on embeddings (populated by embed_source after chaptering)
+DEFINE FIELD IF NOT EXISTS section       ON TABLE source_embedding TYPE option<record<source_section>>;
