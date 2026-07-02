@@ -5,6 +5,7 @@ import {
   SourceListResponse,
   SourceDetailResponse,
   SourceResponse,
+  SourceSectionResponse,
   SourceStatusResponse,
   CreateSourceRequest,
   UpdateSourceRequest
@@ -91,6 +92,15 @@ export const sourcesApi = {
 
   retry: async (id: string) => {
     return post<SourceResponse>(`/sources/${id}/retry`)
+  },
+
+  // Document Foundation Track C (C2): chapter tree for chaptered sources.
+  // `summary` is always inlined; `content` only when includeContent=true
+  // (keeps the payload light — see coordinator Decision Q-section-content-payload).
+  getSections: async (id: string, includeContent = false) => {
+    return get<SourceSectionResponse>(
+      `/sources/${id}/sections${includeContent ? '?include_content=true' : ''}`
+    )
   },
 
   // Needs full AxiosResponse<Blob> for binary download — stays on raw apiClient

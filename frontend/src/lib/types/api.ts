@@ -43,9 +43,36 @@ export interface SourceListResponse {
 export interface SourceDetailResponse extends SourceListResponse {
   full_text: string
   notebooks?: string[]  // List of notebook IDs this source is linked to
+  // Document Foundation Track C (C2): chapter-tree presence/count, mirrors
+  // backend SourceResponse.has_sections/sections_count exactly.
+  has_sections?: boolean
+  sections_count?: number
 }
 
 export type SourceResponse = SourceDetailResponse
+
+// Document Foundation Track C (C2): chapter tree returned by
+// GET /sources/{id}/sections. Mirrors the backend `SourceSectionNode` /
+// `SourceSectionResponse` (api/models.py) exactly — snake_case field names.
+export interface SourceSectionNode {
+  id: string
+  title: string
+  level: number
+  order: number
+  page_start?: number
+  page_end?: number
+  summary?: string
+  content?: string
+  children: SourceSectionNode[]
+}
+
+export interface SourceSectionResponse {
+  id: string
+  title: string
+  has_sections: boolean
+  sections_count: number
+  sections: SourceSectionNode[]
+}
 
 export interface SourceStatusResponse {
   status?: string
