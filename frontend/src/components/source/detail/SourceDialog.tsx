@@ -9,6 +9,8 @@ interface SourceDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   sourceId: string | null
+  /** Decision #20: open the inline PDF at this physical page (from a `#p=N` citation). */
+  initialPage?: number
 }
 
 /**
@@ -17,7 +19,7 @@ interface SourceDialogProps {
  * Displays source details in a modal dialog.
  * Includes a "Chat with source" button that navigates to the full source page in-app.
  */
-export function SourceDialog({ open, onOpenChange, sourceId }: SourceDialogProps) {
+export function SourceDialog({ open, onOpenChange, sourceId, initialPage }: SourceDialogProps) {
   const { t } = useTranslation()
   const router = useRouter()
   // Ensure source ID has 'source:' prefix for API calls and routing
@@ -53,6 +55,7 @@ export function SourceDialog({ open, onOpenChange, sourceId }: SourceDialogProps
             showChatButton={true}
             onChatClick={handleChatClick}
             onClose={handleClose}
+            initialPage={initialPage}
           />
         </div>
       </DialogContent>

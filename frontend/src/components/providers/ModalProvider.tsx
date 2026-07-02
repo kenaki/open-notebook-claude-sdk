@@ -16,7 +16,7 @@ import { SourceInsightDialog, SourceDialog } from '@/components/source/detail'
  * - insight: Source insight modal
  */
 export function ModalProvider() {
-  const { modalType, modalId, closeModal } = useModalManager()
+  const { modalType, modalId, modalPage, closeModal } = useModalManager()
 
   return (
     <>
@@ -27,6 +27,7 @@ export function ModalProvider() {
           if (!open) closeModal()
         }}
         sourceId={modalId}
+        initialPage={modalPage}
       />
 
       {/* Note Modal */}

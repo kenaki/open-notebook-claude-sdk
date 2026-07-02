@@ -1,5 +1,6 @@
 'use client'
 
+import { useState, useEffect } from 'react'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { ConfirmDialog } from '@/components/common/ConfirmDialog'
 import { InlineEdit } from '@/components/common/InlineEdit'
@@ -41,15 +42,23 @@ interface SourceDetailContentProps {
   showChatButton?: boolean
   onChatClick?: () => void
   onClose?: () => void
+  /**
+   * Decision #20: physical page (1-indexed, from a `[source:id#p=N]` citation).
+   * When set on a PDF source, the view jumps to the PDF tab opened at that page.
+   */
+  initialPage?: number
 }
 
 export function SourceDetailContent({
   sourceId,
   showChatButton = false,
   onChatClick,
-  onClose
+  onClose,
+  initialPage
 }: SourceDetailContentProps) {
   const { t } = useTranslation()
+  // Controlled tab so a page citation can programmatically open the PDF tab.
+  const [activeTab, setActiveTab] = useState('content')
   const {
     source,
     insights,
@@ -80,6 +89,14 @@ export function SourceDetailContent({
     handleOpenExternal,
     handleDelete,
   } = useSourceDetail({ sourceId, onClose })
+
+  // Decision #20: when opened via a `#p=N` citation on a PDF source, jump to the
+  // PDF tab (the PDFViewer itself opens at the page). Runs once the source loads.
+  useEffect(() => {
+    if (initialPage != null && source && isPdfAsset(source)) {
+      setActiveTab('pdf')
+    }
+  }, [initialPage, source])
 
   const getSourceIcon = () => {
     if (!source) return null
@@ -189,7 +206,7 @@ export function SourceDetailContent({
 
       {/* Tabs Content */}
       <div className="flex-1 overflow-y-auto px-2">
-        <Tabs defaultValue="content" className="w-full">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className={`grid w-full ${isPdfAsset(source) ? 'grid-cols-4' : 'grid-cols-3'} sticky top-0 z-10`}>
             <TabsTrigger value="content">{t('sources.content')}</TabsTrigger>
             <TabsTrigger value="insights">
@@ -237,7 +254,13 @@ export function SourceDetailContent({
 
           {isPdfAsset(source) && (
             <TabsContent value="pdf" className="mt-6">
-              <PDFViewer sourceId={source.id} />
+              {/* initialPage is 0-based; the citation page is 1-indexed physical.
+                  key remounts the viewer when the cited page changes. */}
+              <PDFViewer
+                key={`pdf-${initialPage ?? 'first'}`}
+                sourceId={source.id}
+                initialPage={initialPage != null ? Math.max(0, initialPage - 1) : undefined}
+              />
             </TabsContent>
           )}
         </Tabs>
