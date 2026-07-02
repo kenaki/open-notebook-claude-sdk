@@ -477,7 +477,12 @@ async def embed_source_command(input_data: EmbedSourceInput) -> EmbedSourceOutpu
         # 6. Bulk INSERT source_embedding records
         # A3: stamp section on each record (None when sections not yet built)
         source_sections_raw = await repo_query(
-            "SELECT id, content FROM source_section WHERE source = $sid ORDER BY order",
+            # `order` is a reserved word in SurrealQL: `ORDER BY order` parses
+            # ("Missing order idiom") ONLY when `order` is also in the SELECT
+            # projection — backticks and `ASC` do NOT help (verified against the
+            # live DB). This is why get_outline works and this query didn't:
+            # project `order` so the ORDER BY can resolve it.
+            "SELECT id, content, order FROM source_section WHERE source = $sid ORDER BY order",
             {"sid": ensure_record_id(input_data.source_id)},
         )
         section_map = (
