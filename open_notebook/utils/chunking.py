@@ -569,3 +569,93 @@ def find_chunk_section(
             return section_id
 
     return None
+
+
+# ---------------------------------------------------------------------------
+# Phase3: Page-number-aware chunk matching helpers
+# ---------------------------------------------------------------------------
+
+
+def build_page_char_map(
+    full_text: str, page_map: List[dict]
+) -> List[Tuple[int, int, int]]:
+    """
+    Build a sorted list of ``(char_start, char_end, page_no)`` tuples by locating
+    each *page_map* block's text within *full_text*.
+
+    *page_map* is the persisted per-block provenance produced by A2's
+    ``_extract_docling_page_map`` — a list of ``{"text": str, "page_no": int}``
+    dicts in document order.  Blocks whose text cannot be located (e.g. headings
+    or table cells that Docling rendered with extra markdown decoration in
+    *full_text*) are silently skipped; the search advances monotonically so
+    later blocks still match.
+
+    Returns ``[]`` when *page_map* is empty or nothing could be located.
+    """
+    result: List[Tuple[int, int, int]] = []
+    if not page_map or not full_text:
+        return result
+
+    search_from = 0
+    for block in page_map:
+        if not isinstance(block, dict):
+            continue
+        text = block.get("text") or ""
+        page_no = block.get("page_no")
+        if not text or page_no is None:
+            continue
+
+        # Use up to 80 characters as the search key (same heuristic as sections)
+        search_key = text[: min(80, len(text))].strip()
+        if not search_key:
+            continue
+
+        idx = full_text.find(search_key, search_from)
+        if idx >= 0:
+            result.append((idx, idx + len(text), int(page_no)))
+            search_from = idx + 1  # advance monotonically
+
+    return result
+
+
+def find_chunk_page(
+    chunk: str, full_text: str, page_char_map: List[Tuple[int, int, int]]
+) -> Optional[int]:
+    """
+    Return the physical ``page_no`` for *chunk* using *page_char_map*.
+
+    Locates the chunk by searching for its first 80 characters inside *full_text*,
+    then finds the page of the block that overlaps the chunk's start offset.  If
+    no block span strictly contains the start offset (gaps between blocks are
+    common), falls back to the most recent block that begins at or before the
+    chunk — i.e. the page the chunk started on.
+
+    Returns ``None`` if:
+    - *page_char_map* is empty;
+    - the chunk text cannot be found in *full_text*;
+    - the chunk starts before the first mapped block.
+    """
+    if not page_char_map:
+        return None
+
+    search_key = chunk[: min(80, len(chunk))].strip()
+    if not search_key:
+        return None
+
+    chunk_start = full_text.find(search_key)
+    if chunk_start < 0:
+        return None
+
+    dominant_page: Optional[int] = None
+    for start, end, page_no in page_char_map:
+        if start <= chunk_start < end:
+            return page_no
+        if start <= chunk_start:
+            # Track the last block that begins at/before the chunk start.
+            dominant_page = page_no
+        else:
+            # page_char_map is sorted by char_start; once we pass the chunk
+            # start there is nothing earlier left to consider.
+            break
+
+    return dominant_page

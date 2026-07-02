@@ -1,0 +1,3 @@
+REMOVE FIELD page_map    ON TABLE source;
+REMOVE FIELD page_number ON TABLE source_embedding;
+REMOVE FIELD bbox        ON TABLE source_embedding;

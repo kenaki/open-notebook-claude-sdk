@@ -378,13 +378,17 @@ class Source(ObjectModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     table_name: ClassVar[str] = "source"
-    nullable_fields: ClassVar[set[str]] = {"page_offset", "page_labels"}
+    nullable_fields: ClassVar[set[str]] = {"page_offset", "page_labels", "page_map"}
     asset: Optional[Asset] = None
     title: Optional[str] = None
     topics: Optional[List[str]] = Field(default_factory=list)
     full_text: Optional[str] = None
     page_offset: Optional[int] = None
     page_labels: Optional[dict] = None
+    # Phase3: persisted per-block page provenance from Docling extraction (A2).
+    # Null for non-PDF / pre-Docling sources. Read back by embed_source /
+    # backfill_page_numbers to stamp page_number on each source_embedding row.
+    page_map: Optional[list] = None
     command: Optional[Union[str, RecordID]] = Field(
         default=None, description="Link to surreal-commands processing job"
     )
@@ -908,6 +912,14 @@ async def vector_search(
                 "minimum_score": minimum_score,
             },
         )
+        # Phase3: fn::vector_search now also returns page_number + bbox per row
+        # (populated for source_embedding matches; NONE for insight/note rows).
+        # Normalise so downstream callers can rely on the keys existing without
+        # crashing on older DBs whose function predates the migration-20 redefine.
+        for row in search_results or []:
+            if isinstance(row, dict):
+                row.setdefault("page_number", None)
+                row.setdefault("bbox", None)
         return search_results
     except Exception as e:
         logger.error(f"Error performing vector search: {str(e)}")

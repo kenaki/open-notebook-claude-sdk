@@ -1,4 +1,6 @@
+import asyncio
 import time
+from pathlib import Path
 from typing import Dict, List, Literal, Optional
 
 from loguru import logger
@@ -11,9 +13,11 @@ from open_notebook.domain.notebook import Note, Source, SourceInsight
 from open_notebook.exceptions import ConfigurationError
 from open_notebook.utils.chunking import (
     ContentType,
+    build_page_char_map,
     build_section_char_map,
     chunk_text,
     detect_content_type,
+    find_chunk_page,
     find_chunk_section,
 )
 from open_notebook.utils.embedding import generate_embedding, generate_embeddings
@@ -120,6 +124,20 @@ class EmbedSourceOutput(CommandOutput):
     success: bool
     source_id: str
     chunks_created: int
+    processing_time: float
+    error_message: Optional[str] = None
+
+
+class BackfillPageNumbersInput(CommandInput):
+    """No required inputs — fans out embed_source for existing PDF sources so
+    their source_embedding rows get stamped with page_number (Phase3)."""
+
+
+class BackfillPageNumbersOutput(CommandOutput):
+    success: bool
+    sources_found: int = 0
+    page_maps_extracted: int = 0
+    jobs_submitted: int = 0
     processing_time: float
     error_message: Optional[str] = None
 
@@ -471,6 +489,18 @@ async def embed_source_command(input_data: EmbedSourceInput) -> EmbedSourceOutpu
             f"Section map: {len(section_map)} entries for {total_chunks} chunks"
         )
 
+        # Phase3: stamp page_number on each record from the source's persisted
+        # page_map (A2 provenance). None when the source has no page_map (non-PDF,
+        # pre-Docling, or PyMuPDF-fallback ingest) or a chunk can't be located.
+        page_char_map = (
+            build_page_char_map(source.full_text, source.page_map)
+            if source.page_map and source.full_text
+            else []
+        )
+        logger.debug(
+            f"Page map: {len(page_char_map)} entries for {total_chunks} chunks"
+        )
+
         records = []
         for idx, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
             section_rid = None
@@ -478,6 +508,9 @@ async def embed_source_command(input_data: EmbedSourceInput) -> EmbedSourceOutpu
                 sec_id = find_chunk_section(chunk, source.full_text, section_map)
                 if sec_id:
                     section_rid = ensure_record_id(sec_id)
+            page_number = None
+            if page_char_map and source.full_text:
+                page_number = find_chunk_page(chunk, source.full_text, page_char_map)
             records.append(
                 {
                     "source": ensure_record_id(input_data.source_id),
@@ -485,6 +518,7 @@ async def embed_source_command(input_data: EmbedSourceInput) -> EmbedSourceOutpu
                     "content": chunk,
                     "embedding": embedding,
                     "section": section_rid,
+                    "page_number": page_number,
                 }
             )
 
@@ -526,6 +560,128 @@ async def embed_source_command(input_data: EmbedSourceInput) -> EmbedSourceOutpu
             f"(command: {cmd_id}): {e}"
         )
         raise
+
+
+@command(
+    "backfill_page_numbers",
+    app="open_notebook",
+    retry={
+        "max_attempts": 1,
+        "stop_on": [ValueError, ConfigurationError],
+    },
+)
+async def backfill_page_numbers_command(
+    input_data: BackfillPageNumbersInput,
+) -> BackfillPageNumbersOutput:
+    """
+    Phase3 one-time backfill: stamp page_number on existing source_embedding rows.
+
+    Orchestrator that, for every source that is a PDF and/or already has a
+    persisted page_map, resolves page provenance and re-submits embed_source
+    (which reads source.page_map and stamps page_number per chunk).
+
+    Provenance resolution order (per source):
+      1. source.page_map already persisted → re-embed as-is.
+      2. page_map null + the .pdf asset file still exists → re-extract via A2's
+         _extract_docling_page_map (PyMuPDF fallback lives inside content
+         extraction; here we call Docling directly), persist it, then re-embed.
+      3. Neither (no page_map, file gone / not a PDF) → leave page_number null,
+         never guess, and skip the needless re-embed.
+
+    Run manually: submit_command("open_notebook", "backfill_page_numbers", {}).
+    """
+    start_time = time.time()
+
+    try:
+        logger.info("backfill_page_numbers started")
+
+        sources_raw = await repo_query(
+            "SELECT id, asset, page_map, full_text FROM source"
+        )
+
+        sources_found = 0
+        page_maps_extracted = 0
+        jobs_submitted = 0
+
+        for row in sources_raw or []:
+            source_id = str(row["id"])
+            asset = row.get("asset") or {}
+            file_path = ""
+            if isinstance(asset, dict):
+                file_path = asset.get("file_path") or ""
+            is_pdf = file_path.lower().endswith(".pdf")
+            page_map = row.get("page_map")
+
+            # Qualify: already has provenance, or is a PDF we might re-extract.
+            if not (page_map or is_pdf):
+                continue
+            sources_found += 1
+
+            # (2) Re-extract + persist when page_map is missing but the PDF exists.
+            if not page_map and is_pdf and file_path and Path(file_path).exists():
+                try:
+                    from open_notebook.graphs.source import _extract_docling_page_map
+
+                    _ft, extracted = await asyncio.to_thread(
+                        _extract_docling_page_map, file_path
+                    )
+                    if extracted:
+                        source = await Source.get(source_id)
+                        if source:
+                            source.page_map = extracted
+                            await source.save()
+                            page_map = extracted
+                            page_maps_extracted += 1
+                            logger.info(
+                                f"Re-extracted page_map for {source_id}: "
+                                f"{len(extracted)} blocks"
+                            )
+                except Exception as exc:
+                    logger.warning(
+                        f"page_map re-extraction failed for {source_id}: {exc!r} "
+                        "— leaving page_number null"
+                    )
+
+            # (3) Still no provenance → skip; re-embedding would stamp nothing.
+            if not page_map:
+                logger.debug(
+                    f"Source {source_id} has no page_map — skipping (page_number stays null)"
+                )
+                continue
+
+            # (1)/(2) provenance available → re-embed to stamp page_number.
+            try:
+                cmd_id = submit_command(
+                    "open_notebook", "embed_source", {"source_id": source_id}
+                )
+                logger.info(f"Submitted embed_source for {source_id}: {cmd_id}")
+                jobs_submitted += 1
+            except Exception as exc:
+                logger.warning(f"Failed to submit embed_source for {source_id}: {exc}")
+
+        processing_time = time.time() - start_time
+        logger.info(
+            f"backfill_page_numbers: {sources_found} candidates, "
+            f"{page_maps_extracted} page_maps re-extracted, "
+            f"{jobs_submitted} embed jobs submitted in {processing_time:.2f}s"
+        )
+        return BackfillPageNumbersOutput(
+            success=True,
+            sources_found=sources_found,
+            page_maps_extracted=page_maps_extracted,
+            jobs_submitted=jobs_submitted,
+            processing_time=processing_time,
+        )
+
+    except Exception as exc:
+        processing_time = time.time() - start_time
+        logger.error(f"backfill_page_numbers failed: {exc}")
+        logger.exception(exc)
+        return BackfillPageNumbersOutput(
+            success=False,
+            processing_time=processing_time,
+            error_message=str(exc),
+        )
 
 
 @command(

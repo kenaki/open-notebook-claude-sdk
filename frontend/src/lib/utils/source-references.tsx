@@ -9,6 +9,48 @@ export interface ParsedReference {
   originalText: string
   startIndex: number
   endIndex: number
+  // Phase3: physical page number from a `[source:id#p=N]` citation, if present.
+  page?: number
+}
+
+// Phase3: `onReferenceClick` gains an optional 3rd arg carrying the cited page
+// (from `[source:id#p=N]`). Existing 2-arg handlers stay valid — a function that
+// ignores the extra param is assignable to this wider type.
+export type ReferenceClickHandler = (
+  type: ReferenceType,
+  id: string,
+  page?: number
+) => void
+
+// Shared source/reference regex. The optional `#p=<n>` suffix captures a
+// physical page number for page-level citations (Phase3). match groups:
+//   1 = type, 2 = id, 3 = page (optional).
+const REFERENCE_REGEX =
+  /(source_insight|note|source):([a-zA-Z0-9_]+)(?:#p=(\d+))?/g
+
+// Reference-link href format: `#ref-<type>-<id>` optionally suffixed with
+// `?p=<page>` so the page survives the markdown round-trip. IDs are
+// `[a-zA-Z0-9_]+` (never contain `?` or `-`), so splitting is unambiguous.
+function parseReferenceHref(
+  href: string
+): { type: ReferenceType; id: string; page?: number } | null {
+  if (!href.startsWith('#ref-')) return null
+  const raw = href.substring(5) // strip '#ref-'
+  const [refPart, query] = raw.split('?')
+  const parts = refPart.split('-')
+  const type = parts[0] as ReferenceType
+  const id = parts.slice(1).join('-') // rejoin in case an ID contains dashes
+  let page: number | undefined
+  if (query) {
+    const m = query.match(/(?:^|&)p=(\d+)/)
+    if (m) page = parseInt(m[1], 10)
+  }
+  return { type, id, page }
+}
+
+// Build a reference-link href, appending `?p=<page>` when a page is present.
+function buildReferenceHref(type: string, id: string, page?: number): string {
+  return `#ref-${type}-${id}${page != null ? `?p=${page}` : ''}`
 }
 
 // ExtractedReference and ExtractedReferences are kept for backward compatibility
@@ -29,6 +71,8 @@ export interface ReferenceData {
   number: number
   type: ReferenceType
   id: string
+  // Phase3: page number of the first occurrence of this reference, if cited with #p=N.
+  page?: number
 }
 
 /**
@@ -44,22 +88,26 @@ export interface ReferenceData {
  * @returns Array of parsed references
  */
 export function parseSourceReferences(text: string): ParsedReference[] {
-  // Match pattern: (source_insight|note|source):alphanumeric_id
-  // This handles references both inside and outside brackets
-  const pattern = /(source_insight|note|source):([a-zA-Z0-9_]+)/g
+  // Match pattern: (source_insight|note|source):alphanumeric_id with an optional
+  // `#p=<n>` page suffix. Handles references both inside and outside brackets.
+  const pattern = new RegExp(REFERENCE_REGEX.source, 'g')
   const matches: ParsedReference[] = []
 
   let match
   while ((match = pattern.exec(text)) !== null) {
     const type = match[1] as ReferenceType
     const id = match[2]
+    const page = match[3] ? parseInt(match[3], 10) : undefined
 
     matches.push({
       type,
       id,
+      // originalText spans the full match incl. any `#p=N`, so start/endIndex
+      // stay correct for downstream replacement.
       originalText: match[0],
       startIndex: match.index,
-      endIndex: pattern.lastIndex
+      endIndex: pattern.lastIndex,
+      page
     })
   }
 
@@ -75,7 +123,7 @@ export function parseSourceReferences(text: string): ParsedReference[] {
  */
 export function convertSourceReferences(
   text: string,
-  onReferenceClick: (type: ReferenceType, id: string) => void
+  onReferenceClick: ReferenceClickHandler
 ): React.ReactNode {
   const matches = parseSourceReferences(text)
 
@@ -110,14 +158,16 @@ export function convertSourceReferences(
     const hasDoubleBracketAfter = afterMatch === ']]'
     const hasSingleBracketAfter = afterMatch.startsWith(']') && !hasDoubleBracketAfter
 
-    // Determine the display text with appropriate brackets
-    let displayText = match.originalText
+    // Determine the display text with appropriate brackets. Strip any `#p=N`
+    // page suffix from the visible label — the page rides along on the click.
+    const baseText = match.originalText.replace(/#p=\d+$/, '')
+    let displayText = baseText
     if (hasDoubleBracketBefore && hasDoubleBracketAfter) {
-      displayText = `[[${match.originalText}]]`
+      displayText = `[[${baseText}]]`
     } else if (hasSingleBracketBefore && hasSingleBracketAfter) {
-      displayText = `[${match.originalText}]`
+      displayText = `[${baseText}]`
     } else {
-      displayText = match.originalText
+      displayText = baseText
     }
 
     // Add clickable reference button
@@ -127,7 +177,7 @@ export function convertSourceReferences(
         onClick={(e) => {
           e.preventDefault()
           e.stopPropagation()
-          onReferenceClick(match.type, match.id)
+          onReferenceClick(match.type, match.id, match.page)
         }}
         className="text-primary hover:underline cursor-pointer inline font-medium"
         type="button"
@@ -172,14 +222,15 @@ export function convertSourceReferences(
  * @returns Text with references converted to markdown links
  */
 export function convertReferencesToMarkdownLinks(text: string): string {
-  // Step 1: Find ALL references using simple greedy pattern
-  const refPattern = /(source_insight|note|source):([a-zA-Z0-9_]+)/g
-  const references: Array<{ type: string; id: string; index: number; length: number }> = []
+  // Step 1: Find ALL references using simple greedy pattern (incl. optional #p=N)
+  const refPattern = new RegExp(REFERENCE_REGEX.source, 'g')
+  const references: Array<{ type: string; id: string; index: number; length: number; page?: number }> = []
 
   let match
   while ((match = refPattern.exec(text)) !== null) {
     const type = match[1]
     const id = match[2]
+    const page = match[3] ? parseInt(match[3], 10) : undefined
 
     // Validate the reference
     const validTypes = ['source', 'source_insight', 'note']
@@ -191,7 +242,10 @@ export function convertReferencesToMarkdownLinks(text: string): string {
       type,
       id,
       index: match.index,
-      length: match[0].length
+      // length spans the full match incl. any `#p=N`, so the page suffix is
+      // consumed by the replacement below rather than left dangling in the text.
+      length: match[0].length,
+      page
     })
   }
 
@@ -246,8 +300,9 @@ export function convertReferencesToMarkdownLinks(text: string): string {
       displayText = refText
     }
 
-    // Step 4: Build the markdown link
-    const href = `#ref-${ref.type}-${ref.id}`
+    // Step 4: Build the markdown link (href carries the page so it survives
+    // the markdown round-trip; the visible displayText stays page-free).
+    const href = buildReferenceHref(ref.type, ref.id, ref.page)
     const markdownLink = `[${displayText}](${href})`
 
     // Step 5: Replace in the result string
@@ -264,7 +319,7 @@ export function convertReferencesToMarkdownLinks(text: string): string {
  * @returns React component for rendering links
  */
 export function createReferenceLinkComponent(
-  onReferenceClick: (type: ReferenceType, id: string) => void
+  onReferenceClick: ReferenceClickHandler
 ) {
   const ReferenceLinkComponent = ({
     href,
@@ -275,11 +330,10 @@ export function createReferenceLinkComponent(
     children?: React.ReactNode
   }) => {
     // Check if this is a reference link (starts with #ref-)
-    if (href?.startsWith('#ref-')) {
-      // Parse: #ref-source-abc123 → type=source, id=abc123
-      const parts = href.substring(5).split('-') // Remove '#ref-'
-      const type = parts[0] as ReferenceType
-      const id = parts.slice(1).join('-') // Rejoin in case ID has dashes
+    const parsed = href ? parseReferenceHref(href) : null
+    if (parsed) {
+      // Parse: #ref-source-abc123(?p=N) → type, id, optional page
+      const { type, id, page } = parsed
 
       // Select appropriate icon based on reference type
       const IconComponent =
@@ -292,7 +346,7 @@ export function createReferenceLinkComponent(
           onClick={(e) => {
             e.preventDefault()
             e.stopPropagation()
-            onReferenceClick(type, id)
+            onReferenceClick(type, id, page)
           }}
           className="text-primary hover:underline cursor-pointer inline font-medium"
           type="button"
@@ -353,12 +407,15 @@ export function convertReferencesToCompactMarkdown(text: string, referencesLabel
   let nextNumber = 1
 
   for (const reference of references) {
+    // Dedup by document (type:id) — unchanged numbering for existing content.
+    // The page from the first occurrence rides along on the citation href.
     const key = `${reference.type}:${reference.id}`
     if (!referenceMap.has(key)) {
       referenceMap.set(key, {
         number: nextNumber++,
         type: reference.type,
-        id: reference.id
+        id: reference.id,
+        page: reference.page
       })
     }
   }
@@ -392,8 +449,8 @@ export function convertReferencesToCompactMarkdown(text: string, referencesLabel
       replaceEnd = refEnd + 1
     }
 
-    // Build the numbered citation with full reference in href
-    const citationLink = `[${number}](#ref-${reference.type}-${reference.id})`
+    // Build the numbered citation with full reference in href (page-aware)
+    const citationLink = `[${number}](${buildReferenceHref(reference.type, reference.id, refData.page)})`
 
     // Replace in the result string
     result = result.substring(0, replaceStart) + citationLink + result.substring(replaceEnd)
@@ -409,7 +466,7 @@ export function convertReferencesToCompactMarkdown(text: string, referencesLabel
 
   // Iterate through reference map in insertion order (Map preserves order)
   for (const [, refData] of referenceMap) {
-    const refListItem = `[${refData.number}] - [${refData.type}:${refData.id}](#ref-${refData.type}-${refData.id})`
+    const refListItem = `[${refData.number}] - [${refData.type}:${refData.id}](${buildReferenceHref(refData.type, refData.id, refData.page)})`
     refListLines.push(refListItem)
   }
 
@@ -437,7 +494,7 @@ export function convertReferencesToCompactMarkdown(text: string, referencesLabel
  * <ReactMarkdown components={{ a: LinkComponent }}>...</ReactMarkdown>
  */
 export function createCompactReferenceLinkComponent(
-  onReferenceClick: (type: ReferenceType, id: string) => void
+  onReferenceClick: ReferenceClickHandler
 ) {
   const CompactReferenceLinkComponent = ({
     href,
@@ -448,18 +505,17 @@ export function createCompactReferenceLinkComponent(
     children?: React.ReactNode
   }) => {
     // Check if this is a reference link (starts with #ref-)
-    if (href?.startsWith('#ref-')) {
-      // Parse: #ref-source-abc123 → type=source, id=abc123
-      const parts = href.substring(5).split('-') // Remove '#ref-'
-      const type = parts[0] as ReferenceType
-      const id = parts.slice(1).join('-') // Rejoin in case ID has dashes
+    const parsed = href ? parseReferenceHref(href) : null
+    if (parsed) {
+      // Parse: #ref-source-abc123(?p=N) → type, id, optional page
+      const { type, id, page } = parsed
 
       return (
         <button
           onClick={(e) => {
             e.preventDefault()
             e.stopPropagation()
-            onReferenceClick(type, id)
+            onReferenceClick(type, id, page)
           }}
           className="text-primary hover:underline cursor-pointer inline font-medium"
           type="button"

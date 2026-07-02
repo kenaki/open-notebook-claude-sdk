@@ -195,6 +195,14 @@ async def save_source(state: SourceState) -> dict:
     if content_state.title and (not source.title or source.title == "Processing..."):
         source.title = content_state.title
 
+    # Phase3: persist A2's per-block page provenance so out-of-process embedding
+    # commands (embed_source / backfill_page_numbers) can stamp page_number on
+    # each chunk. Only PDFs that went through Docling carry a page_map; web /
+    # pasted / PyMuPDF-fallback sources leave it null and degrade gracefully.
+    page_map = state.get("page_map")
+    if page_map:
+        source.page_map = page_map
+
     await source.save()
 
     # NOTE: Notebook associations are created by the API immediately for UI responsiveness
