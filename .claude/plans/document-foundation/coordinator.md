@@ -15,7 +15,7 @@
 ## SESSION HANDOFF (read first)
 
 **State (2026-07-02, wave5d — ALL CODE LANDED):** Track A ☑. **Track C ☑ (C1–C4).** Phase1 ☑.
-Track B: B1 ☑; **B2, B3, B4, B5 all ◐** (code integrated + green; live/decision items parked). **Phase3 ◐.**
+Track B: B1 ☑; **B3 ☑ + B4 ☑ (live-verified 2026-07-02)**; B2, B5 ◐. **Phase3 ◐** (migration ✅ applied; page_number BLOCKED by Docling OCR on the Spark — see Q-docling-install).
 Every build-now chunk's CODE is written, integrated on `feature/multipanelchat`, and static-verified
 (backend full suite 214 pass; frontend tsc baseline-only). **Document-foundation is NOT archived** — the
 ◐ chunks await the end-of-run PUNCH-LIST:
@@ -158,15 +158,15 @@ Legend: ☐ todo · ◐ in progress · ☑ done · ⏸ blocked · ⊘ deferred
 | A | A3 | Chaptering: section tree + get_sections/get_outline + tagged chunks + backfill | ☑ | commit 6ba9f40; build_sections+backfill_sections commands, section tree + get_sections/get_outline, chunk→section stamping, graph rewire. pytest 31 pass; worker 16 cmds; api clean. ⚠ live-ingest spot-check pending. **Track A fully ☑ → B & C unblocked; Phase3 unblocked.** wave3 2026-06-29 |
 | B | B1 🚧 | Vision-verifier plumbing + **validation-gate pilot** | ☑ | commit 87de266 (wave4 2026-07-02). Real pilot run — **GO-WITH-CAVEATS, human-blessed 2026-07-02.** Gate-bypass credential fixed same session |
 | B | B2 | Per-chapter verify-clean background command | ◐ | commit 09c0fed (wave5b 2026-07-02); `verify_clean_section`+`verify_clean_source` cmds, PyMuPDF 2× render, cleaned→`cleaned_content` (raw immutable), discrepancies→`verify_flag` insight, fire-and-forget trigger in `submit_sections`. Static verify green (imports+register, pytest 31). **LIVE spot-check parked:** run on a real section → cleaned better + raw byte-unchanged + verify_flag + fan-out + failure isolation; math path untested. Auto-decisions: direct `get_vision_model(max_tokens=8192)` (NOT `provision_langchain_model` — avoids >105k non-vision large-context swap); retry schema→`max_attempts=3/fixed 10s/stop_on ValueError,ConfigError`; `_MAX_VERIFY_PAGES=50` skip-with-flag |
-| B | B3 | Per-section summaries + doc abstract | ◐ | commit abb9444 (wave5c 2026-07-02); `summarize_section`+`generate_source_abstract` (commands/summary_commands.py), `Source.summarize_sections()` fan-out, trigger after B2's verify in `submit_sections`. Static verify green (register, **full suite 214 pass**). **LIVE spot-check parked:** real run → summaries non-null <500w, `abstract` insight, get_outline surfaces summaries, idempotent re-run. Auto-decisions #17–19 |
-| B | B4 | Tiered get_context rewrite | ◐ | commit c6f6004 (wave5d 2026-07-02); `Source.get_context("long")` → {id,title,insights,abstract,outline} (no full_text); `format_source_long_context` renders Abstract + flattened Chapters; `Notebook.get_context` rewired; short unchanged (no "medium" tier exists). Integrated + **full suite 215 pass**. Decision #21 (non-PDF fallback) **✅ RESOLVED** by orchestrator fix 8c0b606 (implements Decision #12 + regression test). Only the **LIVE no-balloon spot-check** remains parked |
+| B | B3 | Per-section summaries + doc abstract | ☑ | commit abb9444 (wave5c 2026-07-02); `summarize_section`+`generate_source_abstract` (commands/summary_commands.py), `Source.summarize_sections()` fan-out, trigger after B2's verify in `submit_sections`. Static verify green (register, **full suite 214 pass**). **LIVE run ✅ VERIFIED 2026-07-02 (executor):** `summarize_section`→1434-char summary + `generate_source_abstract`→764-char abstract, both surfaced by `get_context("long")`. ⚠ tested on a single whole-doc section (the one test PDF has no TOC/headings) — mechanism proven, per-chapter fan-out richness not. Auto-decisions #17–19 |
+| B | B4 | Tiered get_context rewrite | ☑ | commit c6f6004 (wave5d 2026-07-02); `Source.get_context("long")` → {id,title,insights,abstract,outline} (no full_text); `format_source_long_context` renders Abstract + flattened Chapters; `Notebook.get_context` rewired; short unchanged (no "medium" tier exists). Integrated + **full suite 215 pass**. Decision #21 (non-PDF fallback) **✅ RESOLVED** by orchestrator fix 8c0b606 (implements Decision #12 + regression test). **LIVE no-balloon check ✅ VERIFIED 2026-07-02 (executor):** chaptered→{abstract,outline}, NO full_text (281,733→3,378 chars = 98.8%↓); Decision #21 fallback (unchaptered→full_text) also confirmed |
 | B | B5 | Agent tools get_source_outline / get_section | ◐ | commit 1effece (wave5d 2026-07-02); `get_source_outline`+`get_section` @tool (conformed to file's real dict-arg/`_result` pattern, not the plan's illustrative shape), registered in MCP server; `get_source` kept full_text + added nav hints; `get_section` content capped at 4000 chars. **full suite 214 pass, ruff clean, MCP builds.** **LIVE spot-check parked** (agent actually calls the tools + answers a chapter question). Minor: confirm the 4000-char section cap |
 | C | C1 | GET /sources/{id}/sections + schemas + has_sections flag | ☑ | commit c498aa4 (wave4 2026-07-02); recovered from a prior session's unmerged worktree (orig 67c3b7d) — implementation complete and verified, just never integrated. `pytest tests/test_models_api.py` 12 passed |
 | C | C2 | Frontend types + getSections API client | ☑ | commit 22eca7c (wave5 2026-07-02); SourceSectionNode/SourceSectionResponse types + has_sections?/sections_count? on SourceDetailResponse + getSections client. tsc clean (baseline only). ⚠ `title` typed non-optional per verbatim spec; backend `title` is nullable — C3 should tolerate null |
 | C | C3 | TOC sidebar + per-chapter rendering (SourceContentTab) | ☑ | commit 887bf95 (wave5b 2026-07-02); `SourceTOC.tsx` (sticky collapsible tree, `data-section-id` anchors) + two-col `SourceContentTab` reusing the existing ReactMarkdown; content via `getSections(id,true)`; unchaptered fallback preserved; null-title tolerated; 3 locale keys ×14. tsc clean (baseline only). ⚠ visual spot-check parked (TOC renders for chaptered PDF; flat render for web/pasted). Exposes `getSectionPageRangeLabel` + anchors for C4 |
 | C | C4 | Interaction: selection actions + per-chapter AI + citation→jump | ☑ | commit a530bfa (wave5c 2026-07-02); PassageSelectionMenu Explain+Save-note, SourceTOC per-chapter Summarize/Quiz (onSectionAction prop-down, Q-c4-chat-scope resolved), ChatPanel citation→section-anchor scroll, 5 keys ×14. tsc clean; reuse confirmed; no annotations (Phase4 OUT). **Track C fully ☑.** ⚠ visual spot-checks parked. ⚠ **citation→PDF-page-open last mile = follow-up** (needs SourceDetailContent controlled tabs + PDFViewer initialPage — outside C4's files; Q-citation-pdf-open). Section-anchor scroll dormant until citations carry section ids |
 | — | Phase1 | PDFViewer.tsx inline viewer (FE-only, dep-free) | ☑ | commit 1608053; @react-pdf-viewer + PDFViewer.tsx + Original PDF tab + 14 locales + next.config worker. wave2 2026-06-29. ⚠ browser render spot-check still pending (manual) |
-| — | Phase3 | page_number/bbox + vector_search + #p=N citations (mig 20) | ◐ | commit b525c88 (wave5 2026-07-02); mig20 (page_map/page_number/bbox + fn::vector_search REMOVE+DEFINE redefine) + provenance chunking (build_page_char_map/find_chunk_page) + embed_source page_number stamping + backfill_page_numbers cmd + #p=N parser (forwards `page` arg to C4). Static verify green (pytest 65 + test_chunking 34, imports OK, mig20 in both lists). **LIVE spot-checks PARKED:** (1) migration-apply on API restart — WATCH the fn::vector_search redefine for SurrealQL errors; (2) re-embed PDF → page_number; (3) chat emits #p=N; (4) citation→PDF-open (final wiring is C4's — parser already forwards page); (5) npm build |
+| — | Phase3 | page_number/bbox + vector_search + #p=N citations (mig 20) | ◐ | commit b525c88 (wave5 2026-07-02); mig20 (page_map/page_number/bbox + fn::vector_search REMOVE+DEFINE redefine) + provenance chunking (build_page_char_map/find_chunk_page) + embed_source page_number stamping + backfill_page_numbers cmd + #p=N parser (forwards `page` arg to C4). Static verify green (pytest 65 + test_chunking 34, imports OK, mig20 in both lists). **LIVE (executor 2026-07-02):** (1) migration-apply ✅ VERIFIED (mig19+20 live in DB: page_number/bbox/section, page_map, source_section, fn::vector_search — REMOVE+DEFINE succeeded, no SurrealQL errors); (2) re-embed→page_number ⛔ **BLOCKED** — Docling page_map extraction fails on the Spark (RapidOCR `ValueError: Unsupported configuration: torch.PP-OCRv6.det.small`; = Q-docling-install) → `backfill_page_numbers` leaves page_number null (graceful); (3)/(4) #p=N + citation→PDF-open still pending Decision #20; (5) npm build ✅ (via the canvas fix). **Stays ◐** until Docling OCR is fixed/bypassed on this env |
 | — | Phase4 | Annotations (source_annotation, mig 21, highlight plugin) | ⊘ | **DEFERRED** — do not start until Phase1+Phase3 ☑ |
 
 ---
@@ -326,6 +326,13 @@ mv .claude/plans/pdf-viewer-citations.md .claude/plans/archived/pdf-viewer-citat
 ## Open Questions (cross-track)
 
 - **Q-docling-install** — Docling on aarch64 + CUDA (Spark): wheel availability, model-weights download, Docker pre-bake, license check. *Default:* A2 adds it behind `document_engine` config with PyMuPDF fallback; if `content-core`'s Docling wrapper exposes `page_no`, prefer that over calling Docling directly. Resolve in A2.
+  **⛔ MATERIALIZED 2026-07-02 (live check):** `_extract_docling_page_map` fails on the Spark with
+  `ValueError: Unsupported configuration: torch.PP-OCRv6.det.small` (Docling's RapidOCR backend, torch/GPU
+  engine). Consequence: no page_map ⇒ Phase3 `page_number` cannot populate ⇒ no real-page `#p=N` citations.
+  Plain text extraction still works (PyMuPDF fallback); only the page-provenance map is blocked. Options to
+  unblock (S3 decision): (a) run Docling with `do_ocr=False` when the PDF has a text layer; (b) pin/repair
+  the RapidOCR model config at the env/dependency level; (c) add a PyMuPDF page_map fallback inside
+  `_extract_docling_page_map` (per-page text → char-offset map, no OCR).
 - **Q-qwen-vision** — Is the deployed Ollama Qwen the vision build? Does Esperanto+Ollama forward image_url blocks?
   **Piloted 2026-07-02 (wave4):** YES — `qwen3.6:35b` handles image input correctly through the app's
   normal provisioning path. Quality: body text excellent (incl. an image-only page PyMuPDF got 0 chars
@@ -357,6 +364,28 @@ mv .claude/plans/pdf-viewer-citations.md .claude/plans/archived/pdf-viewer-citat
 
 ## Changelog
 
+- 2026-07-02 (executor resume, LIVE CHECKS on a real PDF) — Drove the one real source ("Modern Greek
+  Grammar Notes.pdf", `source:au8…`) through the pipeline and verified outputs.
+  **✅ VERIFIED:** (a) **B4 tiered get_context** — the digestion fix: chaptered→{abstract,outline} with NO
+  full_text (281,733→3,378 chars = **98.8% reduction**); Decision #21 fallback (unchaptered→full_text)
+  confirmed → **B4 ☑**. (b) **B3** — `summarize_section`→1434-char summary + `generate_source_abstract`→
+  764-char abstract, both surfaced by `get_context("long")` → **B3 ☑**. (c) **Phase3 migration** — mig19+20
+  schema live in DB (page_number/bbox/section, page_map, source_section, `fn::vector_search`).
+  **🔧 BUG FOUND + FIXED (commit 453a6c1): A3 chaptering was broken at runtime.** `_build_sections_for_source`
+  persisted `source_section` rows via `ObjectModel.save()`, which emitted the `source`/`parent` record-links
+  as plain strings → SurrealDB rejected every insert (`expected a record<source>`). It passed static tests
+  but had never actually chaptered a real source. Fixed via a `SourceSection._prepare_save_data` override
+  (`ensure_record_id`). **🖥 OPS: `on-worker` was stale** (started 18:18, before Phase3/B3 landed) → it
+  rejected the new commands with "Command not found"; restarted → registers them now. Any PDF uploaded
+  before this restart would have silently failed its chaptering/verify/summarize pipeline.
+  **⛔ BLOCKER (env, NOT code): Docling page_map extraction fails on the Spark** — RapidOCR
+  `ValueError: Unsupported configuration: torch.PP-OCRv6.det.small` (= Q-docling-install). ⇒ Phase3
+  `page_number` can't populate (backfill leaves it null, gracefully). Phase3 stays ◐.
+  **Caveats:** the test PDF has no TOC/bookmarks + no markdown headings → chaptered into 1 whole-doc section
+  (Decision #4 fallback, correct) — so B2 (185-page section > `_MAX_VERIFY_PAGES=50` → skip) and a rich
+  multi-chapter outline were NOT exercised; the model's own summary confirms the doc has 11 chapters, so a
+  bookmark-bearing PDF would give a fuller test. **Still ◐:** B2 (verify-clean quality), B5 (agent tool-call),
+  Phase3 (page_number blocked). df remains un-archived.
 - 2026-07-02 (executor resume, build-fix) — **Fixed a blocking frontend build error in Phase1 code**
   (user-reported). `pdfjs-dist` (via @react-pdf-viewer, imported by `PDFViewer.tsx`) does
   `require("canvas")` in its NodeCanvasFactory — an optional NATIVE module that is not installed and is
