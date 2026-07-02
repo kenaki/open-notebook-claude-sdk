@@ -14,13 +14,17 @@
 
 ## SESSION HANDOFF (read first)
 
-**State (2026-07-02, wave5c):** Track A fully ☑. **Track C FULLY ☑ (C1–C4).** Track B: B1 ☑, **B2 ◐,
-B3 ◐** (code+static done, live checks parked). Phase1 ☑. **Phase3 ◐**. Remaining build-now: **B4, B5**
-only. Next/final wave (5d): **B4 ‖ B5** (file-disjoint: B4 notebook.py+context_builder.py; B5
-claude_agent_tools.py — B5 uses A3's get_outline, not B4's rewrite, so they parallelize).
-**After 5d, all code lands; document-foundation stays un-archived pending the parked LIVE spot-checks**
-(Phase3 migration-apply, B2/B3/B4 real-section+chat runs) + one follow-up (Q-citation-pdf-open, Decision
-#20) — all on the run's end punch-list. Archive only once those clear to ☑.
+**State (2026-07-02, wave5d — ALL CODE LANDED):** Track A ☑. **Track C ☑ (C1–C4).** Phase1 ☑.
+Track B: B1 ☑; **B2, B3, B4, B5 all ◐** (code integrated + green; live/decision items parked). **Phase3 ◐.**
+Every build-now chunk's CODE is written, integrated on `feature/multipanelchat`, and static-verified
+(backend full suite 214 pass; frontend tsc baseline-only). **Document-foundation is NOT archived** — the
+◐ chunks await the end-of-run PUNCH-LIST:
+  • **Decision #21 🚧 (X-nonpdf-longcontext)** — B4 non-PDF fallback (recommended fix in Decisions log).
+  • **Decision #20 (Q-citation-pdf-open)** — citation→PDF-page-open follow-up chunk.
+  • **LIVE spot-checks** (need running services + a real PDF): Phase3 migration-apply (watch fn::vector_search
+    redefine) + re-embed→page_number; B2 verify-clean on a real section; B3 summaries/abstract; B4 no-balloon
+    chat; B5 agent tool-calls; C3/C4 visual; D1 toast render.
+Once the decisions are answered + the live checks pass, flip the ◐ chunks to ☑ and archive the directory.
 
 **Orchestrator prompt (paste to drive a wave from the meta-coordinator):**
 ```
@@ -139,8 +143,8 @@ Legend: ☐ todo · ◐ in progress · ☑ done · ⏸ blocked · ⊘ deferred
 | B | B1 🚧 | Vision-verifier plumbing + **validation-gate pilot** | ☑ | commit 87de266 (wave4 2026-07-02). Real pilot run — **GO-WITH-CAVEATS, human-blessed 2026-07-02.** Gate-bypass credential fixed same session |
 | B | B2 | Per-chapter verify-clean background command | ◐ | commit 09c0fed (wave5b 2026-07-02); `verify_clean_section`+`verify_clean_source` cmds, PyMuPDF 2× render, cleaned→`cleaned_content` (raw immutable), discrepancies→`verify_flag` insight, fire-and-forget trigger in `submit_sections`. Static verify green (imports+register, pytest 31). **LIVE spot-check parked:** run on a real section → cleaned better + raw byte-unchanged + verify_flag + fan-out + failure isolation; math path untested. Auto-decisions: direct `get_vision_model(max_tokens=8192)` (NOT `provision_langchain_model` — avoids >105k non-vision large-context swap); retry schema→`max_attempts=3/fixed 10s/stop_on ValueError,ConfigError`; `_MAX_VERIFY_PAGES=50` skip-with-flag |
 | B | B3 | Per-section summaries + doc abstract | ◐ | commit abb9444 (wave5c 2026-07-02); `summarize_section`+`generate_source_abstract` (commands/summary_commands.py), `Source.summarize_sections()` fan-out, trigger after B2's verify in `submit_sections`. Static verify green (register, **full suite 214 pass**). **LIVE spot-check parked:** real run → summaries non-null <500w, `abstract` insight, get_outline surfaces summaries, idempotent re-run. Auto-decisions #17–19 |
-| B | B4 | Tiered get_context rewrite | ☐ | The digestion fix |
-| B | B5 | Agent tools get_source_outline / get_section | ☐ | |
+| B | B4 | Tiered get_context rewrite | ◐ | commit c6f6004 (wave5d 2026-07-02); `Source.get_context("long")` → {id,title,insights,abstract,outline} (no full_text); `format_source_long_context` renders Abstract + flattened Chapters; `Notebook.get_context` rewired; short unchanged (no "medium" tier exists). Integrated + **full suite 214 pass** (2 tests updated to new contract). **PARKED DECISION (Decision #21 / X-nonpdf-longcontext, awaiting-you):** non-PDF sources never chapter → post-B4 they emit an empty long block (regresses Decision #12). Also **LIVE no-balloon spot-check** parked |
+| B | B5 | Agent tools get_source_outline / get_section | ◐ | commit 1effece (wave5d 2026-07-02); `get_source_outline`+`get_section` @tool (conformed to file's real dict-arg/`_result` pattern, not the plan's illustrative shape), registered in MCP server; `get_source` kept full_text + added nav hints; `get_section` content capped at 4000 chars. **full suite 214 pass, ruff clean, MCP builds.** **LIVE spot-check parked** (agent actually calls the tools + answers a chapter question). Minor: confirm the 4000-char section cap |
 | C | C1 | GET /sources/{id}/sections + schemas + has_sections flag | ☑ | commit c498aa4 (wave4 2026-07-02); recovered from a prior session's unmerged worktree (orig 67c3b7d) — implementation complete and verified, just never integrated. `pytest tests/test_models_api.py` 12 passed |
 | C | C2 | Frontend types + getSections API client | ☑ | commit 22eca7c (wave5 2026-07-02); SourceSectionNode/SourceSectionResponse types + has_sections?/sections_count? on SourceDetailResponse + getSections client. tsc clean (baseline only). ⚠ `title` typed non-optional per verbatim spec; backend `title` is nullable — C3 should tolerate null |
 | C | C3 | TOC sidebar + per-chapter rendering (SourceContentTab) | ☑ | commit 887bf95 (wave5b 2026-07-02); `SourceTOC.tsx` (sticky collapsible tree, `data-section-id` anchors) + two-col `SourceContentTab` reusing the existing ReactMarkdown; content via `getSections(id,true)`; unchaptered fallback preserved; null-title tolerated; 3 locale keys ×14. tsc clean (baseline only). ⚠ visual spot-check parked (TOC renders for chaptered PDF; flat render for web/pasted). Exposes `getSectionPageRangeLabel` + anchors for C4 |
@@ -201,6 +205,7 @@ Human viewer gets: TOC + per-chapter render (cleaned content) + inline PDF + cit
 | 18 | B3 abstract readiness gate? | **auto-decided (B3):** deviates from the verbatim `get_outline()` → gates on `get_sections()` (text-bearing) instead. Heading-only divider sections legitimately have empty content and never get a `summary`; requiring 100% of outline nodes summarized would retry-forever. Gate only on sections that actually have text. |
 | 19 | B3 abstract retry window? | **auto-decided (B3):** `generate_source_abstract` is submitted right after fanning out N per-section LLM jobs on one local GPU → `max_attempts=8, exponential_jitter, wait 15–120s` (~10 min). May need widening for 30+ chapter textbooks; manual re-run via `Source.summarize_sections()` remains. `summarize_section` retry = `max_attempts=3, fixed 5s, stop_on ValueError/ConfigError`. |
 | 20 | citation → PDF-page-open (Q-citation-pdf-open)? | **PARKED FOLLOW-UP (from C4):** Phase3 forwards a `page` arg and C4 does section-anchor scroll, but opening the inline PDF at page N needs `SourceDetailContent.tsx` made tab-controlled + `PDFViewer.initialPage` wired + a `{activeTab, citationPage}` lift on the source page — all OUTSIDE any chunk's file ownership (Phase1 owns those, done). **Proposed default:** a small follow-up chunk (allowed to touch SourceDetailContent + source page + PDFViewer) closes it; `ChatPanel.handleReferenceClick` then takes the 3rd `page` arg. On the run's end punch-list. |
+| 21 🚧 | Non-PDF "long" context after B4 (X-nonpdf-longcontext)? | **⏸ AWAITING-YOU (emergent, B4).** Decision #7 ("never dump full_text in long context") vs Decision #12 ("non-PDF sources keep current behavior"): B4 implemented literal #7, but non-PDF sources never chapter (`build_sections` is PDF-gated) → `get_context("long")` returns `abstract=None, outline=[]` → an **empty long block**, where pre-B4 they dumped full_text. Real degradation for web/pasted/transcript sources; PDFs (the feature's target) are correct. **Recommended fix:** in `Source.get_context("long")`, when `outline` is empty **fall back to the old full_text return** (covers non-PDF + a not-yet-chaptered PDF's transient window — full_text briefly is safer than an empty block), and revert `Notebook.get_context`'s `get_sources(include_full_text=False)` → `True` so the fallback has full_text available (PDFs still format the digest, so no prompt balloon). Then re-point the 2 tests B4 changed at a chaptered vs non-chaptered source. Parked (multi-method + test-semantics change) rather than applied blind. |
 
 ---
 
@@ -336,6 +341,16 @@ mv .claude/plans/pdf-viewer-citations.md .claude/plans/archived/pdf-viewer-citat
 
 ## Changelog
 
+- 2026-07-02 (wave5d — final code wave) — **B4 ◐ (c6f6004), B5 ◐ (1effece). ALL document-foundation
+  code landed.** 2 parallel worktree agents (both backend, file-disjoint; orchestrator pre-verified the
+  `get_context` callers are opaque so B4 needn't touch api/). **B5** — `get_source_outline`/`get_section`
+  MCP tools (conformed to the file's real dict-arg/`_result` pattern), `get_source` gets nav hints; 214
+  pass, ruff clean, server builds. **B4** — tiered `Source.get_context("long")` (abstract+outline, no
+  full_text) + `Notebook.get_context` rewire; 214 pass (2 tests updated). **B4 surfaced a real
+  #7↔#12 conflict (Decision #21, PARKED for you):** non-PDF sources never chapter → empty long block,
+  regressing Decision #12; recommended fallback in the Decisions log. Both left ◐ pending live checks.
+  Merged-tree verify green vs baseline. **This closes the automated waves — a consolidated punch-list
+  (Decisions #20/#21 + all live spot-checks) is now handed to the user; archival waits on it.**
 - 2026-07-02 (wave5c) — **C4 ☑ (a530bfa) → Track C COMPLETE; B3 ◐ (abb9444).** 2 parallel worktree agents
   (B3 backend ‖ C4 frontend, disjoint). **C4** — Explain/Save-note in PassageSelectionMenu, per-chapter
   Summarize/Quiz in SourceTOC (chat dispatch via `onSectionAction` prop from SourceContentTab's

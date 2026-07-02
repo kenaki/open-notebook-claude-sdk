@@ -70,8 +70,8 @@ new Open Questions → commit → announce "✅ Chunk B.n complete — safe to c
 | B1 🚧 | Vision-verifier plumbing + validation-gate pilot | ☑ | commit 87de266 (wave4 2026-07-02); plumbing + real pilot run. **Human-blessed GO-WITH-CAVEATS 2026-07-02.** Gate-bypass credential also fixed (Q-vision-gate-bypass resolved) — B2 unblocked |
 | B2 | Per-chapter verify-clean background command | ◐ | commit 09c0fed (wave5b 2026-07-02); `verify_clean_section`+`verify_clean_source` in `commands/verify_commands.py`, fire-and-forget trigger in `submit_sections`, `commands/__init__.py` wired. PyMuPDF 2× render → `get_vision_model(max_tokens=8192)` (direct, not provision — see coord Decisions #14) → `cleaned_content` (raw immutable) + `verify_flag` insight. Static verify green (import+register, pytest 31). **LIVE quality spot-check parked** (real section: cleaned>raw, immutable raw, verify_flag, fan-out, failure isolation; math untested). Auto-decisions #14–16 in coordinator |
 | B3 | Per-section summaries + doc abstract | ◐ | commit abb9444 (wave5c 2026-07-02); summary_commands.py (summarize_section + generate_source_abstract), Source.summarize_sections() fan-out, trigger after B2 verify. Static green (register, full suite 214). **LIVE run parked.** Auto-decisions coord #17–19 (abstract idempotency delete-then-add, get_sections readiness gate, retry windows) |
-| B4 | Tiered get_context rewrite (the digestion fix) | ☐ | |
-| B5 | Agent tools get_source_outline / get_section | ☐ | |
+| B4 | Tiered get_context rewrite (the digestion fix) | ◐ | commit c6f6004 (wave5d 2026-07-02); get_context("long")→{title,insights,abstract,outline}, no full_text; Notebook.get_context rewired; 214 pass. **PARKED DECISION #21 (X-nonpdf-longcontext, awaiting-you):** non-PDF sources emit empty long block (regresses #12) — recommended fallback in coord Decisions. **LIVE no-balloon check parked** |
+| B5 | Agent tools get_source_outline / get_section | ◐ | commit 1effece (wave5d 2026-07-02); get_source_outline+get_section MCP tools (real dict-arg pattern), get_source nav hints, 4000-char section cap. 214 pass, ruff clean, MCP builds. **LIVE agent tool-call check parked** |
 
 Legend: ☐ todo · ◐ in progress · ☑ done · ⏸ blocked
 
@@ -79,6 +79,16 @@ Legend: ☐ todo · ◐ in progress · ☑ done · ⏸ blocked
 
 ## Changelog (this track)
 
+- 2026-07-02 (wave5d) — **B4 ◐ (c6f6004), B5 ◐ (1effece) — Track B code complete.** **B4:**
+  `Source.get_context("long")` returns `{id,title,insights,abstract,outline}` (abstract = the B3
+  `abstract` insight; outline = `get_outline()`); `format_source_long_context` renders Abstract + a
+  depth-first flattened Chapters list; `Notebook.get_context` rewired to format from those fields;
+  `short` unchanged, no `medium` tier exists. api/ callers confirmed opaque (append+str) so untouched.
+  214 pass (2 tests migrated to the new contract). **Surfaced Decision #21 (parked): non-PDF sources
+  never chapter → empty long block, regressing #12.** **B5:** `get_source_outline`/`get_section` @tool
+  (conformed to the file's dict-arg/`_result` convention), registered in the MCP server; `get_source`
+  keeps full_text + gains nav hints; `get_section` capped at 4000 chars. 214 pass, ruff clean, MCP
+  server builds. Both ◐ pending live checks. **Track B code done — B1 ☑, B2–B5 ◐ (live/decision parked).**
 - 2026-07-02 (wave5c) — **B3 ◐ (commit abb9444).** `commands/summary_commands.py`: `summarize_section`
   (`provision_langchain_model(text, None, "transformation", max_tokens=8192)` on `cleaned_content or
   content` → `section.summary`) + `generate_source_abstract` (roll-up from `get_outline()` →

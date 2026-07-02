@@ -276,8 +276,8 @@ Legend: ☐ todo · ◐ in-flight · ☑ done. Update the per-plan coordinator's
 | 5b | C3 | document-foundation | 🔵 | ☑ (887bf95) |
 | 5c | B3 | document-foundation | 🔵 | ◐ (abb9444 — code done, live run parked) |
 | 5c | C4 | document-foundation | 🔵 | ☑ (a530bfa — Track C COMPLETE) |
-| 5d | B4 | document-foundation | 🔵 | ☐ (‖ B5 — file-disjoint) |
-| 5d | B5 | document-foundation | 🔵 | ☐ (‖ B4) |
+| 5d | B4 | document-foundation | 🔵 | ◐ (c6f6004 — code done; Decision #21 + live check parked) |
+| 5d | B5 | document-foundation | 🔵 | ◐ (1effece — code done; live tool-call check parked) |
 | 6+ | chat-foundation W1–W6 ‖ df tail (B3,B4,B5,C3,C4) | — | mixed | ☐ |
 | last | T3-d | codebase-cleanup-audit | 🟣 | ☐ |
 | last | Phase4 (deferred) | document-foundation | 🔵 | ☐ |
@@ -308,6 +308,13 @@ does not duplicate chunk specs.
 - **ds4-deepseek-v4-flash** — research/decision-gated; orthogonal.
 
 ## Changelog
+- 2026-07-02 (wave5d — final code wave) — **B4 ◐ (c6f6004), B5 ◐ (1effece). ALL document-foundation
+  code landed + integrated + green** (backend full suite 214; frontend tsc baseline-only). B4 = tiered
+  get_context; B5 = MCP agent tools. B4 surfaced Decision #21 (non-PDF long-context, PARKED). Lane B
+  (document-foundation) code is complete; the plan stays un-archived pending the consolidated punch-list
+  (Decisions #20/#21 + live spot-checks). **Cross-plan status: Lane A background-jobs ✅ archived;
+  Lane B document-foundation code-complete (◐ chunks pending punch-list). Remaining in the meta-plan:
+  chat-foundation (Lane A #2, human-gated — separate execution) + T3-d tail.**
 - 2026-07-02 (wave5c) — **C4 ☑ (a530bfa) → df Track C COMPLETE; B3 ◐ (abb9444).** 2 parallel worktree
   agents (B3 backend ‖ C4 frontend). C4 = interaction layer (Explain/Save-note, per-chapter Summarize/Quiz,
   citation→section scroll); surfaced Q-citation-pdf-open follow-up. B3 = summaries + doc abstract; left ◐
