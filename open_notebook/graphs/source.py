@@ -298,6 +298,24 @@ async def submit_sections(state: SourceState) -> dict:
         # Non-fatal: chaptering failure must not block the ingest pipeline
         logger.warning(f"Failed to submit build_sections for {source.id}: {exc}")
 
+    # B2: fire-and-forget vision verify-clean fan-out. The verify_clean_source
+    # orchestrator retries until build_sections (above) has produced the section
+    # tree (eventual-consistency — see commands/verify_commands.py). Non-blocking
+    # and non-fatal; also callable manually as a re-run path.
+    try:
+        vcmd_id = submit_command(
+            "open_notebook",
+            "verify_clean_source",
+            {"source_id": str(source.id)},
+        )
+        logger.info(
+            f"Submitted verify_clean_source for source {source.id}: {vcmd_id}"
+        )
+    except Exception as exc:
+        logger.warning(
+            f"Failed to submit verify_clean_source for {source.id}: {exc}"
+        )
+
     return {}
 
 
