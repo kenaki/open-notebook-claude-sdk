@@ -46,9 +46,10 @@ def _format_outline_chapters(
 
 def format_source_long_context(source_context: Dict[str, Any]) -> str:
     """
-    Render a Source.get_context("long") dict (title/abstract/outline — no
-    full_text, document-foundation Decision #7/#9) as an "Abstract" + flattened
-    "Chapters" text block for embedding into an LLM prompt.
+    Render a Source.get_context("long") dict as an "Abstract" + flattened
+    "Chapters" text block for a chaptered source (document-foundation Decision
+    #7/#9), or the raw body for a non-chaptered source (Decision #12 fallback —
+    the dict then carries full_text instead of abstract/outline).
     """
     parts: List[str] = []
     abstract = source_context.get("abstract")
@@ -57,6 +58,12 @@ def format_source_long_context(source_context: Dict[str, Any]) -> str:
     chapter_lines = _format_outline_chapters(source_context.get("outline") or [])
     if chapter_lines:
         parts.append("Chapters:\n" + "\n".join(chapter_lines))
+    if not chapter_lines and not abstract:
+        # Decision #12: a non-chaptered source (web page / pasted text / transcript,
+        # or a not-yet-chaptered PDF) keeps its raw body in long context.
+        full_text = source_context.get("full_text")
+        if full_text:
+            parts.append(full_text)
     return "\n\n".join(parts).strip()
 
 
@@ -123,10 +130,11 @@ class Notebook(ObjectModel):
 
         Normal list retrieval omits large source/note bodies, so this method uses
         opt-in full-content fetches and formats only substantive context blocks.
-        Sources are digested via title + abstract + chapter outline (tiered
-        context, Decision #7/#9) — full_text is never fetched or dumped here.
+        Chaptered sources are digested via title + abstract + chapter outline
+        (tiered context, Decision #7/#9); non-chaptered sources fall back to their
+        raw body (Decision #12), so full_text is fetched to make that fallback work.
         """
-        sources = await self.get_sources(include_full_text=False)
+        sources = await self.get_sources(include_full_text=True)
         notes = await self.get_notes(include_content=True)
         context_blocks = []
 
@@ -137,9 +145,9 @@ class Notebook(ObjectModel):
                 insights = source_context.get("insights") or []
 
                 content_parts = []
-                # Tiered context (Decision #7/#9): abstract + chapter outline,
-                # never the raw full_text blob — keeps textbook-sized sources
-                # from ballooning the prompt.
+                # Tiered context: chaptered sources → abstract + chapter outline
+                # (Decision #7/#9; never the raw blob, so textbooks don't balloon
+                # the prompt); non-chaptered sources → raw body (Decision #12).
                 outline_block = format_source_long_context(source_context)
                 if outline_block:
                     content_parts.append(outline_block)
@@ -536,6 +544,20 @@ class Source(ObjectModel):
         insights_list = await self.get_insights()
         insights = [insight.model_dump() for insight in insights_list]
         if context_size == "long":
+            outline = await self.get_outline()
+            # Decision #7/#9: chaptered sources (PDFs) return the tiered digest
+            # (abstract + chapter outline), never the raw full_text blob. Decision
+            # #12: sources that never chapter — web pages, pasted text, transcripts,
+            # or a PDF whose chaptering job hasn't completed yet — keep their raw
+            # body so their content still reaches chat/podcast context. An empty
+            # outline is the signal for that fallback.
+            if not outline:
+                return dict(
+                    id=self.id,
+                    title=self.title,
+                    insights=insights,
+                    full_text=self.full_text,
+                )
             abstract_insight = next(
                 (i for i in insights_list if i.insight_type == "abstract"), None
             )
@@ -544,7 +566,7 @@ class Source(ObjectModel):
                 title=self.title,
                 insights=insights,
                 abstract=abstract_insight.content if abstract_insight else None,
-                outline=await self.get_outline(),
+                outline=outline,
             )
         else:
             return dict(id=self.id, title=self.title, insights=insights)

@@ -154,8 +154,9 @@ class TestNotebookDomain:
         ):
             context = await notebook.get_context()
 
-        # Sources are no longer fetched with full_text (B4 digestion fix).
-        assert get_sources_calls == [False]
+        # Chaptered sources are digested (no raw dump in the prompt), but full_text
+        # is still fetched so non-chaptered sources can fall back to it (Decision #12).
+        assert get_sources_calls == [True]
         assert "## Source: First Source" in context
         assert "Chapter of First Source" in context
         assert "Summary of First Source." in context
@@ -165,6 +166,45 @@ class TestNotebookDomain:
         assert "First source full text for podcast generation." not in context
         assert "Second source full text for podcast generation." not in context
         assert "Notebook(id=" not in context
+
+    @pytest.mark.asyncio
+    async def test_notebook_get_context_falls_back_to_full_text_for_unchaptered_source(
+        self,
+    ):
+        """Decision #12: a non-chaptered source (web page / pasted text / transcript,
+        or a not-yet-chaptered PDF) keeps its raw full_text in long context — it never
+        gets an abstract/outline, so the tiered digest would otherwise be empty."""
+        notebook = Notebook(id="notebook:test", name="Test", description="Test")
+        sources = [
+            Source(
+                id="source:web",
+                title="Web Article",
+                full_text="Raw body of an unchaptered web article.",
+            ),
+        ]
+
+        async def fake_get_sources(self, include_full_text=False):
+            return sources
+
+        async def fake_get_notes(self, include_content=False):
+            return []
+
+        async def fake_get_insights(self):
+            return []
+
+        async def fake_get_outline(self):
+            return []  # non-chaptered source → no outline → Decision #12 fallback
+
+        with (
+            patch.object(Notebook, "get_sources", new=fake_get_sources),
+            patch.object(Notebook, "get_notes", new=fake_get_notes),
+            patch.object(Source, "get_insights", new=fake_get_insights),
+            patch.object(Source, "get_outline", new=fake_get_outline),
+        ):
+            context = await notebook.get_context()
+
+        assert "## Source: Web Article" in context
+        assert "Raw body of an unchaptered web article." in context
 
     @pytest.mark.asyncio
     async def test_notebook_get_context_includes_note_content(self):
