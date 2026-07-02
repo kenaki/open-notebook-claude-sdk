@@ -26,11 +26,18 @@ Modifies: `frontend/src/lib/locales/<lang>/index.ts` for all 14 languages
 ## Status table (this track)
 | Chunk | Title | Status | Owner / session | Notes |
 |------:|-------|--------|-----------------|-------|
-| 1 | `jobs.*` keys across 14 locales | ☐ todo | | dep B, C |
+| 1 | `jobs.*` keys across 14 locales | ☑ done | wave5 2026-07-02 | commit ec88bce; full `jobs.*` key set (tray/status/chatReady/chatFailed/view/generating) across all 14 locales, English fallback values. tsc clean (baseline only); all code-referenced keys resolve. **Last chunk → background-jobs COMPLETE + archived.** ⚠ live toast/tray render across languages = light spot-check (parked) |
 Legend: ☐ todo · ◐ in progress · ☑ done · ⏸ blocked · ⊘ deferred.
 
 ## Changelog (this track)
-- _(none yet)_
+- 2026-07-02 (wave5) — **☑ (commit ec88bce).** Added `jobs.*` section to all 14 locale `index.ts`
+  files (English values as v1 fallback per resolved Q-translate-now). Keys: `jobs.tray.{title,empty,
+  activeCount}`, `jobs.status.{new,queued,running,completed,failed}`, `jobs.chatReady`, `jobs.chatFailed`,
+  `jobs.view`, `jobs.generating`. All 8 code-referenced keys (JobStatusBadge/JobTray/use-jobs-poller)
+  resolve; identical key set + balanced syntax across locales verified. Merged-tree `tsc` clean (only the
+  pre-existing `@testing-library` test-file baseline). **This was the last background-jobs chunk — plan
+  complete; directory archived to `.claude/plans/archived/background-jobs/`.** Light spot-check parked:
+  trigger a completion toast in a couple languages to eyeball rendered strings.
 
 ## Chunks (verbatim)
 
@@ -52,5 +59,6 @@ Legend: ☐ todo · ◐ in progress · ☑ done · ⏸ blocked · ⊘ deferred.
   every track ☑, perform archival (move the feature dir to `.claude/plans/archived/background-jobs/`).
 
 ## Open Questions (this track)
-- **Q-translate-now** — v1 ships English values in non-en locales (keys present, values not localized).
-  Default: acceptable; real translations are a follow-up. Flag if the user wants full localization now.
+- ~~**Q-translate-now**~~ — **RESOLVED 2026-07-02 (orchestrated run, default applied):** ship English
+  values in non-en locales (keys present, values not localized); real translations are a follow-up.
+  User was away at the Phase-0 gate; recommended v1 default applied.

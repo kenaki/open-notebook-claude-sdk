@@ -54,15 +54,24 @@ self-locates from the Status table + `git log`. (Authoritative copy lives in eac
 | A | 4 | status API: `list_command_jobs` active + `commands.ts` client | ☑ done | wave1 2026-06-29 | commit 484ef18; SQL runs, GET /commands/active→200 |
 | A | 5 | shared `jobs-store.ts` (Zustand + persist) | ☑ done | wave1 2026-06-29 | commit 831aede; tsc clean. **Track B fully unblocked** |
 | B | 1 | `use-jobs-poller` + `JobsRuntime` + mount | ☑ done | wave3 2026-06-29 | commit 82257ae; use-jobs-poller.ts (237L) + JobsRuntime + layout mount |
-| B | 2 | `JobTray` + `JobTrayItem` + `JobStatusBadge` + mount | ☐ todo | | dep B1 ✓ |
-| B | 3 | completion/failure toasts + `job-origin` helper | ☐ todo | | dep B1 ✓ |
+| B | 2 | `JobTray` + `JobTrayItem` + `JobStatusBadge` + mount | ☑ done | wave4 2026-07-02 | commit e57378a; JobStatusBadge+JobTrayItem+JobTray + layout mount. tsc clean modulo baseline |
+| B | 3 | completion/failure toasts + `job-origin` helper | ☑ done | wave4 2026-07-02 | commit 111f279; job-origin.ts + toast wiring in use-jobs-poller (notebook_chat/source_chat only, per Q-toast-noise). tsc clean modulo baseline. **Track B fully ☑** |
 | C | 1 | shared pending/error chat bubble + message types | ☑ done | worktree-bg-jobs-c1 | commit 3295a27; merged to feature/multipanelchat |
 | C | 2 | notebook send/receive refactor | ☑ done | wave3 2026-06-29 | commit 5171514; useNotebookChat sendMessageTo → job submit + placeholder |
 | C | 3 | source-chat → cache-backed + job-tracked | ☑ done | wave3 2026-06-29 | commit e9bcafe; cache-backed + job-tracked source chat (mirrors C2). tsc clean. ⚠ live-flow smoke pending |
-| D | 1 | `jobs.*` i18n keys across 14 locales | ☐ todo | | dep B, C |
+| D | 1 | `jobs.*` i18n keys across 14 locales | ☑ done | wave5 2026-07-02 | commit ec88bce; jobs.* across 14 locales, English fallback. **Last chunk — plan COMPLETE + archived.** |
 Legend: ☐ todo · ◐ in progress · ☑ done · ⏸ blocked · ⊘ deferred.
 
+> **✅ PLAN COMPLETE (2026-07-02).** Every track ☑ (A1–A5, B1–B3, C1–C3, D1). Directory archived to
+> `.claude/plans/archived/background-jobs/`. Light live spot-checks remain on the cross-plan run's
+> punch-list (completion-toast render per language; source-chat live-flow smoke) — not blocking.
+
 ## Changelog (cross-track)
+- 2026-07-02 (wave5) — **D1 ☑ (ec88bce) → background-jobs COMPLETE.** `jobs.*` i18n keys across all 14
+  locales (English fallback, Q-translate-now resolved). Merged-tree `tsc` clean (baseline only). With
+  A/B/C already ☑, this closed the plan; the whole feature directory was archived to
+  `.claude/plans/archived/background-jobs/` per the Completion section. Ran in cross-plan Wave 5
+  (bg D1 ‖ df C2 ‖ df Phase3), 3 parallel worktree agents, integrated + verified on the merged tree.
 - 2026-06-29 — Wave-3 completion: **C3 ☑ (e9bcafe)** source-chat moved off useState+SSE onto the
   TanStack cache + job model (mirrors C2); `source-chat.ts` send → 202 `{job_id,session_id}`, optimistic
   user msg + `source_chat` job register + `pending-<job_id>` placeholder, SSE reader deleted. Verified:

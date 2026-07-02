@@ -274,7 +274,7 @@ null (never guess). One-time operation; run manually.
 | Phase | Title | Status | Notes |
 |-------|-------|--------|-------|
 | Phase1 | PDFViewer.tsx inline viewer (FE-only) | ☑ | commit 1608053; @react-pdf-viewer/core+default-layout+pdfjs-dist, PDFViewer.tsx, Original PDF tab in SourceDetailContent, next.config worker alias, 14 locales. ⚠ browser render spot-check still pending (manual) |
-| Phase3 | page_number/bbox + vector_search + #p=N citations (mig 20) | ☐ | Needs A2 ✓ + A3 + Phase1 ✓ |
+| Phase3 | page_number/bbox + vector_search + #p=N citations (mig 20) | ◐ | commit b525c88 (wave5 2026-07-02); code landed + static-verified. **Live spot-checks parked** (migration-apply + fn::vector_search redefine, re-embed→page_number, chat #p=N emission, citation→PDF click, npm build). Citation-click final wiring → C4 (parser forwards `page`) |
 | Phase4 | Annotations (source_annotation, mig 21, highlight plugin) | ⊘ | DEFERRED |
 
 Legend: ☐ todo · ◐ in progress · ☑ done · ⊘ deferred
@@ -283,4 +283,16 @@ Legend: ☐ todo · ◐ in progress · ☑ done · ⊘ deferred
 
 ## Changelog (standalone phases)
 
-- _(none yet.)_
+- 2026-07-02 (wave5) — **Phase3 ◐ (commit b525c88)** — page-level citations landed in an orchestrated
+  run. Migration 20: `source.page_map` (FLEXIBLE option<array>) + `source_embedding.page_number`
+  (option<int>) + `bbox` (option<object>); `fn::vector_search` redefined in mig 20 via `REMOVE FUNCTION IF
+  EXISTS` + `DEFINE FUNCTION IF NOT EXISTS` (same idempotent pattern mig 4 uses — mig 4 left untouched),
+  projecting `page_number`/`bbox` through the grouped RETURN. `save_source` persists `state.page_map` at
+  ingest; `chunk_text`/`embed_source` read it off the DB record and stamp `page_number` per chunk
+  (`build_page_char_map`/`find_chunk_page`, mirroring A3's monotonic-search; never guesses — null when
+  unmatched). `backfill_page_numbers` command re-embeds old PDFs (provenance order: persisted page_map →
+  re-extract if file present → leave null). Prompts (`chat/system.jinja`, `ask/query_process.jinja`) now
+  instruct `[source:id#p=N]` emission. `source-references.tsx` parses `#p=N`, round-trips it through the
+  markdown href as `?p=N`, and calls `onReferenceClick(type, id, page)`. **Left ◐** — Verify block is live
+  (migration-apply on API restart, real-PDF re-embed, browser citation click, npm build); on the punch-list.
+  `bbox` stays null (A2's page_map has no bbox — the column exists for Phase4). **B2 unblocked** (source.py freed).

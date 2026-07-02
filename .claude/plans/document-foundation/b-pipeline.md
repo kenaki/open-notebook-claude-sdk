@@ -67,8 +67,8 @@ new Open Questions → commit → announce "✅ Chunk B.n complete — safe to c
 
 | Chunk | Title | Status | Notes |
 |------:|-------|--------|-------|
-| B1 🚧 | Vision-verifier plumbing + validation-gate pilot | ☐ | **HUMAN GATE** — needs A ☑ |
-| B2 | Per-chapter verify-clean background command | ☐ | Needs B1 GO |
+| B1 🚧 | Vision-verifier plumbing + validation-gate pilot | ☑ | commit 87de266 (wave4 2026-07-02); plumbing + real pilot run. **Human-blessed GO-WITH-CAVEATS 2026-07-02.** Gate-bypass credential also fixed (Q-vision-gate-bypass resolved) — B2 unblocked |
+| B2 | Per-chapter verify-clean background command | ☐ | **Unblocked** (B1 GO'd). Must pass `max_tokens>=8192` explicitly (pilot found silent-empty-output bug otherwise); treat single-pass vision output as draft — route low-confidence pages through `verify_flag` rather than blind overwrite; math handling untested, spot-check before trusting |
 | B3 | Per-section summaries + doc abstract | ☐ | |
 | B4 | Tiered get_context rewrite (the digestion fix) | ☐ | |
 | B5 | Agent tools get_source_outline / get_section | ☐ | |
@@ -79,7 +79,13 @@ Legend: ☐ todo · ◐ in progress · ☑ done · ⏸ blocked
 
 ## Changelog (this track)
 
-- _(none yet.)_
+- 2026-07-02 (wave4) — **B1 ☑ plumbing (commit 87de266), pilot run, parked at human gate.**
+  `default_vision_model` + `get_vision_model()` in `ai/models.py`; `ai/vision_utils.py:provision_vision_message()`;
+  `_media_to_data_uri()` data_uri passthrough in `graphs/chat.py`. Live pilot against `qwen3.6:35b`
+  transcribed 3 real pages of a Modern Greek grammar PDF — GO-WITH-CAVEATS recommendation, awaiting
+  human bless. Surfaced a real `max_tokens` silent-failure bug (must carry into B2) and a credential
+  config issue that bypasses the heavy-slot gate (Q-vision-gate-bypass, needs a decision before any real
+  B2 job runs). `uv run pytest tests/test_models_api.py` 12 passed, no regression.
 
 ---
 
@@ -129,7 +135,26 @@ without explicit user confirmation.
 - The pilot returns a response from Ollama (no timeout/crash).
 - Record whether the output quality gates B2 proceed.
 
-**Gate outcome (fill in after pilot):** `Q-qwen-vision = _____________`
+**Gate outcome (filled 2026-07-02, wave4):** `Q-qwen-vision = GO-WITH-CAVEATS` — **human-blessed 2026-07-02.**
+Piloted `qwen3.6:35b` via Ollama on 3 real pages of `data/uploads/Modern Greek Grammar Notes.pdf`
+(image-only cover page, dense IPA/phonetics table, dense verb-conjugation table). Body-text fidelity
+excellent (including the image-only page PyMuPDF's text layer got 0 chars from); both dense tables
+faithfully reconstructed as markdown tables; Greek script/diacritics handled well. Two small
+transcription slips found in dense prose (a dropped letter; one letter-identity reference rendered
+inconsistently across runs — non-determinism). **Math notation untested** — no sampled page contained
+any; spot-check before trusting that path. **Plumbing bug found:** default (unset) `max_tokens` makes
+this thinking-capable model silently return empty final content on real pages, no error — fixed by
+passing `max_tokens=8192` (same value `graphs/chat.py` already uses); B2 must carry this forward
+explicitly. **Infra issue found and fixed:** the DB-linked credential for this
+model (`credential:sl23md12zdmi5ok3v9bc`) stored `base_url=http://localhost:11434` directly, which
+bypassed the `:11435` heavy-slot admission-control gate entirely (credential config takes priority over
+env vars in `ModelManager.get_model`). Full pilot transcript kept in this run's session
+record; not reproduced here in full. See coordinator Decision Register (Q-qwen-vision, Q-vision-gate-bypass).
+
+**Resolution (2026-07-02):** Human blessed **GO-WITH-CAVEATS**. `credential:sl23md12zdmi5ok3v9bc`
+("Default (Migrated from env)", provider `ollama`, linked to both `qwen3-embedding:8b` and
+`qwen3.6:35b`) had `base_url` updated `:11434` → `:11435` via `Credential.save()`. Verified: gate
+forwards `/api/tags` and `/api/embeddings` correctly; `on-api`/`on-worker` restarted clean. **B2 is unblocked.**
 
 ---
 

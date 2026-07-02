@@ -24,15 +24,39 @@ bg C2 ☑ (5171514). Still ☐ in W3: **bg C3** (source-chat job-tracked), **df 
 backend pytest test_domain 31 pass + worker 16 cmds + api clean; frontend tsc clean (only pre-existing
 `@testing-library` test-file noise). **Track A (document-foundation) FULLY ☑; bg Track A + Track C FULLY ☑.**
 
-**Next runnable wave = Wave 4 (≤4):**
-- **bg B2** — JobTray + JobTrayItem + JobStatusBadge + mount (dep B1✓) — FE, Track-B files
-- **bg B3** — completion/failure toasts + job-origin helper (dep B1✓) — FE, Track-B files
-- **df C1** — GET /sources/{id}/sections + schemas + has_sections (dep A3✓) — BE api/routers/sources + FE-disjoint
-- **df B1 🚧 HUMAN GATE** — vision-verifier plumbing + is-Qwen-vision pilot (dep A1✓+A3✓). ⚠ Spike needs
-  the live Spark + Ollama; STOPS for GO/NO-GO before df B2. Will PARK at its gate; bg B2/B3 + df C1 proceed.
-> ⚠ bg B2 + bg B3 both edit `(dashboard)/layout.tsx` (mount) and may both add to `components/jobs/*` — they
-> are the SAME track (B), sequential, NOT file-disjoint → run B2 then B3 (one worktree), not concurrently.
-> Concurrency this wave: { bg B2→B3 } ‖ { df C1 } ‖ { df B1 pilot, parks }.
+**Wave 4 ☑ COMPLETE (2026-07-02).** bg B2 (e57378a), bg B3 (111f279), df C1 (c498aa4) all landed and
+verified on the merged tree. **df B1 parked at its human gate** (commit 87de266 — plumbing landed; real
+pilot run against `qwen3.6:35b`; agent recommends GO-WITH-CAVEATS; awaiting human bless before df B2).
+Merged-tree verify: frontend `tsc` clean (baseline `@testing-library` noise only); backend import smoke
+clean; `pytest tests/test_domain.py tests/test_models_api.py` 31+12 pass in isolation (the combined-run
+12 "errors" are the known pre-existing collection-order flake, not a regression — see Wave-1 changelog).
+
+> ⚠ **Recovered unmerged prior-session work.** Before this wave, `git worktree list` showed 5 leftover
+> worktrees from an earlier session that were never integrated or recorded. Two contained real completed
+> work never merged: **df C1** (orig `67c3b7d`) and **bg B2** (orig `d67af3c`) — both based only 1
+> docs-commit behind HEAD, trivially clean. df C1 was cherry-picked in as-is (c498aa4). bg B2 had already
+> been independently redone by this wave's freshly-dispatched agent (which self-corrected its own stale
+> worktree base via `git merge --ff-only`) — that version (e57378a) was used instead; the older duplicate
+> was discarded, no unique content lost. Two more worktrees (orig `812a46b` bg-C3, orig `5e88b34` df-A3)
+> were confirmed byte-identical to already-landed `e9bcafe`/`6ba9f40` — pure leftovers. **Lesson for future
+> waves:** `isolation:"worktree"` occasionally seeds from a stale/cached base rather than current branch
+> HEAD — agents should verify their own base against the target branch before starting, and the
+> orchestrator should sweep `git worktree list` for unmerged leftovers before trusting a chunk's `☐ todo`
+> status at face value.
+
+**df B1 gate resolved same session:** human-blessed GO-WITH-CAVEATS; Q-vision-gate-bypass fixed (shared
+Ollama credential now routes through `:11435`). **df B2 and bg D1 are both unblocked** — Wave 5 is now
+fully runnable: bg D1 (i18n) ‖ df B2 (verify-clean) ‖ df C2 (FE types) ‖ df Phase3 (page citations, mig 20)
+— note df B2 ∦ df Phase3 (both touch `graphs/source.py`), so pack df Phase3 this wave and slide df B2
+to run right after, per the existing Wave-5 packing caveat above.
+
+**Wave 5 ran 2026-07-02 (chunk-plan-execute, 3 parallel worktree agents):** **bg D1 ☑** (ec88bce —
+**background-jobs COMPLETE + archived**), **df C2 ☑** (22eca7c), **df Phase3 ◐** (b525c88 — code landed +
+static-verified; live checks parked: migration-apply/re-embed/citation-click/npm build). Merged-tree verify
+green (pytest test_domain 31 + test_chunking 34; test_models_api iso 12; imports clean; mig 20 in both
+async_migrate lists; frontend tsc baseline-only). **Now running Wave 5b: df B2 ‖ df C3** (Phase3 freed
+`graphs/source.py` for B2; C2 ☑ unblocks C3). Remaining Lane B after that: B3→B4→B5, C4. Lane A next plan
+= chat-foundation (Wave 6, has 🚧 B7 vision-spike + SSRF gates — a SEPARATE gated execution).
 ⚠ **Migration-counter caveat (for chatF B1 executor):** the version counter is **positional** (= list length), not filename-derived. df A1 appended `19.surrealql` as list position 18 → DB now at version 18. When chatF B1 adds migration **18**, it MUST be **appended at the END of both lists** (becoming the highest position), NOT inserted between 17 and 19 — inserting positionally would re-run 19 and skip the new 18. Filenames are labels only.
 📐 **Design revision 2026-07-02 (integration audit):** (1) chat-foundation's illustration-delivery
 contract rewritten for the 202-async world — trigger now owned by chatF **W1** in
@@ -209,8 +233,13 @@ Then continue: chatF W2 ‖ df `B3`/`C4`; chatF W3; chatF worker W1→W2(needs B
 
 ## Human gates (orchestrator must pause)
 - **chat-foundation B7 — S-gate** (Wave 6): qwen3.6 VLM vision + relevance spike → GO / GO-WITH-ADJUSTMENTS / NO-GO. Gates worker W2/W3 (image path). Diagram path (worker W1) proceeds regardless. 🟣
+  > ⚠ **Relevant prior evidence:** df B1 (Wave 4, below) already piloted `qwen3.6:35b`'s vision quality on
+  > real dense-page images — GO-WITH-CAVEATS, with a documented `max_tokens` gotcha and two minor
+  > transcription-fidelity caveats. B7's own spike is a different use case (relevance judgment, not
+  > transcription) but should read df B1's pilot writeup first rather than starting cold.
 - **chat-foundation W1–W3** — SSRF / fail-closed image safety review. 🟣
-- **document-foundation B1** — is-Qwen-vision feasibility gate (Wave 4); gates df B2 verify-clean. 🟣
+- **document-foundation B1** — ☑ **RESOLVED (Wave 4, 2026-07-02).** GO-WITH-CAVEATS human-blessed;
+  Q-vision-gate-bypass fixed (shared credential now routes through `:11435`). df B2 unblocked.
 - **ds4-deepseek** (orthogonal, not scheduled) — needs your A/B/C design decision + nvcc/memory check before any chunking.
 
 ---
@@ -236,14 +265,14 @@ Legend: ☐ todo · ◐ in-flight · ☑ done. Update the per-plan coordinator's
 | 3 | C2 | background-jobs | 🔵 | ☑ |
 | 3 | C3 | background-jobs | 🔵 | ☑ |
 | 3 | A3 | document-foundation | 🔵 | ☑ |
-| 4 | B2 | background-jobs | 🔵 | ☐ |
-| 4 | B3 | background-jobs | 🔵 | ☐ |
-| 4 | B1 🚧 | document-foundation | 🟣 | ☐ |
-| 4 | C1 | document-foundation | 🔵 | ☐ |
-| 5 | D1 | background-jobs | 🔵 | ☐ |
-| 5 | B2 | document-foundation | 🔵 | ☐ |
-| 5 | C2 | document-foundation | 🔵 | ☐ |
-| 5 | Phase3 | document-foundation | 🔵 | ☐ |
+| 4 | B2 | background-jobs | 🔵 | ☑ |
+| 4 | B3 | background-jobs | 🔵 | ☑ |
+| 4 | B1 🚧 | document-foundation | 🟣 | ☑ GO-blessed |
+| 4 | C1 | document-foundation | 🔵 | ☑ |
+| 5 | D1 | background-jobs | 🔵 | ☑ (ec88bce — background-jobs COMPLETE + archived) |
+| 5 | C2 | document-foundation | 🔵 | ☑ (22eca7c) |
+| 5 | Phase3 | document-foundation | 🔵 | ◐ (b525c88 — code done, live checks parked) |
+| 5b | B2 | document-foundation | 🔵 | ☐ (unblocked; Phase3 freed source.py) |
 | 6+ | chat-foundation W1–W6 ‖ df tail (B3,B4,B5,C3,C4) | — | mixed | ☐ |
 | last | T3-d | codebase-cleanup-audit | 🟣 | ☐ |
 | last | Phase4 (deferred) | document-foundation | 🔵 | ☐ |
@@ -274,6 +303,28 @@ does not duplicate chunk specs.
 - **ds4-deepseek-v4-flash** — research/decision-gated; orthogonal.
 
 ## Changelog
+- 2026-07-02 (wave5) — **Wave 5 ran; background-jobs COMPLETE + archived.** Orchestrated via
+  chunk-plan-execute, 3 parallel worktree agents (bg D1 ‖ df C2 ‖ df Phase3, all file-disjoint). Landed:
+  **bg D1** (ec88bce → cherry-pick 5725154) — `jobs.*` i18n across 14 locales, closing background-jobs
+  (all tracks ☑); directory `git mv`'d to `archived/background-jobs/`. **df C2** (22eca7c) — FE section
+  types + `getSections`. **df Phase3** (b525c88) — mig 20 page provenance + `fn::vector_search` redefine +
+  provenance chunking + `backfill_page_numbers` + `#p=N` parser; **left ◐** (live migration-apply /
+  re-embed / citation-click / npm-build checks parked on the run's punch-list). All three worktrees seeded
+  from a stale base (`209b48c`) and self-corrected via `git merge --ff-only feature/multipanelchat` per the
+  stale-base lesson. Merged-tree verify green vs baseline (pytest 65 + iso 12; imports clean; frontend tsc
+  baseline-only). **df B2 unblocked** (Phase3 released `graphs/source.py`); Wave 5b = df B2 ‖ df C3 next.
+- 2026-07-02 (wave4, post-gate) — **df B1 gate resolved.** Human blessed GO-WITH-CAVEATS; fixed
+  Q-vision-gate-bypass (`credential:sl23md12zdmi5ok3v9bc` `base_url` `:11434`→`:11435`, verified live).
+  **Wave 4 now fully ☑; df B2 + bg D1 both unblocked for Wave 5.**
+- 2026-07-02 (wave4) — **Wave 4 ☑ (bg B2/B3, df C1); df B1 parked at gate.** Ran via
+  `chunk-plan-execute`, 3 parallel worktree agents. Landed: bg B2 (e57378a), bg B3 (111f279), df C1
+  (c498aa4, recovered from an unmerged prior-session worktree), df B1 plumbing (87de266, real pilot run —
+  GO-WITH-CAVEATS, parked for human bless). Discovered and reconciled 5 leftover worktrees from an
+  earlier, never-integrated session (see per-plan coordinators for detail) — 2 held real unmerged work
+  (now landed or superseded), 2 were exact duplicates of already-landed commits, 1 was an empty stale
+  checkout. Merged-tree verify green (tsc clean modulo baseline; pytest green in isolation, combined-run
+  flake is the known pre-existing collection-order issue). Two decisions now await you: df B1's
+  GO/NO-GO bless, and Q-vision-gate-bypass (shared credential bypasses the heavy-slot gate).
 - 2026-07-02 — **Integration audit → design revision (docs only, no code).** Pre-Wave-4 first-principles
   audit of how the three plans compose found and fixed: (1) **unimplementable illustration contract** —
   chatF frozen contract #6 predated the 202 pivot (`illustration_job_id` unreturnable; trigger assigned

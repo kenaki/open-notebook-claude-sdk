@@ -14,10 +14,11 @@
 
 ## SESSION HANDOFF (read first)
 
-**State (2026-06-26):** Plan authored. No chunks started. Background-jobs A1 is committed (the
-`chat_commands.py` / `_heavy_lane.py` WAL-pragma work). Migration 17 = chat_tag_colors on notebooks
-(landed). Migration 18 = reserved for chat-foundation B1. This plan uses **migration 19** (A1)
-and **migration 20** (Phase3). Migration 21 is reserved for Phase4 (deferred).
+**State (2026-07-02, wave5):** Track A fully ☑. Track B: B1 ☑ (GO-blessed). Track C: **C1 ☑, C2 ☑**
+(wave5). Phase1 ☑. **Phase3 ◐** (wave5, commit b525c88 — code landed + static-verified; live checks
+parked: migration-apply, re-embed→page_number, citation→PDF, npm build). Remaining build-now: **B2**
+(runnable now — Phase3 freed graphs/source.py), **B3–B5**, **C3–C4**. Next wave (5b): **B2 ‖ C3**
+(file-disjoint: B2 backend verify_commands.py+source.py; C3 frontend SourceContentTab/SourceTOC+locales).
 
 **Orchestrator prompt (paste to drive a wave from the meta-coordinator):**
 ```
@@ -133,17 +134,17 @@ Legend: ☐ todo · ◐ in progress · ☑ done · ⏸ blocked · ⊘ deferred
 | A | A1 | Migration 19 + SourceSection model + page/section fields | ☑ | commit 34ec0bd; mig19 schema LIVE in DB (source_section + page_offset/page_labels + source_embedding.section). wave1 2026-06-29 |
 | A | A2 | Docling extraction + page provenance (folds pdf Phase 2) | ☑ | commit 7e13d72; content-core[docling] dep + page_map provenance + PyMuPDF fallback. wave2 2026-06-29. ⚠ GPU spot-check on real textbook still pending (manual) |
 | A | A3 | Chaptering: section tree + get_sections/get_outline + tagged chunks + backfill | ☑ | commit 6ba9f40; build_sections+backfill_sections commands, section tree + get_sections/get_outline, chunk→section stamping, graph rewire. pytest 31 pass; worker 16 cmds; api clean. ⚠ live-ingest spot-check pending. **Track A fully ☑ → B & C unblocked; Phase3 unblocked.** wave3 2026-06-29 |
-| B | B1 🚧 | Vision-verifier plumbing + **validation-gate pilot** | ☐ | **HUMAN GATE** — needs A ☑; GO/NO-GO before B2 |
-| B | B2 | Per-chapter verify-clean background command | ☐ | Needs B1 GO |
+| B | B1 🚧 | Vision-verifier plumbing + **validation-gate pilot** | ☑ | commit 87de266 (wave4 2026-07-02). Real pilot run — **GO-WITH-CAVEATS, human-blessed 2026-07-02.** Gate-bypass credential fixed same session |
+| B | B2 | Per-chapter verify-clean background command | ☐ | **Unblocked.** Must force `max_tokens>=8192`; route low-confidence pages through `verify_flag`; math untested |
 | B | B3 | Per-section summaries + doc abstract | ☐ | |
 | B | B4 | Tiered get_context rewrite | ☐ | The digestion fix |
 | B | B5 | Agent tools get_source_outline / get_section | ☐ | |
-| C | C1 | GET /sources/{id}/sections + schemas + has_sections flag | ☐ | Needs A ☑; sources.py is a package |
-| C | C2 | Frontend types + getSections API client | ☐ | |
+| C | C1 | GET /sources/{id}/sections + schemas + has_sections flag | ☑ | commit c498aa4 (wave4 2026-07-02); recovered from a prior session's unmerged worktree (orig 67c3b7d) — implementation complete and verified, just never integrated. `pytest tests/test_models_api.py` 12 passed |
+| C | C2 | Frontend types + getSections API client | ☑ | commit 22eca7c (wave5 2026-07-02); SourceSectionNode/SourceSectionResponse types + has_sections?/sections_count? on SourceDetailResponse + getSections client. tsc clean (baseline only). ⚠ `title` typed non-optional per verbatim spec; backend `title` is nullable — C3 should tolerate null |
 | C | C3 | TOC sidebar + per-chapter rendering (SourceContentTab) | ☐ | Anchors in SourceContentTab.tsx |
 | C | C4 | Interaction: selection actions + per-chapter AI + citation→jump | ☐ | |
 | — | Phase1 | PDFViewer.tsx inline viewer (FE-only, dep-free) | ☑ | commit 1608053; @react-pdf-viewer + PDFViewer.tsx + Original PDF tab + 14 locales + next.config worker. wave2 2026-06-29. ⚠ browser render spot-check still pending (manual) |
-| — | Phase3 | page_number/bbox + vector_search + #p=N citations (mig 20) | ☐ | Needs A2 ✓ + A3 + Phase1 ✓ |
+| — | Phase3 | page_number/bbox + vector_search + #p=N citations (mig 20) | ◐ | commit b525c88 (wave5 2026-07-02); mig20 (page_map/page_number/bbox + fn::vector_search REMOVE+DEFINE redefine) + provenance chunking (build_page_char_map/find_chunk_page) + embed_source page_number stamping + backfill_page_numbers cmd + #p=N parser (forwards `page` arg to C4). Static verify green (pytest 65 + test_chunking 34, imports OK, mig20 in both lists). **LIVE spot-checks PARKED:** (1) migration-apply on API restart — WATCH the fn::vector_search redefine for SurrealQL errors; (2) re-embed PDF → page_number; (3) chat emits #p=N; (4) citation→PDF-open (final wiring is C4's — parser already forwards page); (5) npm build |
 | — | Phase4 | Annotations (source_annotation, mig 21, highlight plugin) | ⊘ | **DEFERRED** — do not start until Phase1+Phase3 ☑ |
 
 ---
@@ -295,7 +296,20 @@ mv .claude/plans/pdf-viewer-citations.md .claude/plans/archived/pdf-viewer-citat
 ## Open Questions (cross-track)
 
 - **Q-docling-install** — Docling on aarch64 + CUDA (Spark): wheel availability, model-weights download, Docker pre-bake, license check. *Default:* A2 adds it behind `document_engine` config with PyMuPDF fallback; if `content-core`'s Docling wrapper exposes `page_no`, prefer that over calling Docling directly. Resolve in A2.
-- **Q-qwen-vision** — Is the deployed Ollama Qwen the vision build? Does Esperanto+Ollama forward image_url blocks? *Default:* B1 pilot answers this. If NO: fall back to cloud vision (Claude) for verify-only or text-only dual-parse cross-check; adjust B2 design accordingly.
+- **Q-qwen-vision** — Is the deployed Ollama Qwen the vision build? Does Esperanto+Ollama forward image_url blocks?
+  **Piloted 2026-07-02 (wave4):** YES — `qwen3.6:35b` handles image input correctly through the app's
+  normal provisioning path. Quality: body text excellent (incl. an image-only page PyMuPDF got 0 chars
+  from); both dense tables (IPA/phonetics, verb conjugation) reconstructed correctly; Greek
+  script/diacritics handled well; two small transcription slips in dense prose (non-determinism); math
+  untested (no sampled page had any). **Agent recommendation: GO-WITH-CAVEATS. Human-blessed 2026-07-02
+  — B2 unblocked.** See b-pipeline.md Chunk B1 "Gate outcome" for the full pilot writeup.
+- ~~**Q-vision-gate-bypass**~~ *(from B1 pilot)* — **RESOLVED 2026-07-02.** The DB-linked credential for
+  the vision model (`credential:sl23md12zdmi5ok3v9bc`, "Default (Migrated from env)") stored
+  `base_url=http://localhost:11434` directly, and credential config takes priority over env vars in
+  `ModelManager.get_model` — so it bypassed the `:11435` heavy-slot admission-control gate entirely
+  (this credential is also linked to `qwen3-embedding:8b`, so both modalities were affected). **Fixed:**
+  `base_url` updated to `http://localhost:11435` via `Credential.save()`; verified the gate forwards both
+  `/api/tags` and `/api/embeddings` correctly; `on-api`/`on-worker` restarted clean.
 - **Q-section-content-payload** — Return `content` inline in the sections endpoint or lazy per-section fetch? *Default:* `summary` always inline; `content` only on demand (keep tree payload light). Revisit if UX needs it.
 - **Q-viewer-peer-dep** — @react-pdf-viewer React 19/Next 16 compatibility. *Default:* Phase1 validates; fallback to react-pdf + custom highlight layer. Resolve in Phase1.
 - **Q-section-delete-cleanup** *(new, from A3)* — `Source.delete()` does not remove orphaned `source_section`
@@ -313,6 +327,37 @@ mv .claude/plans/pdf-viewer-citations.md .claude/plans/archived/pdf-viewer-citat
 
 ## Changelog
 
+- 2026-07-02 (wave5) — **C2 ☑ (22eca7c); Phase3 ◐ (b525c88).** Orchestrated run (chunk-plan-execute,
+  3 parallel worktree agents: bg D1 ‖ df C2 ‖ df Phase3). **C2** — `SourceSectionNode`/`SourceSectionResponse`
+  TS types + `has_sections?`/`sections_count?` on `SourceDetailResponse` + `sourcesApi.getSections`.
+  **Phase3** — migration 20 (`source.page_map` FLEXIBLE + `source_embedding.page_number`/`bbox` +
+  `fn::vector_search` redefined via REMOVE+DEFINE, mig 4 untouched); `chunking.py` `build_page_char_map`/
+  `find_chunk_page`; `embed_source` stamps `page_number` from persisted `source.page_map`;
+  `backfill_page_numbers` command; `save_source` persists `state.page_map`; prompts emit `[source:id#p=N]`;
+  `source-references.tsx` parses `#p=N` and forwards a `page` arg (C4 consumes it for the PDF-open wiring).
+  Merged-tree verify: `pytest tests/test_domain.py tests/test_chunking.py` 65 pass; `test_models_api`
+  isolated 12 pass; imports clean; mig 20 in both async_migrate lists; frontend `tsc` clean (baseline
+  `@testing-library` test-file noise only). **Phase3 left ◐** — its Verify block is live (needs API restart
+  for migration-apply, a real PDF re-embed, and browser citation click); those are on the run's punch-list.
+  **B2 now unblocked** (Phase3 released `graphs/source.py`). Follow-up: C2's `title` is typed non-optional
+  per the verbatim spec while the backend field is nullable — C3 should tolerate a null title.
+- 2026-07-02 (wave4, post-gate) — **B1 human-blessed GO-WITH-CAVEATS; Q-vision-gate-bypass fixed.**
+  `credential:sl23md12zdmi5ok3v9bc` (linked to both `qwen3-embedding:8b` and `qwen3.6:35b`) had
+  `base_url` corrected `:11434` → `:11435` (the heavy-slot gate) via `Credential.save()`; verified the
+  gate forwards `/api/tags` + `/api/embeddings`; `on-api`/`on-worker` restarted clean, `/api/sources`
+  200. **B2 is now unblocked.**
+- 2026-07-02 (wave4) — **C1 ☑ (c498aa4)** — recovered from a prior session's completed-but-unmerged
+  worktree (`agent-a3289c0d50a2fd904`, orig commit `67c3b7d`, based only 1 docs-commit behind HEAD);
+  cherry-picked clean, `pytest tests/test_models_api.py` 12 passed. **B1 plumbing ☑ (87de266), parked at
+  human gate** — `default_vision_model`/`get_vision_model()`, `ai/vision_utils.py`, `graphs/chat.py`
+  data_uri passthrough. Live pilot: `qwen3.6:35b` transcribed 3 real pages of a Modern Greek grammar PDF
+  (image-only cover, 2 dense tables) — strong body-text/table/script fidelity, two small prose slips,
+  math untested. Agent rec: GO-WITH-CAVEATS. Found + documented (not fixed): `max_tokens` silent-empty-
+  output bug (must force ≥8192 in B2), and the shared vision-model credential bypasses the `:11435`
+  heavy-slot gate (Q-vision-gate-bypass, needs human decision before any real B2 job runs). Two other
+  worktrees found from the same stale-session batch (`agent-a37c36e19fb100271` orig `812a46b`,
+  `agent-ac6b9d010feb91603` orig `5e88b34`) were confirmed byte-identical (diff-only-on-hash) to already-
+  landed `e9bcafe`/`6ba9f40` — pure leftovers, no unique work, safe to discard.
 - 2026-07-02 — **Phase3 design revision (Q-page-map-provenance resolved):** migration 20 now also adds
   `source.page_map` (persisted provenance); `save_source` persists it at ingest; embed/backfill read it
   from the record. Phase3's file set grew (`graphs/source.py`, `domain/notebook.py`) → new shared-file
