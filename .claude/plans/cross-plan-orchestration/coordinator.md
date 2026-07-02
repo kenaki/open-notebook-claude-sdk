@@ -34,6 +34,14 @@ backend pytest test_domain 31 pass + worker 16 cmds + api clean; frontend tsc cl
 > are the SAME track (B), sequential, NOT file-disjoint → run B2 then B3 (one worktree), not concurrently.
 > Concurrency this wave: { bg B2→B3 } ‖ { df C1 } ‖ { df B1 pilot, parks }.
 ⚠ **Migration-counter caveat (for chatF B1 executor):** the version counter is **positional** (= list length), not filename-derived. df A1 appended `19.surrealql` as list position 18 → DB now at version 18. When chatF B1 adds migration **18**, it MUST be **appended at the END of both lists** (becoming the highest position), NOT inserted between 17 and 19 — inserting positionally would re-run 19 and skip the new 18. Filenames are labels only.
+📐 **Design revision 2026-07-02 (integration audit):** (1) chat-foundation's illustration-delivery
+contract rewritten for the 202-async world — trigger now owned by chatF **W1** in
+`commands/chat_commands.py` (the old plan assigned it to bg C2, which landed without it);
+`illustration_job_id` response field DROPPED; FE discovery via the poller's auto-register (chatF F3
+re-scoped to `jobs-store.ts` + `use-jobs-poller.ts`). See chat-foundation coordinator contracts #5/#6 +
+P-5/P-6. (2) df Phase3 now persists `page_map` (mig 20 + `graphs/source.py` + `domain/notebook.py`) —
+resolves Q-page-map-provenance but adds file collisions: **df B2 ∦ df Phase3** (Wave-5 caveat below) and
+**chatF F4 → df C4** on ChatPanel.tsx (cross-lane table). No landed code affected; Waves 4–5 packing adjusted.
 
 **Orchestrator resume prompt (paste into a fresh Opus chat to drive a wave):**
 
@@ -97,8 +105,8 @@ chunks editing the same row's file in the same wave:
 |---|---|---|---|
 | `frontend/src/lib/types/api.ts` | bg `A2`, bg `A4`; chatF `F1` | df `C2`, df `Phase3` | One editor per wave. Order: bg A2 → bg A4 → df C2/Phase3 → chatF F1. |
 | `open_notebook/database/async_migrate.py` | chatF `B1` (mig 18) | df `A1` (mig 19) | Serialize registration edits. df A1 lands first (early Lane B); chatF B1 later. Migrations stay 18 → 19 (additive, apply-order-safe). |
-| `frontend/src/components/.../ChatPanel.tsx` (now `chat/ChatPanel` after refactor) | bg `C1`; chatF `F4` | (none) | Lane-A internal only — bg C1 before chatF F4 (already enforced by lane serialization). |
-| `open_notebook/graphs/source.py` | (none) | df `A2`, df `A3`, df `B2` | Lane-B internal — sequenced by document-foundation's own coordinator. |
+| `frontend/src/components/.../ChatPanel.tsx` (now `chat/ChatPanel` after refactor) | bg `C1`✓; chatF `F4` | df `C4` (extends `handleReferenceClick` ~:126 — was missing from this table until 2026-07-02) | One editor per wave. Order: bg C1✓ → chatF F4 → df C4. **Never pack chatF F4 and df C4 in the same wave** (Wave 6+ backfill risk). |
+| `open_notebook/graphs/source.py` | (none) | df `A2`✓, df `A3`✓, df `B2`, df `Phase3` (persist page_map — added 2026-07-02) | Lane-B internal — but **df B2 and df Phase3 are NOT file-disjoint**; never same wave (see Wave 5 caveat). |
 | `open_notebook/graphs/chat.py` + `graphs/source_chat.py` | bg A1✓, chatF B3; T3-d | (none) | T3-d runs LAST, after B3 and all graph edits. |
 
 > ⚠ **Re-anchoring:** every per-plan doc was written against the pre-refactor layout. Wave 0
@@ -166,6 +174,13 @@ Legend: **A**=Lane A (chat) · **B**=Lane B (doc) · **P**=prep. Model: 🟣 Opu
 | df C2 | B | document-foundation · C2 | FE types + `getSections` client | C1 | 🔵 |
 | df P3 | B | document-foundation · (pdf Phase 3) | page_number/bbox on source_embedding + vector_search + `#p=N` citations (mig 20) | A2 | 🔵 |
 
+> ⚠ **Wave-5 packing caveat (2026-07-02):** df B2 and df Phase3 **both edit `graphs/source.py`** now
+> (Phase3 persists `page_map` in `save_source`; Phase3 also adds `Source.page_map` to
+> `domain/notebook.py`, a Track-B-owned file) — they are NOT file-disjoint and must NOT run
+> concurrently as this table suggests. Run **df Phase3 ‖ df C2 ‖ bg D1** in Wave 5 (Phase3 is
+> gate-free) and slide **df B2 to Wave 6** (it is gated on the df B1 GO anyway, which parks at Wave 4).
+> If B1 GO'd early and B2 is ready first, invert: B2 in Wave 5, Phase3 slides.
+
 > ✅ **background-jobs archived after Wave 5.** Lane A now switches to `chat-foundation`.
 
 ### Wave 6 — chat-foundation begins (≤4 chats; Lane B tail backfills spare slots)
@@ -179,6 +194,10 @@ document-foundation firm file sets.
 
 Suggested Wave 6: chatF `B1`(mig18 🔵) · chatF `B3`(msgid 🔵) · chatF `B7`(🚧 vision-spike S-gate 🟣) · df `C3`(TOC sidebar 🔵).
 Then continue: chatF W2 ‖ df `B3`/`C4`; chatF W3; chatF worker W1→W2(needs B7 **GO**)→W3 (W1–W3 SSRF/safety 🟣 Opus).
+> ⚠ Backfill constraints (2026-07-02): **df C4 only after chatF F4 ☑** (both edit `ChatPanel.tsx` —
+> cross-lane table). chatF F3 edits bg-owned `use-jobs-poller.ts`/`jobs-store.ts` — fine, bg fully
+> landed by Wave 6. chatF W1 edits bg-owned `commands/chat_commands.py` (illustration trigger —
+> contract #6 v2, see chat-foundation changelog 2026-07-02) — same rule, fine after bg archives.
 
 ### Final wave
 | Chunk | Lane | Plan · ID | What | Dep | Model |
@@ -255,6 +274,17 @@ does not duplicate chunk specs.
 - **ds4-deepseek-v4-flash** — research/decision-gated; orthogonal.
 
 ## Changelog
+- 2026-07-02 — **Integration audit → design revision (docs only, no code).** Pre-Wave-4 first-principles
+  audit of how the three plans compose found and fixed: (1) **unimplementable illustration contract** —
+  chatF frozen contract #6 predated the 202 pivot (`illustration_job_id` unreturnable; trigger assigned
+  to bg C2 which landed as pure-FE → orphan). Rewritten as v2: W1 owns the trigger in
+  `commands/chat_commands.py` (submit `illustrate_message` before the chat job returns), poller
+  auto-discovers (F3 → `deriveKind`/`handleTermination`, silent kind), B5 slimmed to citations.py-only
+  hydrate, B3/F1 drop the dead field; heavy-lane serialization pinned (P-6). (2) **df Phase3 page_map
+  persistence** — Q-page-map-provenance resolved by persisting `source.page_map` in mig 20; Phase3 file
+  set grew → df B2 ∦ df Phase3 rule + Wave-5 repack (Phase3 in W5, B2 slides to W6 behind its gate).
+  (3) **ChatPanel.tsx cross-lane row added** (df C4 was missing) → chatF F4 → df C4 order. Updated docs:
+  chatF coordinator/backend/frontend/worker, df coordinator/standalone, this file.
 - 2026-06-29 (later, wave 3) — **Wave 3 ☑.** Fanned out bg C3 ‖ df A3 (2× Sonnet, feature-based
   worktrees). Both detected their worktree was main-based and re-seeded onto feature/multipanelchat HEAD
   (orchestrator integrated via cherry-pick — clean, file-disjoint). **bg C3 (e9bcafe)** source-chat

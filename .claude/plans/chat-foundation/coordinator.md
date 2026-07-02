@@ -54,14 +54,28 @@ without waiting on upstream lanes. Only *runtime verification* honors the depend
    index on `message_id`. Hydrate merge (per P-3): `mode='image'` → append `MediaItem(**media)` to the
    message's `.media`; `mode='diagram'` → append a fenced ` ```mermaid\n{diagram}\n``` ` block to
    `.content` (AFTER citation resolution); `mode='none'` → nothing.
-5. **Stable AI message id** — every AI message returned by `/chat/execute` and `/chat/sessions/{id}`
-   carries a real `.id` (`ai-{uuid4().hex}`, assigned at `graphs/chat.py:178`, persists in the
-   checkpoint). The enrichment job is submitted with `(session_id, message_id, notebook_id, model_id)`.
-6. **`ExecuteChatResponse.illustration_job_id: Optional[str]`** — populated by the background-jobs
-   `chat-completion` worker command (Track C2), **not** inline in `execute_chat` (see compat note in B5).
-   Set when a job was submitted (toggle ON + an AI message produced); else `None`. **Frontend does NOT
-   build its own poll loop** — register this id in `useJobsStore` (kind: `'illustration'`);
-   `use-jobs-poller.ts` (background-jobs Track B1) invalidates the session on completion (see F3).
+5. **Stable AI message id** — every AI message carries a real `.id` (`ai-{uuid4().hex}`, assigned at
+   `graphs/chat.py:178`, persists in the checkpoint). `/chat/execute` is now a **202 job submit**
+   (background-jobs), so the id reaches clients via `GET /chat/sessions/{id}`; the worker correlates
+   **in-process** — `chat_completion_command` holds the graph invoke result and reads the new AI
+   message's `.id` directly (no HTTP round-trip).
+6. **Illustration job delivery (v2 — revised 2026-07-02 for the 202-async chat contract).** There is
+   **NO illustration field on any API response** (the old `ExecuteChatResponse.illustration_job_id`
+   is DEAD — the 202 ack is returned before the worker runs, so the API can never know the id).
+   Instead:
+   - **Trigger (W1, in `commands/chat_commands.py`):** after a successful graph run + `session.save()`,
+     when `kind == "notebook"` AND the notebook's `auto_illustrate ?? true` AND an AI message was
+     produced, `chat_completion_command` submits `illustrate_message` **fire-and-forget, BEFORE
+     returning** (so the active-jobs poller never sees an empty active window between the chat job
+     completing and the illustration job appearing). Trigger failures are swallowed (log + continue —
+     never fail the chat job).
+   - **Pinned args:** `{session_id, message_id, notebook_id, model_id, label}` (`label` feeds the
+     background-jobs tray, mirroring `ChatCompletionInput.label`).
+   - **Frontend discovery (F3):** no id hand-off needed — `use-jobs-poller.ts` already auto-registers
+     unseen active jobs (`use-jobs-poller.ts:146`). F3 extends `deriveKind` (`'illustrate_message'` →
+     kind `'illustration'`, union extended in `jobs-store.ts`) and `handleTermination` (kind
+     `'illustration'` + `sessionId` → invalidate `notebookChatSession(sessionId)`). Illustration jobs
+     are **silent**: no completion/failure toast (progressive enhancement), tray display only.
 7. **Job output (`CommandOutput`)** — `{ success, mode, message_id, error_message?, processing_time }`.
    Frontend only needs terminal status; on success it **invalidates the session query** (P-4) and the
    merged illustration hydrates from the backend (single source of truth).
@@ -79,34 +93,37 @@ Chunk ids are stable. **Owns (files)** is the conflict key; **Depends-on** drive
 | P2 | PRE | — | Re-anchor plan docs + async compat fixes (post-refactor paths + B5/F3 compat bakes) | `coordinator.md`, `backend.md`, `frontend.md`, `worker.md` | — | ☑ |
 | B1 | MIG | backend.md | Migration 18 (all 3 schema changes) + register | `migrations/18.surrealql`, `18_down.surrealql`, `database/async_migrate.py` | — | ☐ |
 | B2 | MODELS | backend.md | Domain models: `ChatMessageMedia` + `Notebook.auto_illustrate` + `ChatSession.context_config` | `open_notebook/domain/notebook.py` | B1 | ☐ |
-| B3 | MSGID | backend.md | Stable AIMessage `.id` + `illustration_job_id` field on response | `open_notebook/graphs/chat.py` | — | ☐ |
+| B3 | MSGID | backend.md | Stable AIMessage `.id` (checkpoint-persistent) | `open_notebook/graphs/chat.py` | — | ☐ |
 | B4 | CTX-CRUD | backend.md | `context_config` on session schemas + create/update/get | `api/routers/chat/schemas.py` + `api/routers/chat/sessions.py` | B2 | ☐ |
-| B5 | HYDRATE-JOB | backend.md | Hydrate-merge sidecar + `illustration_job_id` field (trigger in worker — see compat note) | `api/routers/chat/citations.py`, `api/routers/chat/execute.py`, `api/routers/chat/schemas.py` | B2, B3 | ☐ |
+| B5 | HYDRATE | backend.md | Hydrate-merge sidecar into session reads (per-message lookup in `_build_chat_message`) | `api/routers/chat/citations.py` | B2, B3 | ☐ |
 | B6 | NB-API | backend.md | `auto_illustrate` passthrough on notebook-update | `api/routers/notebooks.py`, `api/models.py` | B2 | ☐ |
 | B7 | SPIKES | worker.md | R3 vision + R4 relevance spikes → **S-gate** | scratch scripts only | — | ☐ |
-| W1 | WORKER | worker.md | Enrichment command skeleton: gate → route → **diagram** → sidecar | `commands/illustrate_commands.py`, `open_notebook/graphs/illustrate.py`, `prompts/illustrate/` | B2, B5 | ☐ |
+| W1 | WORKER | worker.md | Enrichment command: trigger (in `chat_completion`) → gate → route → **diagram** → sidecar | `commands/illustrate_commands.py`, `open_notebook/graphs/illustrate.py`, `prompts/illustrate/`, `commands/chat_commands.py` (trigger) | B2, B3, B5 | ☐ |
 | W2 | WORKER | worker.md | **Image** pipeline: expand → search → VLM relevance/abstain | (same as W1) | W1, **B7 (S-gate GO)** | ☐ |
 | W3 | WORKER | worker.md | **Image** safety (fail-closed) + SSRF fetch → WebP → store → sidecar | (same as W1) | W2 | ☐ |
-| F1 | FE-TYPES | frontend.md | Types + chat-api passthrough (`context_config`, `illustration_job_id`, `auto_illustrate`) | `frontend/src/lib/types/api.ts`, `frontend/src/lib/api/chat.ts` | — | ☐ |
+| F1 | FE-TYPES | frontend.md | Types + chat-api passthrough (`context_config`, `auto_illustrate`) | `frontend/src/lib/types/api.ts`, `frontend/src/lib/api/chat.ts` | — | ☐ |
 | F2 | FE-HOOK | frontend.md | `useNotebookChat`: per-session context resolution + quote-only seed + setter | `frontend/src/lib/hooks/useNotebookChat.ts` | F1 | ☐ |
-| F3 | FE-HOOK | frontend.md | `useNotebookChat`: illustration job-poll → invalidate on complete (via `use-jobs-poller`) | `frontend/src/lib/hooks/useNotebookChat.ts` | F1, F2 | ☐ |
+| F3 | FE-POLLER | frontend.md | Jobs poller: `'illustration'` kind → auto-register + session invalidate (silent, no toast) | `frontend/src/lib/stores/jobs-store.ts`, `frontend/src/lib/hooks/use-jobs-poller.ts` | F1 | ☐ |
 | F4 | FE-MERMAID | frontend.md | Mermaid renderer (strict + DOMPurify + parse-or-fallback) | `components/source/chat/Mermaid.tsx` (new), `components/source/chat/MarkdownCodeBlock.tsx`, `components/source/chat/ChatPanel.tsx` | — | ☐ |
 | F5 | FE-POPOVER | frontend.md | Side-chat Context popover + i18n (`chat.context*`) | `components/notebooks/chat/PoppedChatPanel.tsx`, `components/notebooks/chat/SideChatContextPopover.tsx` (new), `components/notebooks/workspace/DeepDiveWorkspace.tsx`, `locales/*` | F1, F2 | ☐ |
 | F6 | FE-TOGGLE | frontend.md | Per-notebook auto-illustrate toggle + i18n (`chat.autoIllustrate*`) | `components/notebooks/chat/SideChatDefaultMenu.tsx`, `components/notebooks/chat/ChatDock.tsx`, `components/notebooks/workspace/NotebookWorkspaceProvider.tsx`, `locales/*` | F1 | ☐ |
 
 Legend: ☐ todo · ◐ in progress · ☑ done · ⏸ blocked · ⊘ deferred.
 
-> **Same-file note (worktree-required):** B4 and B5 now edit **different files** in the
-> `api/routers/chat/` package (B4: `schemas.py` + `sessions.py`; B5: `citations.py` + `execute.py` +
-> `schemas.py`), so there is no per-function file conflict — but worktree isolation still applies for clean
-> integration. F2 and F3 both edit the **same function** (`sendMessageTo`) in `useNotebookChat.ts`, so
-> F3 is sequenced **after** F2 even with worktrees.
+> **Same-file note (worktree-required):** B4 and B5 edit **different files** in the
+> `api/routers/chat/` package (B4: `schemas.py` + `sessions.py`; B5: `citations.py` only), so there is
+> no per-function file conflict — worktree isolation still applies for clean integration. F3 no longer
+> touches `useNotebookChat.ts` (that was the v1 design) — it edits the two **background-jobs-owned**
+> files (`jobs-store.ts`, `use-jobs-poller.ts`); this is safe because ALL background-jobs chunks land
+> before any chat-foundation chunk starts (meta-coordinator lane rule — bg B3 also edits
+> `use-jobs-poller.ts` and must be ☑ first). W1 extends `commands/chat_commands.py` (bg Track A file) —
+> same lane rule applies.
 
 ## Computed waves (what the orchestrator will schedule)
 - **Wave 1 (5 parallel):** B1, B3, B7, F1, F4 — all dep-free; each self-verifies (B1 applies the migration).
 - **Wave 2 (3 parallel):** B2 (B1✓), F2 (F1✓), F6 (F1✓).
-- **Wave 3 (5 parallel):** B4 (B2✓), B5 (B2,B3✓), B6 (B2✓), F3 (F2✓), F5 (F2✓).
-- **Wave 4:** W1 (B5,B2✓).  **Wave 5:** W2 (W1✓ + S-gate GO).  **Wave 6:** W3 (W2✓).
+- **Wave 3 (5 parallel):** B4 (B2✓), B5 (B2,B3✓), B6 (B2✓), F3 (F1✓), F5 (F2✓).
+- **Wave 4:** W1 (B2,B3,B5✓).  **Wave 5:** W2 (W1✓ + S-gate GO).  **Wave 6:** W3 (W2✓).
 - **Peak concurrency = 5** (waves 1 & 3). **Critical path = the worker tail** W1→W2→W3 (gated on B7);
   no agent count shortens it. Frontend (F1→F2→F3/F5) and the rest of backend finish well before W3.
 
@@ -121,7 +138,7 @@ Carried verbatim from the two source plans; merge-specific decisions are **C-***
 | G-msgid | Message→job correlation | Deterministic stable AIMessage `.id` at `graphs/chat.py:178`. |
 | G-scope-modes | v1 illustration scope | **Both** diagram + image, routed per message. |
 | G-control | Illustration noise control | **Per-notebook toggle, default ON.** |
-| G-transport | Which chat illustrates | **Notebook chat only** (sync `POST /chat/execute`); source-chat SSE deferred. |
+| G-transport | Which chat illustrates | **Notebook chat only** in v1 (`kind == "notebook"` guard in the trigger). Source chat deferred for scope — note it now rides the SAME job rails (bg C3 killed SSE), so extending later is a small guard change, not a transport rework. |
 | ctx-1 | Where per-chat context lives | Persisted nullable `context_config` on `chat_session`. Survives reload. |
 | ctx-2 | `null` vs object semantics | `null`/absent → inherit global drawer; object → own selection. |
 | ctx-3 | Default for a new side chat | **Quote only** — seed explicit empty `{ sources:{}, notes:{} }`; relies on the `quote` seed passage. (Drops the `insightsSnapshot` helper — do NOT add it.) |
@@ -137,6 +154,8 @@ Carried verbatim from the two source plans; merge-specific decisions are **C-***
 | P-2 | Toggle UI location | Chat dock-header dropdown, mirroring `SideChatDefaultMenu`. |
 | P-3 | Diagram carrier | Sidecar stores mermaid source; hydrate appends a ` ```mermaid ` fence (no new `ChatMessage` field). Image stores a `MediaItem` merged into `.media`. |
 | P-4 | FE illustration delivery | On job completion, **invalidate the session query** (don't hand-patch client-side). |
+| P-5 | Illustration delivery post-202 (2026-07-02) | **v2 contract** (frozen contract #6): trigger lives in `chat_completion_command` (W1 owns the edit — the old plan pointed at bg Track C2, which landed as a pure FE refactor and never owned it); FE discovery via the poller's existing auto-register of unseen active jobs. `ExecuteChatResponse.illustration_job_id` DROPPED (202 ack predates the worker run — the field was unpopulatable). |
+| P-6 | GPU contention (illustration vs interactive chat) | Enrichment LLM/VLM calls in `graphs/illustrate.py` **acquire `heavy_lane`** (via `is_heavy_model(model_id)` from `commands/_heavy_lane.py`) — qwen3.6 is local/heavy, so illustration serializes BEHIND interactive chat turns on the single GPU instead of contending. Enrichment is background enhancement; queuing is acceptable (Q-R5 latency measured in W1/W2). The ds4↔Ollama admission gate (:11435) remains the infra-level backstop. |
 
 ## Conventions / translation notes (shared)
 - **Migration:** `18.surrealql` + `18_down.surrealql`; register BOTH in `async_migrate.py` (up list ends
@@ -186,7 +205,7 @@ Carried verbatim from the two source plans; merge-specific decisions are **C-***
 - FE query keys `query-client.ts:41-42` (`notebookChatSession(sessionId)`, `notebookChatSessions(notebookId)`)
 - FE markdown: `AIMessageContent` + react-markdown `components` map `components/source/chat/ChatPanel.tsx`;
   `components/source/chat/MarkdownCodeBlock.tsx` (`extractLanguage`/`extractText`); `components/source/chat/MessageMedia.tsx`
-- FE job-poll: reuse `use-jobs-poller.ts` (background-jobs Track B1) — register illustration jobs in `useJobsStore` (kind `'illustration'`); poller invalidates session on completion. Do NOT build a second `setInterval` loop.
+- FE job-poll: reuse `use-jobs-poller.ts` (background-jobs Track B1) — the poller **auto-registers unseen active jobs** (`use-jobs-poller.ts:146`), so no id hand-off is needed; F3 extends `deriveKind` (`'illustrate_message'` → `'illustration'`) + `handleTermination` (invalidate session, NO toast) + the `JobKind` union in `jobs-store.ts`. Do NOT build a second `setInterval` loop.
 - FE types `lib/types/api.ts` (`MediaItem` 165-170, `NotebookChatMessage` 255-270);
   `chatApi`/`notebooksApi` `lib/api/chat.ts`,`lib/api/notebooks.ts`
 - FE context UI: `ContextToggle.tsx`, `source-context.ts` (`applyBulkSourceContext`/`applyBulkNoteContext`/
@@ -204,6 +223,17 @@ point also remove the two superseded source dirs (`.claude/plans/auto-illustrate
 `.claude/plans/per-chat-context`) and the loose `.claude/plans/shimmering-fluttering-candle.md` if present.
 
 ## Changelog (cross-track)
+- _(2026-07-02)_ **Design revision: illustration delivery v2** (frozen contracts #5/#6 rewritten; decisions
+  P-5/P-6 added). The v1 contract predated the 202-async chat pivot and was unimplementable:
+  `ExecuteChatResponse.illustration_job_id` can't be populated (the 202 ack returns before the worker
+  runs), and the trigger was assigned to bg Track C2, which landed as a pure FE refactor — the
+  worker-side trigger had **no owner**. Fixes: trigger now owned by **W1** (edits `commands/chat_commands.py`,
+  submits `illustrate_message` before the chat job returns); FE discovery via the poller's existing
+  auto-register (F3 re-scoped to `jobs-store.ts` + `use-jobs-poller.ts`, silent kind, dep on F2 dropped);
+  B5 slimmed to `citations.py`-only hydrate (per-message `get_for_message` lookup inside the already-async
+  `_build_chat_message` — no batching, no `execute.py`/`schemas.py` edits); B3/F1 drop the dead field;
+  heavy-lane serialization made an explicit decision (P-6). Chunk specs updated in backend.md /
+  frontend.md / worker.md. Wave shape unchanged (W1 deps grew but it was already Wave 4).
 - _(2026-06-26)_ Re-anchored all plan docs to post-refactor codebase: chat router split `api/routers/chat.py` → `api/routers/chat/` package; components reorganized into `chat/` + `workspace/` subfolders; hook line numbers updated for `useNotebookChat`/`useNotebookChatSessions`/`useBuildNotebookContext` split. Baked two background-jobs async compat fixes: B5 illustration trigger moved to worker `chat-completion` command (Track C2), not `execute_chat`; F3 must reuse `use-jobs-poller.ts` (Track B1) instead of a second poll loop. [P2 ☑]
 
 ## Open Questions (defaults chosen; surface if they bite)

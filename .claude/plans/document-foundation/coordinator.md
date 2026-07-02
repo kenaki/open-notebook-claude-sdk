@@ -116,7 +116,8 @@ Announce ✅ Phase3 complete — safe to clear context. Stop.
 | `open_notebook/database/async_migrate.py` | **A1** (appends mig 19 to both lists) | **Phase3** (appends mig 20) | Phase3 appends ONLY after A1☑. One editor at a time. |
 | `open_notebook/utils/chunking.py` | **A3** (section-aware chunk tagging) | **Phase3** (page_number provenance) | Phase3 edits ONLY after A3☑. |
 | `commands/embedding_commands.py` | **A3** (stamp section on source_embedding) | **Phase3** (stamp page_number on source_embedding) | Phase3 edits ONLY after A3☑. |
-| `open_notebook/graphs/source.py` | **A** (structure node + wiring) then **B2** (fire-and-forget triggers) | — | B2 edits ONLY after A☑. C must NOT touch it. |
+| `open_notebook/graphs/source.py` | **A** (structure node + wiring) then **B2** (fire-and-forget triggers) | **Phase3** (persist `page_map` in save_source — added 2026-07-02) | B2 edits ONLY after A☑. **B2 and Phase3 NEVER in the same wave** — whichever runs first completes before the other starts. C must NOT touch it. |
+| `open_notebook/domain/notebook.py` (see also row 1) | **A** then **B** | **Phase3** (adds `Source.page_map` field) | Phase3's model edit must not run concurrently with any B chunk (B owns this file after A). Serialize: Phase3 ↔ B, either order. |
 | `frontend/src/components/source/detail/SourceDetailContent.tsx` | **Phase1** (add PDF tab/toggle) | *(C3 touches SourceContentTab.tsx, not this file)* | Phase1 edits the tab wrapper; C3 edits the content tab body. No conflict if Phase1 lands first. |
 
 > **Intra-track ordering** (A1→A2→A3; B1→…→B5; C1→…→C4) is enforced by each track's own sequential structure — trust the track files.
@@ -300,16 +301,25 @@ mv .claude/plans/pdf-viewer-citations.md .claude/plans/archived/pdf-viewer-citat
 - **Q-section-delete-cleanup** *(new, from A3)* — `Source.delete()` does not remove orphaned `source_section`
   rows. *Default:* add `DELETE source_section WHERE source = $source_id` to `Source.delete()` (or a DB
   trigger). Low severity; fold into B (which already edits notebook.py) or a small follow-up. Tracked.
-- **Q-page-map-provenance** *(new, from A3)* — `page_map` (Docling per-block page_no) is **transient graph
-  state**, not persisted; the fire-and-forget `build_sections` command therefore can't read it and falls
-  back to PyMuPDF page-text search (page_start/end = None when the file was auto-deleted). **Phase3 impact:**
-  Phase3 must source `page_number` from `page_map` on the **ingest/graph path** (where it exists) rather than
-  from `build_sections`, or persist `page_map` for the backfill path. Resolve in Phase3 design.
+- ~~**Q-page-map-provenance**~~ *(from A3)* — **RESOLVED 2026-07-02 (design chosen, in Phase3 spec):**
+  `page_map` gets **persisted** — migration 20 adds `source.page_map` (FLEXIBLE option<array>);
+  `save_source` writes `state.page_map` at ingest; `embed_source` + `backfill_page_numbers` read it off
+  the source record (backfill re-extracts when null + file present; else leaves `page_number` null).
+  This was mandatory, not optional: `embed_source` is itself an out-of-process fire-and-forget command,
+  so even the MAIN path could never see transient graph state. **Consequence:** Phase3 now edits
+  `graphs/source.py` + `domain/notebook.py` → new shared-file rows above (B2/B ordering constraint).
 
 ---
 
 ## Changelog
 
+- 2026-07-02 — **Phase3 design revision (Q-page-map-provenance resolved):** migration 20 now also adds
+  `source.page_map` (persisted provenance); `save_source` persists it at ingest; embed/backfill read it
+  from the record. Phase3's file set grew (`graphs/source.py`, `domain/notebook.py`) → new shared-file
+  rows: **Phase3 must not run in the same wave as B2 (graphs/source.py) or any B chunk
+  (domain/notebook.py)**. Meta-coordinator Wave 5 packing updated accordingly (it had B2 ‖ Phase3
+  concurrent). Also noted in c-surfaces context: C4's `ChatPanel.tsx` edit is now tracked in the
+  meta-coordinator cross-lane table (chat-foundation F4 collides; F4 → C4 order).
 - 2026-06-29 — Wave-3: **A3 ☑ (6ba9f40)** — chaptering. `commands/section_commands.py`
   (`build_sections` + `backfill_sections`), `Source.get_sections()`/`get_outline()`, graph rewired
   `save_source → submit_sections → trigger_transformations` (fire-and-forget), `embed_source` stamps

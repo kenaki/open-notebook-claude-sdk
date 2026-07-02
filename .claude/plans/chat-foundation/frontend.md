@@ -9,8 +9,9 @@
 
 ## F1 — FE-TYPES: types + chat-api passthrough
 - **Owns:** `frontend/src/lib/types/api.ts`, `frontend/src/lib/api/chat.ts`. **Deps:** none.
-- **Goal:** Carry all three new fields on the types + session API so the hook/components can read them:
-  `context_config` (per-chat), `illustration_job_id` (execute response), `auto_illustrate` (notebook).
+- **Goal:** Carry the two new fields on the types + session API so the hook/components can read them:
+  `context_config` (per-chat), `auto_illustrate` (notebook). *(v2 note: `illustration_job_id` was cut —
+  illustration jobs are discovered by the poller, not handed over in a response; coordinator P-5.)*
 - **Read first:** `lib/types/api.ts` (session types `BaseChatSession`/`NotebookChatSession`/
   `NotebookChatSessionWithMessages` + create/update request types; `MediaItem` 165-170;
   `NotebookChatMessage` 255-270; `NotebookResponse`/`UpdateNotebookRequest`; the execute-response type);
@@ -19,7 +20,6 @@
 - **Spec:**
   - `context_config?: ContextSelections | null` on the session response types + create/update request
     payloads (import the existing `ContextSelections` — do not redefine the shape). `null` = inherit.
-  - `illustration_job_id?: string | null` on the execute-response type.
   - `auto_illustrate?: boolean` on `NotebookResponse` + `UpdateNotebookRequest`.
   - Ensure `chatApi.createSession`/`updateSession` include `context_config` in the request body (verify the
     body isn't field-picked).
@@ -52,29 +52,36 @@
 - **Verify:** `npx tsc --noEmit` clean. Reason through: dock send still global; side chat with empty config
   sends no sources; side chat with `null` config inherits global.
 
-## F3 — FE-HOOK: illustration job-poll → invalidate on complete
-- **Owns:** `frontend/src/lib/hooks/useNotebookChat.ts`. **Deps:** F1, F2.
-- **Goal:** After `/chat/execute` returns a non-null `illustration_job_id`, poll `GET /commands/jobs/{id}`
-  until terminal; on `completed`, **invalidate the session query** so the merged illustration hydrates from
-  the backend (P-4). On `failed`/timeout, stop quietly (message stays text-only).
-- **Read first:** `useNotebookChat.ts:136-212` (`patchSessionMessages` :136, `sendMessageTo` :152, where the
-  execute response is handled at :199); `query-client.ts:41-42` (`notebookChatSession(sessionId)`);
-  **background-jobs Track B** `use-jobs-poller.ts` (created by Track B1) + `jobs-store.ts` (Track A5) —
-  reuse these; do NOT copy the `RebuildEmbeddings.tsx` interval pattern.
-- **background-jobs compat (REQUIRED — dep: Track B1 ☑ before F3 runs):** do NOT build a second
-  `setInterval` poll loop. Reuse `use-jobs-poller.ts` (background-jobs Track B1) and `useJobsStore`
-  (Track A5) instead. No `commandsApi.getJobStatus` shim needed.
-- **Spec:** when `sendMessageTo` (`useNotebookChat.ts:199`) receives a response with non-null
-  `illustration_job_id`, call
-  `useJobsStore.getState().register({ jobId: illustration_job_id, kind: 'illustration', sessionId, notebookId, ... })`.
-  The global `use-jobs-poller` (mounted in `JobsRuntime`) polls `commandsApi.listActive`; on `completed`
-  for a `kind:'illustration'` job it invalidates
-  `queryClient.invalidateQueries({ queryKey: QUERY_KEYS.notebookChatSession(sessionId) })`.
-  On `failed`/timeout the message stays text-only (poller removes the job from the store on terminal
-  status). No timers to clean up — the poller is app-level and already handles unmount.
-- **Verify:** with W1 running (or a manual sidecar row + fake completed job), send a message → a beat later
-  the diagram/image appears without manual refresh; reload → persists; no console errors; no runaway
-  intervals (polling stops on terminal). `npm run build` clean.
+## F3 — FE-POLLER: `'illustration'` job kind → session invalidate *(revised 2026-07-02 — contract #6 v2)*
+- **Owns:** `frontend/src/lib/stores/jobs-store.ts` (the `JobKind` union), 
+  `frontend/src/lib/hooks/use-jobs-poller.ts` (`deriveKind` + `handleTermination`). **Deps:** F1.
+  > Both files are **background-jobs-owned** (Tracks A5/B1) — F3 may edit them ONLY because the entire
+  > background-jobs plan (including bg B3, which also edits `use-jobs-poller.ts` for toasts) lands before
+  > chat-foundation starts (meta-coordinator lane rule). Confirm bg is archived before running this chunk.
+  > `useNotebookChat.ts` is NOT touched (v1 design) — there is no job id in any response to register;
+  > the poller discovers illustration jobs from the active list on its own.
+- **Goal:** The poller recognizes `illustrate_message` jobs, tracks them in the store/tray, and on
+  `completed` **invalidates the session query** so the merged illustration hydrates from the backend
+  (P-4). Silent on both completion and failure — no toast (progressive enhancement; a failed
+  illustration just leaves the message text-only).
+- **Read first:** `use-jobs-poller.ts` — `deriveKind` :28 (auto-register of unseen jobs :146,
+  `handleTermination` :189); `jobs-store.ts` (`JobKind` union); bg B3's toast additions to
+  `handleTermination` (landed by then); `query-client.ts:41-42` (`notebookChatSession(sessionId)`);
+  coordinator frozen contract #6.
+- **Spec:**
+  - `jobs-store.ts`: add `'illustration'` to the `JobKind` union. No other store changes.
+  - `deriveKind`: `case 'illustrate_message': return 'illustration'` (args carry `session_id`,
+    `notebook_id`, `label` per the pinned contract — `serverRowToJob` already maps them).
+  - `handleTermination`: on `completed` for `kind === 'illustration'` with a `sessionId`, invalidate
+    `QUERY_KEYS.notebookChatSession(sessionId)` (same as `notebook_chat`). Ensure bg B3's
+    completion/failure **toasts are NOT emitted** for `'illustration'` (guard by kind) — tray-only.
+  - Nothing else: auto-register (:146), grace-period removal, and reload reconciliation already work
+    for any active job.
+- **Verify:** `npx tsc --noEmit` clean. With W1 integrated: send a diagram-worthy message → chat answer
+  appears (chat job), then a beat later the diagram hydrates in WITHOUT manual refresh and WITHOUT a
+  toast; the tray shows the illustration job while active; a failed/abstained job changes nothing
+  visibly. Unit-level (pre-W1): a hand-inserted `illustrate_message` row in the active list derives
+  kind `'illustration'` and triggers the invalidate on completion.
 
 ## F4 — FE-MERMAID: Mermaid renderer in the chat markdown pipeline
 - **Owns:** `frontend/src/components/source/chat/Mermaid.tsx` (NEW),
@@ -148,8 +155,8 @@
 - **Reuse:** `SideChatDefaultMenu` structure; the `chat_tag_colors` update+cache pattern; Shadcn
   `Switch`/`Checkbox`; `useTranslation`.
 - **Verify:** dock-header dropdown shows the toggle defaulting ON; turn OFF → `notebooksApi.update` fires,
-  persists across reload. With it OFF, a chat message returns `illustration_job_id: null` (network tab,
-  once B5/B6 integrated). `npm run build` clean.
+  persists across reload. With it OFF, a chat turn submits no `illustrate_message` job (no illustration
+  entry in the tray / `GET /commands/jobs` — once B6/W1 integrated). `npm run build` clean.
 
 ## Open Questions (frontend)
 - **Q-quote-first-turn** — also prepend `quote` to the first user message? *Default: skip — the

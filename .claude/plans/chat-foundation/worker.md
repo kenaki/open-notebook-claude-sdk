@@ -24,26 +24,36 @@
 
 ---
 
-## W1 — WORKER: command skeleton → gate → route → diagram → sidecar
+## W1 — WORKER: trigger + command skeleton → gate → route → diagram → sidecar *(revised 2026-07-02)*
 - **Owns:** `commands/illustrate_commands.py` (NEW), `open_notebook/graphs/illustrate.py` (NEW),
-  `prompts/illustrate/` (NEW prompt templates). **Deps:** B2 (ChatMessageMedia), B5 (job submitted by
-  `execute_chat`).
+  `prompts/illustrate/` (NEW prompt templates), **`commands/chat_commands.py` (the trigger — see below)**.
+  **Deps:** B2 (ChatMessageMedia), B3 (stable AI message id), B5 (hydrate, for end-to-end verify).
 - **Goal:** Stand up the `illustrate_message` surreal-command end-to-end for the **diagram** path (no
-  external fetch). Load the message, two-stage gate, route; for `diagram` emit one strict Mermaid block
-  from qwen3.6 and write a sidecar row. For `none`, write `mode='none'` (or nothing). Makes diagrams ship
-  once F4's renderer lands.
-- **background-jobs compat note:** the `illustrate_message` job is submitted by the **background-jobs
-  `chat-completion` worker command** (Track C2, after chat result is written back) — NOT by `execute_chat`
-  (B5 compat fix). W1 implements what happens when the job runs; Track C2 is responsible for submitting it.
-  W1 needs no code to trigger itself.
-- **Read first:** `commands/podcast_commands.py:51-72` (`CommandInput`/`CommandOutput` + `@command`);
+  external fetch) — INCLUDING its trigger. Load the message, two-stage gate, route; for `diagram` emit one
+  strict Mermaid block from qwen3.6 and write a sidecar row. For `none`, write `mode='none'` (or nothing).
+  Makes diagrams ship once F4's renderer lands.
+- **Trigger (contract #6 v2 — W1 owns this; the v1 plan pointed at bg Track C2, which landed without it):**
+  in `chat_completion_command` (`commands/chat_commands.py`), after the graph run + `session.save()`
+  succeed and **before returning**: if `input_data.kind == "notebook"`, load the notebook, and if
+  `auto_illustrate ?? true` and the invoke result contains a new AI message with a stable `.id` (B3),
+  `submit_command("open_notebook", "illustrate_message", {session_id, message_id, notebook_id,
+  model_id: <the resolved model_override>, label: <short subject/notebook label for the tray>})`.
+  Wrap the whole trigger in try/except — a trigger failure logs and is swallowed; it must NEVER fail the
+  chat job. Submitting before return means the active-jobs poller sees the illustration job in the same
+  window as the completing chat job (no discovery gap).
+- **Heavy lane (coordinator P-6):** every LLM/VLM call in `graphs/illustrate.py` acquires `heavy_lane`
+  when `await is_heavy_model(model_id)` (import from `commands/_heavy_lane.py`) — qwen3.6 is local, so
+  enrichment serializes BEHIND interactive chat turns instead of contending for the GPU.
+- **Read first:** `commands/chat_commands.py` (the landed command — where the trigger slots in);
+  `commands/podcast_commands.py:51-72` (`CommandInput`/`CommandOutput` + `@command`);
   `api/podcast_service.py:95-133`; coordinator frozen contracts + "AI calls in the worker". Read the AI
-  message content from the checkpoint like `execute_chat` does
+  message content from the checkpoint like the session read path does
   (`chat_graph.get_state(config={"configurable":{"thread_id":session_id}})`, graph handle
   `graphs/chat.py:188-198`); find the message by `.id == message_id`.
 - **Spec:**
   - `IllustrateInput(CommandInput)`: `session_id: str`, `message_id: str`, `notebook_id: str`,
-    `model_id: Optional[str] = None`. `IllustrateOutput(CommandOutput)`: `success: bool`, `mode: str`,
+    `model_id: Optional[str] = None`, `label: str = ""` (tray display — mirrors
+    `ChatCompletionInput.label`). `IllustrateOutput(CommandOutput)`: `success: bool`, `mode: str`,
     `message_id: str`, `error_message: Optional[str] = None`, `processing_time: float`.
     `@command("illustrate_message", app="open_notebook", retry={"max_attempts": 1})`.
   - **Two-stage gate:** (1) cheap heuristic — skip greetings/meta/very short replies (length + simple
@@ -56,8 +66,12 @@
     `ChatMessageMedia(message_id, session_id, mode='diagram', diagram=<source>).save()` (upsert on `message_id`).
   - **Never raise:** wrap LLM calls with `classify_error`; on any failure write `mode='none'` (or skip).
 - **Verify:** restart `on-worker`. Send a diagram-worthy message ("explain the TCP handshake step by step")
-  with toggle ON → `GET /commands/jobs/{id}` terminal `completed`; a `chat_message_media` row `mode='diagram'`
-  with plausible mermaid. Send "hi" → gate `none`. `journalctl --user -u on-worker` shows no tracebacks.
+  with toggle ON → the chat job completes AND an `illustrate_message` job appears in
+  `GET /commands/jobs?status_filter=active` (trigger fired) → terminal `completed`; a `chat_message_media`
+  row `mode='diagram'` with plausible mermaid; `GET /chat/sessions/{id}` shows the fence (B5 hydrate).
+  Send "hi" → gate `none`. Toggle OFF (B6) → no illustration job submitted. Source chat turn → no
+  illustration job (kind guard). A forced trigger error (e.g. bad notebook id) does NOT fail the chat job.
+  `journalctl --user -u on-worker` shows no tracebacks.
 
 ## W2 — WORKER: image pipeline → expand → search → VLM relevance/abstain
 - **Owns:** same files as W1. **Deps:** W1, **B7 S-gate = GO / GO-WITH-ADJUSTMENTS** (skip if NO-GO).
@@ -107,8 +121,9 @@
 
 ## Open Questions (worker)
 - **Q-B-msgload** — cleanest way to read one message by id from the checkpoint in the worker. *Default:
-  `chat_graph.get_state(thread_id=session_id)` then `.id == message_id`; if the handle isn't importable in
-  the worker, pass message content in the job args from B5 (revisit B5 via the coordinator if so).*
+  `chat_graph.get_state(thread_id=session_id)` then `.id == message_id`; the graph handle is definitely
+  importable here (`chat_commands.py` already imports it). Fallback: the trigger holds the invoke result
+  in-process — pass the message content in the job args from the trigger in `chat_commands.py`.*
 - **Q-B-structured** — exact Ollama JSON-schema/structured-output call for the gate. *Default: model-layer
   structured-output path; confirm against existing qwen3.6 constraint usage.*
 - **Q-B-openverse-ua** — Openverse/Wikimedia rate limits + required User-Agent. *Default: descriptive UA;
