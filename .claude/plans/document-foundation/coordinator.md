@@ -14,14 +14,13 @@
 
 ## SESSION HANDOFF (read first)
 
-**State (2026-07-02, wave5b):** Track A fully ☑. Track B: B1 ☑, **B2 ◐** (5b — code+static done, live
-quality check parked). Track C: **C1 ☑, C2 ☑, C3 ☑** (5b). Phase1 ☑. **Phase3 ◐** (code+static done;
-live checks parked). Remaining build-now: **B3, B4, B5, C4**. Next wave (5c): **B3 ‖ C4** (file-disjoint:
-B3 backend summary_commands.py+notebook.py+source.py; C4 frontend PassageSelectionMenu/SourceTOC/
-source-references/ChatPanel+locales). Then **B4 ‖ B5** (file-disjoint: B4 notebook.py+context_builder.py;
-B5 claude_agent_tools.py — B5 uses A3's get_outline, not B4's rewrite, so they parallelize). Archival
-gated on the parked live spot-checks (Phase3 migration-apply, B2/B3 real-section runs, B4 chat-context) —
-those are on the run's end punch-list; document-foundation archives only once they clear to ☑.
+**State (2026-07-02, wave5c):** Track A fully ☑. **Track C FULLY ☑ (C1–C4).** Track B: B1 ☑, **B2 ◐,
+B3 ◐** (code+static done, live checks parked). Phase1 ☑. **Phase3 ◐**. Remaining build-now: **B4, B5**
+only. Next/final wave (5d): **B4 ‖ B5** (file-disjoint: B4 notebook.py+context_builder.py; B5
+claude_agent_tools.py — B5 uses A3's get_outline, not B4's rewrite, so they parallelize).
+**After 5d, all code lands; document-foundation stays un-archived pending the parked LIVE spot-checks**
+(Phase3 migration-apply, B2/B3/B4 real-section+chat runs) + one follow-up (Q-citation-pdf-open, Decision
+#20) — all on the run's end punch-list. Archive only once those clear to ☑.
 
 **Orchestrator prompt (paste to drive a wave from the meta-coordinator):**
 ```
@@ -139,13 +138,13 @@ Legend: ☐ todo · ◐ in progress · ☑ done · ⏸ blocked · ⊘ deferred
 | A | A3 | Chaptering: section tree + get_sections/get_outline + tagged chunks + backfill | ☑ | commit 6ba9f40; build_sections+backfill_sections commands, section tree + get_sections/get_outline, chunk→section stamping, graph rewire. pytest 31 pass; worker 16 cmds; api clean. ⚠ live-ingest spot-check pending. **Track A fully ☑ → B & C unblocked; Phase3 unblocked.** wave3 2026-06-29 |
 | B | B1 🚧 | Vision-verifier plumbing + **validation-gate pilot** | ☑ | commit 87de266 (wave4 2026-07-02). Real pilot run — **GO-WITH-CAVEATS, human-blessed 2026-07-02.** Gate-bypass credential fixed same session |
 | B | B2 | Per-chapter verify-clean background command | ◐ | commit 09c0fed (wave5b 2026-07-02); `verify_clean_section`+`verify_clean_source` cmds, PyMuPDF 2× render, cleaned→`cleaned_content` (raw immutable), discrepancies→`verify_flag` insight, fire-and-forget trigger in `submit_sections`. Static verify green (imports+register, pytest 31). **LIVE spot-check parked:** run on a real section → cleaned better + raw byte-unchanged + verify_flag + fan-out + failure isolation; math path untested. Auto-decisions: direct `get_vision_model(max_tokens=8192)` (NOT `provision_langchain_model` — avoids >105k non-vision large-context swap); retry schema→`max_attempts=3/fixed 10s/stop_on ValueError,ConfigError`; `_MAX_VERIFY_PAGES=50` skip-with-flag |
-| B | B3 | Per-section summaries + doc abstract | ☐ | |
+| B | B3 | Per-section summaries + doc abstract | ◐ | commit abb9444 (wave5c 2026-07-02); `summarize_section`+`generate_source_abstract` (commands/summary_commands.py), `Source.summarize_sections()` fan-out, trigger after B2's verify in `submit_sections`. Static verify green (register, **full suite 214 pass**). **LIVE spot-check parked:** real run → summaries non-null <500w, `abstract` insight, get_outline surfaces summaries, idempotent re-run. Auto-decisions #17–19 |
 | B | B4 | Tiered get_context rewrite | ☐ | The digestion fix |
 | B | B5 | Agent tools get_source_outline / get_section | ☐ | |
 | C | C1 | GET /sources/{id}/sections + schemas + has_sections flag | ☑ | commit c498aa4 (wave4 2026-07-02); recovered from a prior session's unmerged worktree (orig 67c3b7d) — implementation complete and verified, just never integrated. `pytest tests/test_models_api.py` 12 passed |
 | C | C2 | Frontend types + getSections API client | ☑ | commit 22eca7c (wave5 2026-07-02); SourceSectionNode/SourceSectionResponse types + has_sections?/sections_count? on SourceDetailResponse + getSections client. tsc clean (baseline only). ⚠ `title` typed non-optional per verbatim spec; backend `title` is nullable — C3 should tolerate null |
 | C | C3 | TOC sidebar + per-chapter rendering (SourceContentTab) | ☑ | commit 887bf95 (wave5b 2026-07-02); `SourceTOC.tsx` (sticky collapsible tree, `data-section-id` anchors) + two-col `SourceContentTab` reusing the existing ReactMarkdown; content via `getSections(id,true)`; unchaptered fallback preserved; null-title tolerated; 3 locale keys ×14. tsc clean (baseline only). ⚠ visual spot-check parked (TOC renders for chaptered PDF; flat render for web/pasted). Exposes `getSectionPageRangeLabel` + anchors for C4 |
-| C | C4 | Interaction: selection actions + per-chapter AI + citation→jump | ☐ | |
+| C | C4 | Interaction: selection actions + per-chapter AI + citation→jump | ☑ | commit a530bfa (wave5c 2026-07-02); PassageSelectionMenu Explain+Save-note, SourceTOC per-chapter Summarize/Quiz (onSectionAction prop-down, Q-c4-chat-scope resolved), ChatPanel citation→section-anchor scroll, 5 keys ×14. tsc clean; reuse confirmed; no annotations (Phase4 OUT). **Track C fully ☑.** ⚠ visual spot-checks parked. ⚠ **citation→PDF-page-open last mile = follow-up** (needs SourceDetailContent controlled tabs + PDFViewer initialPage — outside C4's files; Q-citation-pdf-open). Section-anchor scroll dormant until citations carry section ids |
 | — | Phase1 | PDFViewer.tsx inline viewer (FE-only, dep-free) | ☑ | commit 1608053; @react-pdf-viewer + PDFViewer.tsx + Original PDF tab + 14 locales + next.config worker. wave2 2026-06-29. ⚠ browser render spot-check still pending (manual) |
 | — | Phase3 | page_number/bbox + vector_search + #p=N citations (mig 20) | ◐ | commit b525c88 (wave5 2026-07-02); mig20 (page_map/page_number/bbox + fn::vector_search REMOVE+DEFINE redefine) + provenance chunking (build_page_char_map/find_chunk_page) + embed_source page_number stamping + backfill_page_numbers cmd + #p=N parser (forwards `page` arg to C4). Static verify green (pytest 65 + test_chunking 34, imports OK, mig20 in both lists). **LIVE spot-checks PARKED:** (1) migration-apply on API restart — WATCH the fn::vector_search redefine for SurrealQL errors; (2) re-embed PDF → page_number; (3) chat emits #p=N; (4) citation→PDF-open (final wiring is C4's — parser already forwards page); (5) npm build |
 | — | Phase4 | Annotations (source_annotation, mig 21, highlight plugin) | ⊘ | **DEFERRED** — do not start until Phase1+Phase3 ☑ |
@@ -198,6 +197,10 @@ Human viewer gets: TOC + per-chapter render (cleaned content) + inline PDF + cit
 | 14 | B2 vision provisioning path? | **auto-decided (B2, 2026-07-02):** call `get_vision_model(max_tokens=8192).to_langchain()` **directly**, NOT `provision_langchain_model(...)` — the latter auto-upgrades >105k-token content to a non-vision `large_context_model` → garbage on large sections. Direct path also returns None cleanly when unconfigured (the required skip path). **Confirm if you'd prefer routing through provision.** |
 | 15 | B2 retry config? | **auto-decided (B2):** the plan's `{max_retries, delay_seconds}` fields don't exist in the installed `surreal_commands.RetryConfig` (silently ignored). Translated to `{max_attempts:3, wait_strategy:"fixed", wait_time:10, stop_on:[ValueError, ConfigurationError]}` = 1 initial + 2 retries, fixed 10s. Verified against the library. |
 | 16 | B2 pathological page span? | **auto-decided (B2):** a headingless PDF chapters into one whole-doc section → rendering hundreds of page-images into one vision call blows context. `_MAX_VERIFY_PAGES=50`: over the cap → **skip-with-`verify_flag`** (never truncate — truncation violates "preserve all content"). **Confirm the cap value (50).** |
+| 17 | B3 abstract idempotency? | **auto-decided (B3):** `add_insight` always CREATEs, so `generate_source_abstract` first queries `get_insights()`, synchronously `.delete()`s any existing `insight_type=="abstract"` row, then re-adds — re-runs replace rather than duplicate. |
+| 18 | B3 abstract readiness gate? | **auto-decided (B3):** deviates from the verbatim `get_outline()` → gates on `get_sections()` (text-bearing) instead. Heading-only divider sections legitimately have empty content and never get a `summary`; requiring 100% of outline nodes summarized would retry-forever. Gate only on sections that actually have text. |
+| 19 | B3 abstract retry window? | **auto-decided (B3):** `generate_source_abstract` is submitted right after fanning out N per-section LLM jobs on one local GPU → `max_attempts=8, exponential_jitter, wait 15–120s` (~10 min). May need widening for 30+ chapter textbooks; manual re-run via `Source.summarize_sections()` remains. `summarize_section` retry = `max_attempts=3, fixed 5s, stop_on ValueError/ConfigError`. |
+| 20 | citation → PDF-page-open (Q-citation-pdf-open)? | **PARKED FOLLOW-UP (from C4):** Phase3 forwards a `page` arg and C4 does section-anchor scroll, but opening the inline PDF at page N needs `SourceDetailContent.tsx` made tab-controlled + `PDFViewer.initialPage` wired + a `{activeTab, citationPage}` lift on the source page — all OUTSIDE any chunk's file ownership (Phase1 owns those, done). **Proposed default:** a small follow-up chunk (allowed to touch SourceDetailContent + source page + PDFViewer) closes it; `ChatPanel.handleReferenceClick` then takes the 3rd `page` arg. On the run's end punch-list. |
 
 ---
 
@@ -333,6 +336,17 @@ mv .claude/plans/pdf-viewer-citations.md .claude/plans/archived/pdf-viewer-citat
 
 ## Changelog
 
+- 2026-07-02 (wave5c) — **C4 ☑ (a530bfa) → Track C COMPLETE; B3 ◐ (abb9444).** 2 parallel worktree agents
+  (B3 backend ‖ C4 frontend, disjoint). **C4** — Explain/Save-note in PassageSelectionMenu, per-chapter
+  Summarize/Quiz in SourceTOC (chat dispatch via `onSectionAction` prop from SourceContentTab's
+  `useSourceChat` — Q-c4-chat-scope resolved), ChatPanel citation→`data-section-id` scroll, 5 keys ×14;
+  reuse-only (no duplicated dispatch), annotations stay OUT. Surfaced **Q-citation-pdf-open** (Decision
+  #20) — the `#p=N`→open-PDF-at-page last mile needs page-owned files C4 can't touch; parked follow-up.
+  **B3** — `summarize_section`/`generate_source_abstract` + `Source.summarize_sections()` fan-out +
+  trigger after B2's verify. Left ◐ (live summary/abstract run parked). B3 auto-decisions #17–19 (abstract
+  idempotency, `get_sections` readiness gate to avoid retry-forever, retry windows). Merged-tree verify:
+  **backend full suite 214 pass**; frontend `tsc` clean (baseline only, 3 `@testing-library` test-file
+  errors, zero new). Final code wave next: B4 ‖ B5.
 - 2026-07-02 (wave5b) — **C3 ☑ (887bf95); B2 ◐ (09c0fed).** Orchestrated run, 2 parallel worktree agents
   (B2 backend ‖ C3 frontend, disjoint). **C3** — `SourceTOC.tsx` + two-column `SourceContentTab` reusing
   the single existing ReactMarkdown; chapter content fetched once via `getSections(id,true)`; unchaptered

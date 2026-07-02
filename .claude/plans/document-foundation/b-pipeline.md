@@ -69,7 +69,7 @@ new Open Questions → commit → announce "✅ Chunk B.n complete — safe to c
 |------:|-------|--------|-------|
 | B1 🚧 | Vision-verifier plumbing + validation-gate pilot | ☑ | commit 87de266 (wave4 2026-07-02); plumbing + real pilot run. **Human-blessed GO-WITH-CAVEATS 2026-07-02.** Gate-bypass credential also fixed (Q-vision-gate-bypass resolved) — B2 unblocked |
 | B2 | Per-chapter verify-clean background command | ◐ | commit 09c0fed (wave5b 2026-07-02); `verify_clean_section`+`verify_clean_source` in `commands/verify_commands.py`, fire-and-forget trigger in `submit_sections`, `commands/__init__.py` wired. PyMuPDF 2× render → `get_vision_model(max_tokens=8192)` (direct, not provision — see coord Decisions #14) → `cleaned_content` (raw immutable) + `verify_flag` insight. Static verify green (import+register, pytest 31). **LIVE quality spot-check parked** (real section: cleaned>raw, immutable raw, verify_flag, fan-out, failure isolation; math untested). Auto-decisions #14–16 in coordinator |
-| B3 | Per-section summaries + doc abstract | ☐ | |
+| B3 | Per-section summaries + doc abstract | ◐ | commit abb9444 (wave5c 2026-07-02); summary_commands.py (summarize_section + generate_source_abstract), Source.summarize_sections() fan-out, trigger after B2 verify. Static green (register, full suite 214). **LIVE run parked.** Auto-decisions coord #17–19 (abstract idempotency delete-then-add, get_sections readiness gate, retry windows) |
 | B4 | Tiered get_context rewrite (the digestion fix) | ☐ | |
 | B5 | Agent tools get_source_outline / get_section | ☐ | |
 
@@ -79,6 +79,15 @@ Legend: ☐ todo · ◐ in progress · ☑ done · ⏸ blocked
 
 ## Changelog (this track)
 
+- 2026-07-02 (wave5c) — **B3 ◐ (commit abb9444).** `commands/summary_commands.py`: `summarize_section`
+  (`provision_langchain_model(text, None, "transformation", max_tokens=8192)` on `cleaned_content or
+  content` → `section.summary`) + `generate_source_abstract` (roll-up from `get_outline()` →
+  `add_insight("abstract", …)`, idempotent via delete-then-add). `Source.summarize_sections()` fans out one
+  job/section then the abstract; fired fire-and-forget from `submit_sections` after B2's verify trigger.
+  Registered via `commands/__init__.py`. Static verify: py_compile clean, both commands register, **full
+  suite 214 pass**. **Left ◐** — live summary/abstract quality run parked. Auto-decisions #17–19 (coord):
+  abstract idempotency, `get_sections()` readiness gate (avoids retry-forever on heading-only nodes),
+  abstract retry window `max_attempts=8/exp-jitter/15–120s`. **B4 next.**
 - 2026-07-02 (wave5b) — **B2 ◐ (commit 09c0fed).** `commands/verify_commands.py`: `verify_clean_section`
   renders a section's pages (PyMuPDF `get_pixmap` @2×, off-loop) → vision verifier (`get_vision_model(
   max_tokens=8192)` directly, avoiding provision's non-vision large-context auto-upgrade) → writes

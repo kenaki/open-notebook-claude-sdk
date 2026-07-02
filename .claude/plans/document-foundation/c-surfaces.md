@@ -74,7 +74,7 @@ note new Open Questions → commit → announce "✅ Chunk C.n complete — safe
 | C1 | GET /sources/{id}/sections + schemas + has_sections flag | ☐ | Needs A ☑; sources.py is a package |
 | C2 | Frontend types + getSections API client | ☑ | commit 22eca7c (wave5 2026-07-02); types + getSections client. tsc clean. ⚠ `title` non-optional per spec vs nullable backend — C3 tolerate null |
 | C3 | TOC sidebar + per-chapter rendering (SourceContentTab) | ☑ | commit 887bf95 (wave5b 2026-07-02); SourceTOC.tsx + two-col SourceContentTab (single ReactMarkdown reused), content via getSections(id,true), fallback preserved, null-title tolerated, 3 keys ×14. tsc clean. Anchors + getSectionPageRangeLabel ready for C4. ⚠ visual spot-check parked |
-| C4 | Interaction: selection actions + per-chapter AI + citation→section jump | ☐ | |
+| C4 | Interaction: selection actions + per-chapter AI + citation→section jump | ☑ | commit a530bfa (wave5c 2026-07-02); Explain+Save-note, per-chapter Summarize/Quiz, citation→data-section-id scroll, 5 keys ×14. tsc clean; reuse-only; annotations OUT. **Track C COMPLETE.** ⚠ visual spot-checks parked; citation→PDF-page-open = follow-up (coord Q-citation-pdf-open/#20) |
 
 Legend: ☐ todo · ◐ in progress · ☑ done · ⏸ blocked
 
@@ -82,7 +82,16 @@ Legend: ☐ todo · ◐ in progress · ☑ done · ⏸ blocked
 
 ## Changelog (this track)
 
-- _(none yet.)_
+- 2026-07-02 (wave5c) — **C4 ☑ (a530bfa) → Track C COMPLETE (C1–C4).** PassageSelectionMenu gains
+  Explain (scoped chat) + Save-note (reuses `useCreateNote`); SourceTOC gains a per-row ⋮ menu
+  (Summarize/Quiz) driven by an `onSectionAction` prop that SourceContentTab supplies from a
+  `useSourceChat(source.id)` instance sharing the TanStack cache with the visible ChatPanel; ChatPanel's
+  `handleReferenceClick` now tries `[data-source-id]` then `[data-section-id]` before the openModal
+  fallback. Reuse-only (no duplicated chat dispatch); annotations stay OUT (Phase4). tsc clean (baseline).
+  **Follow-up surfaced:** citation→PDF-page-open (Q-citation-pdf-open / coord Decision #20) — needs
+  page-owned files outside C4; section-anchor scroll covers in-content jumps today.
+- 2026-07-02 (wave5b) — **C3 ☑ (887bf95).** (see coordinator changelog)
+- 2026-07-02 (wave5) — **C2 ☑ (22eca7c).**
 
 ---
 
