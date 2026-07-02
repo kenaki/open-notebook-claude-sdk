@@ -48,9 +48,24 @@ def _extract_docling_page_map(file_path: str) -> Tuple[str, List[Dict]]:
     text block — where page_no is Docling's 1-indexed physical page number.
     Raises on any failure so the caller can fall back gracefully.
     """
-    from docling.document_converter import DocumentConverter  # lazy import
+    from docling.document_converter import (  # lazy import
+        DocumentConverter,
+        PdfFormatOption,
+    )
+    from docling.datamodel.base_models import InputFormat
+    from docling.datamodel.pipeline_options import PdfPipelineOptions
 
-    converter = DocumentConverter()
+    # do_ocr=False: skip OCR (RapidOCR). Born-digital PDFs already carry a text
+    # layer, so OCR adds nothing — and RapidOCR's default backend on this env
+    # (torch, since onnxruntime isn't installed) lacks the PP-OCRv6 models it
+    # requests, crashing with "Unsupported configuration: torch.PP-OCRv6.det.small".
+    # Skipping OCR sidesteps that entirely. (Scanned/image-only PDFs would then
+    # yield no text from Docling; page provenance still comes from the text layer.)
+    pipeline_options = PdfPipelineOptions()
+    pipeline_options.do_ocr = False
+    converter = DocumentConverter(
+        format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
+    )
     result = converter.convert(file_path)
     doc = result.document
 
