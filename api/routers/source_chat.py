@@ -2,6 +2,7 @@ import asyncio
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Path
+from langchain_core.runnables import RunnableConfig
 from loguru import logger
 from pydantic import BaseModel, Field
 
