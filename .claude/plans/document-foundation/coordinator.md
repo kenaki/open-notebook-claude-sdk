@@ -166,7 +166,7 @@ Legend: ☐ todo · ◐ in progress · ☑ done · ⏸ blocked · ⊘ deferred
 | C | C3 | TOC sidebar + per-chapter rendering (SourceContentTab) | ☑ | commit 887bf95 (wave5b 2026-07-02); `SourceTOC.tsx` (sticky collapsible tree, `data-section-id` anchors) + two-col `SourceContentTab` reusing the existing ReactMarkdown; content via `getSections(id,true)`; unchaptered fallback preserved; null-title tolerated; 3 locale keys ×14. tsc clean (baseline only). ⚠ visual spot-check parked (TOC renders for chaptered PDF; flat render for web/pasted). Exposes `getSectionPageRangeLabel` + anchors for C4 |
 | C | C4 | Interaction: selection actions + per-chapter AI + citation→jump | ☑ | commit a530bfa (wave5c 2026-07-02); PassageSelectionMenu Explain+Save-note, SourceTOC per-chapter Summarize/Quiz (onSectionAction prop-down, Q-c4-chat-scope resolved), ChatPanel citation→section-anchor scroll, 5 keys ×14. tsc clean; reuse confirmed; no annotations (Phase4 OUT). **Track C fully ☑.** ⚠ visual spot-checks parked. ⚠ **citation→PDF-page-open last mile = follow-up** (needs SourceDetailContent controlled tabs + PDFViewer initialPage — outside C4's files; Q-citation-pdf-open). Section-anchor scroll dormant until citations carry section ids |
 | — | Phase1 | PDFViewer.tsx inline viewer (FE-only, dep-free) | ☑ | commit 1608053; @react-pdf-viewer + PDFViewer.tsx + Original PDF tab + 14 locales + next.config worker. wave2 2026-06-29. ⚠ browser render spot-check still pending (manual) |
-| — | Phase3 | page_number/bbox + vector_search + #p=N citations (mig 20) | ◐ | commit b525c88 (wave5 2026-07-02); mig20 (page_map/page_number/bbox + fn::vector_search REMOVE+DEFINE redefine) + provenance chunking (build_page_char_map/find_chunk_page) + embed_source page_number stamping + backfill_page_numbers cmd + #p=N parser (forwards `page` arg to C4). Static verify green (pytest 65 + test_chunking 34, imports OK, mig20 in both lists). **LIVE (executor 2026-07-02):** (1) migration-apply ✅ VERIFIED (mig19+20 live in DB: page_number/bbox/section, page_map, source_section, fn::vector_search — REMOVE+DEFINE succeeded, no SurrealQL errors); (2) re-embed→page_number ⛔ **BLOCKED** — Docling page_map extraction fails on the Spark (RapidOCR `ValueError: Unsupported configuration: torch.PP-OCRv6.det.small`; = Q-docling-install) → `backfill_page_numbers` leaves page_number null (graceful); (3)/(4) #p=N + citation→PDF-open still pending Decision #20; (5) npm build ✅ (via the canvas fix). **Stays ◐** until Docling OCR is fixed/bypassed on this env |
+| — | Phase3 | page_number/bbox + vector_search + #p=N citations (mig 20) | ◐ | commit b525c88 (wave5 2026-07-02); mig20 (page_map/page_number/bbox + fn::vector_search REMOVE+DEFINE redefine) + provenance chunking (build_page_char_map/find_chunk_page) + embed_source page_number stamping + backfill_page_numbers cmd + #p=N parser (forwards `page` arg to C4). Static verify green (pytest 65 + test_chunking 34, imports OK, mig20 in both lists). **LIVE (executor 2026-07-02):** (1) migration-apply ✅ VERIFIED (mig19+20 live in DB: page_number/bbox/section, page_map, source_section, fn::vector_search — REMOVE+DEFINE succeeded, no SurrealQL errors); (2) re-embed→page_number ✅ **VERIFIED** — after fixing Docling OCR (`do_ocr=False`, commit 18e0ea0) + the `embed_source` section query (`ORDER BY order` needs `order` projected, commit fc47c64): **285/286 chunks stamped with real physical page_number, 286/286 with section**; `vector_search` now returns `page_number` (e.g. `[11]`) → feeds `#p=N`; (3) chat emits `#p=N` — data is all present, live-chat confirmation still pending; (4) citation→PDF-open = Decision #20; (5) npm build ✅. **Stays ◐** only for the live-chat `#p=N` confirmation + Decision #20 |
 | — | Phase4 | Annotations (source_annotation, mig 21, highlight plugin) | ⊘ | **DEFERRED** — do not start until Phase1+Phase3 ☑ |
 
 ---
@@ -333,6 +333,10 @@ mv .claude/plans/pdf-viewer-citations.md .claude/plans/archived/pdf-viewer-citat
   unblock (S3 decision): (a) run Docling with `do_ocr=False` when the PDF has a text layer; (b) pin/repair
   the RapidOCR model config at the env/dependency level; (c) add a PyMuPDF page_map fallback inside
   `_extract_docling_page_map` (per-page text → char-offset map, no OCR).
+  **✅ RESOLVED 2026-07-02 via option (a):** `_extract_docling_page_map` now sets `do_ocr=False`
+  (commit 18e0ea0). Extraction succeeds (2677-block page_map, ~53s on the 185pg test PDF), page_number
+  stamping verified (285/286). Trade-off: scanned/image-only PDFs get no Docling text — revisit with (b)
+  or (c) if such PDFs need support.
 - **Q-qwen-vision** — Is the deployed Ollama Qwen the vision build? Does Esperanto+Ollama forward image_url blocks?
   **Piloted 2026-07-02 (wave4):** YES — `qwen3.6:35b` handles image input correctly through the app's
   normal provisioning path. Quality: body text excellent (incl. an image-only page PyMuPDF got 0 chars
@@ -364,6 +368,18 @@ mv .claude/plans/pdf-viewer-citations.md .claude/plans/archived/pdf-viewer-citat
 
 ## Changelog
 
+- 2026-07-02 (executor resume, Phase3 page_number UNBLOCKED) — Fixed the two runtime bugs that blocked
+  per-page provenance and verified the whole chain live. **(1) Docling OCR (commit 18e0ea0):**
+  `_extract_docling_page_map` now passes `do_ocr=False` — the default pipeline crashed on the Spark because
+  RapidOCR fell back to its PyTorch backend (no `onnxruntime`) which lacks PP-OCRv6 models. **(2) `embed_source`
+  section query (commit fc47c64):** `SELECT … source_section … ORDER BY order` is a SurrealQL reserved-word
+  trap — it parses only when `order` is in the SELECT projection (backticks/ASC don't help; verified against
+  the live DB); the query didn't project it, so every re-embed crashed with "Missing order idiom" and never
+  stamped section/page_number. **Result (verified live):** Docling extraction → 2677-block page_map (~53s);
+  re-embed → **285/286 chunks page_number + 286/286 section**; `vector_search` now returns `page_number`
+  (e.g. `[11]`) → feeds `#p=N`. Q-docling-install RESOLVED (option a). Phase3 stays ◐ only for the live-chat
+  `#p=N` confirmation + Decision #20 (citation→PDF-open). Both bugs were the same "passed static tests, never
+  run against the real DB / stale worker" class as the A3 record-link fix.
 - 2026-07-02 (executor resume, LIVE CHECKS on a real PDF) — Drove the one real source ("Modern Greek
   Grammar Notes.pdf", `source:au8…`) through the pipeline and verified outputs.
   **✅ VERIFIED:** (a) **B4 tiered get_context** — the digestion fix: chaptered→{abstract,outline} with NO
