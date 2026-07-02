@@ -521,6 +521,24 @@ export const frFR = {
     generationFailed: "Failed to generate a response",
     retry: "Retry",
   },
+  jobs: {
+    tray: {
+      title: "Background Jobs",
+      empty: "No background jobs",
+      activeCount: "{count} background jobs",
+    },
+    status: {
+      new: "Queued",
+      queued: "Queued",
+      running: "Running",
+      completed: "Completed",
+      failed: "Failed",
+    },
+    chatReady: "Your chat response is ready",
+    chatFailed: "Chat generation failed",
+    view: "View",
+    generating: "Generating…",
+  },
   searchPage: {
     askAndSearch: "Poser une question et Rechercher",
     chooseAMode: "Choisir un mode",
