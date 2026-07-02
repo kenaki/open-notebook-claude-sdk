@@ -432,6 +432,20 @@ class SourceSection(ObjectModel):
     updated: Optional[datetime] = None
     nullable_fields = ["parent", "cleaned_content", "summary", "page_start", "page_end", "token_count", "created", "updated"]
 
+    def _prepare_save_data(self) -> Dict[str, Any]:
+        # `source` (record<source>) and `parent` (option<record<source_section>>)
+        # are strict record links in the SCHEMAFULL source_section table.
+        # model_dump() emits them as plain strings, which SurrealDB rejects
+        # ("expected a record<source>"). Coerce to RecordID so the driver
+        # serializes proper record links — mirrors ensure_record_id() usage
+        # everywhere else links are passed to repo_* functions.
+        data = super()._prepare_save_data()
+        if data.get("source") is not None:
+            data["source"] = ensure_record_id(data["source"])
+        if data.get("parent") is not None:
+            data["parent"] = ensure_record_id(data["parent"])
+        return data
+
 
 def _flatten_section_ids(nodes: List[Dict]) -> List[str]:
     """Depth-first flatten of a ``get_sections()``/``get_outline()`` tree into
