@@ -458,6 +458,9 @@ export const ptBR = {
     tableOfContents: "Table of Contents",
     loadingChapters: "Loading chapters...",
     untitledSection: "Untitled Section",
+    summarize: "Summarize",
+    quizMe: "Quiz me",
+    sectionActions: "Section actions",
   },
   chat: {
     chatSettings: "Chat settings",
@@ -474,6 +477,8 @@ export const ptBR = {
     noChats: "No chats yet",
     renameChat: "Rename",
     chatAboutThis: "Conversar sobre isto",
+    explain: "Explain",
+    saveNote: "Save note",
     discussingPassage: "Discutindo este trecho",
     attachImage: "Anexar imagem",
     attachVideo: "Anexar vídeo",

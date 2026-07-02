@@ -2,8 +2,11 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Sparkles } from 'lucide-react'
+import { Sparkles, WandSparkles, StickyNote } from 'lucide-react'
+import { toast } from 'sonner'
 import { useTranslation } from '@/lib/hooks/use-translation'
+import { useNotebookWorkspace } from './NotebookWorkspaceProvider'
+import { useCreateNote } from '@/lib/hooks/use-notes'
 
 interface PendingSelection {
   parentId: string // the chat the selection came from (prospective sub-chat parent)
@@ -13,7 +16,7 @@ interface PendingSelection {
 }
 
 interface PassageSelectionMenuProps {
-  // Spawn a sub-chat from the captured passage. Called on pill click.
+  // Spawn a sub-chat from the captured passage. Called on the "Chat about this" item.
   onChatAboutPassage: (parentId: string, quote: string) => void
 }
 
@@ -21,17 +24,30 @@ const MIN_SELECTION_CHARS = 2
 const PILL_OFFSET = 46
 
 /**
- * Sub-chats / "chat about a passage" (Plan D / Chunk 11). A single document-level
- * selection watcher (mounted once on the desktop notebook track). On `mouseup` it
- * reads the current selection; if it's ≥2 chars and lives inside an AI message
- * body (an element tagged `data-chat-scope={sessionId}`), it renders a floating
- * accent pill at the selection. Clicking the pill spawns a sub-chat anchored to
- * that parent + quote. Dismisses on outside-click, scroll, or an empty selection.
+ * Sub-chats / "chat about a passage" (Plan D / Chunk 11, extended by Document
+ * Foundation C4). A single document-level selection watcher (mounted once on the
+ * desktop notebook track). On `mouseup` it reads the current selection; if it's
+ * ≥2 chars and lives inside an AI message body (an element tagged
+ * `data-chat-scope={sessionId}`), it renders a floating action menu at the
+ * selection. The menu offers:
+ *   • Chat about this → spawns a sub-chat anchored to that parent + quote.
+ *   • Explain → sends "Explain this passage: …" to the SAME chat session (the
+ *     scope the selection came from), reusing the notebook chat dispatch.
+ *   • Save note → creates a human Note with the selected text.
+ * Dismisses on outside-click, scroll, or an empty selection. Annotations
+ * (highlight rects / comment bubbles) are intentionally NOT built here — deferred
+ * to Phase 4.
  */
 export function PassageSelectionMenu({ onChatAboutPassage }: PassageSelectionMenuProps) {
   const { t } = useTranslation()
   const [pending, setPending] = useState<PendingSelection | null>(null)
-  const pillRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  // Chat dispatch + notebook id come from the workspace context this menu is
+  // always mounted inside (Deep-Dive). `useNotebookWorkspace` returns null off a
+  // notebook route, so Explain / Save-note degrade gracefully rather than throw.
+  const workspace = useNotebookWorkspace()
+  const createNote = useCreateNote()
 
   useEffect(() => {
     const dismiss = () => setPending(null)
@@ -67,8 +83,8 @@ export function PassageSelectionMenu({ onChatAboutPassage }: PassageSelectionMen
     }
 
     const handleMouseDown = (e: MouseEvent) => {
-      // Clicking the pill itself shouldn't dismiss it before its click fires.
-      if (pillRef.current?.contains(e.target as Node)) return
+      // Clicking the menu itself shouldn't dismiss it before its click fires.
+      if (menuRef.current?.contains(e.target as Node)) return
       setPending(null)
     }
 
@@ -85,25 +101,62 @@ export function PassageSelectionMenu({ onChatAboutPassage }: PassageSelectionMen
 
   if (!pending || typeof document === 'undefined') return null
 
-  const handleClick = () => {
-    onChatAboutPassage(pending.parentId, pending.quote)
+  const finish = () => {
     window.getSelection()?.removeAllRanges()
     setPending(null)
   }
 
+  const handleChat = () => {
+    onChatAboutPassage(pending.parentId, pending.quote)
+    finish()
+  }
+
+  const handleExplain = () => {
+    // Reuse the notebook chat dispatch — send to the SAME session the selection
+    // came from (parentId is a data-chat-scope session id), just a scoped prompt.
+    void workspace?.chat.sendMessageTo(pending.parentId, `Explain this passage: ${pending.quote}`)
+    finish()
+  }
+
+  const handleSaveNote = () => {
+    const notebookId = workspace?.notebookId
+    if (!notebookId) {
+      toast.error(t('sources.cannotSaveNoteNoNotebook'))
+      finish()
+      return
+    }
+    createNote.mutate({
+      content: pending.quote,
+      note_type: 'human',
+      notebook_id: notebookId,
+    })
+    finish()
+  }
+
+  const itemClass =
+    'flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-popover-foreground hover:bg-muted transition-colors whitespace-nowrap'
+
   return createPortal(
-    <button
-      ref={pillRef}
-      type="button"
-      // Keep the text selection (and this button) alive through the click.
+    <div
+      ref={menuRef}
+      // Keep the text selection (and these buttons) alive through the click.
       onMouseDown={(e) => e.preventDefault()}
-      onClick={handleClick}
       style={{ position: 'fixed', top: pending.top, left: pending.left, transform: 'translateX(-50%)', zIndex: 60 }}
-      className="flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground shadow-[var(--shadow)] hover:opacity-90 transition-opacity"
+      className="flex items-center gap-0.5 rounded-lg border border-border bg-popover p-1 shadow-[var(--shadow)]"
     >
-      <Sparkles className="h-3.5 w-3.5" />
-      {t('chat.chatAboutThis')}
-    </button>,
+      <button type="button" onClick={handleChat} className={itemClass}>
+        <Sparkles className="h-3.5 w-3.5" />
+        {t('chat.chatAboutThis')}
+      </button>
+      <button type="button" onClick={handleExplain} className={itemClass}>
+        <WandSparkles className="h-3.5 w-3.5" />
+        {t('chat.explain')}
+      </button>
+      <button type="button" onClick={handleSaveNote} className={itemClass}>
+        <StickyNote className="h-3.5 w-3.5" />
+        {t('chat.saveNote')}
+      </button>
+    </div>,
     document.body
   )
 }

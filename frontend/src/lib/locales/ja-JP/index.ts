@@ -458,6 +458,9 @@ export const jaJP = {
     tableOfContents: "Table of Contents",
     loadingChapters: "Loading chapters...",
     untitledSection: "Untitled Section",
+    summarize: "Summarize",
+    quizMe: "Quiz me",
+    sectionActions: "Section actions",
   },
   chat: {
     chatSettings: "Chat settings",
@@ -474,6 +477,8 @@ export const jaJP = {
     noChats: "No chats yet",
     renameChat: "Rename",
     chatAboutThis: "これについてチャット",
+    explain: "Explain",
+    saveNote: "Save note",
     discussingPassage: "この一節について",
     attachImage: "画像を添付",
     attachVideo: "動画を添付",

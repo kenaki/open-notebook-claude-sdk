@@ -458,6 +458,9 @@ export const ruRU = {
     tableOfContents: "Table of Contents",
     loadingChapters: "Loading chapters...",
     untitledSection: "Untitled Section",
+    summarize: "Summarize",
+    quizMe: "Quiz me",
+    sectionActions: "Section actions",
   },
   chat: {
     chatSettings: "Chat settings",
@@ -474,6 +477,8 @@ export const ruRU = {
     noChats: "No chats yet",
     renameChat: "Rename",
     chatAboutThis: "Обсудить это",
+    explain: "Explain",
+    saveNote: "Save note",
     discussingPassage: "Обсуждение этого фрагмента",
     attachImage: "Прикрепить изображение",
     attachVideo: "Прикрепить видео",

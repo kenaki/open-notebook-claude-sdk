@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useQuery } from '@tanstack/react-query'
@@ -10,7 +10,8 @@ import { useTranslation } from '@/lib/hooks/use-translation'
 import { sourcesApi } from '@/lib/api/sources'
 import { SourceDetailResponse, SourceSectionNode } from '@/lib/types/api'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
-import { SourceTOC, getSectionPageRangeLabel } from './SourceTOC'
+import { SourceTOC, getSectionPageRangeLabel, type SectionActionKind } from './SourceTOC'
+import { useSourceChat } from '@/lib/hooks/useSourceChat'
 import { cn } from '@/lib/utils'
 
 function getYouTubeVideoId(url: string): string | null {
@@ -57,6 +58,24 @@ interface SourceContentTabProps {
 export function SourceContentTab({ source }: SourceContentTabProps) {
   const { t } = useTranslation()
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null)
+
+  // C4: per-chapter AI actions dispatch to this source's chat. We tap the same
+  // `useSourceChat` hook the source-detail page's ChatPanel uses; both instances
+  // share the TanStack cache (keyed by source + session), so a "Summarize
+  // section" message surfaces in the visible chat panel and auto-creates a
+  // session when none exists. (Q-c4-chat-scope resolution.)
+  const sourceChat = useSourceChat(source.id)
+  const handleSectionAction = useCallback(
+    (kind: SectionActionKind, section: SourceSectionNode) => {
+      const title = section.title?.trim() || t('sources.untitledSection')
+      const prompt =
+        kind === 'summarize'
+          ? `Summarize section: ${title}`
+          : `Quiz me on section: ${title}`
+      void sourceChat.sendMessage(prompt)
+    },
+    [sourceChat, t]
+  )
 
   const youTubeVideoId = useMemo(() => {
     if (!source.asset?.url) return null
@@ -153,6 +172,7 @@ export function SourceContentTab({ source }: SourceContentTabProps) {
               sections={outlineSections}
               activeSectionId={activeSectionId}
               onSectionClick={setActiveSectionId}
+              onSectionAction={handleSectionAction}
             />
           )}
           <div className={cn(hasSections && 'min-w-0 flex-1')}>

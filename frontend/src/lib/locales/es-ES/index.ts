@@ -458,6 +458,9 @@ export const esES = {
     tableOfContents: "Table of Contents",
     loadingChapters: "Loading chapters...",
     untitledSection: "Untitled Section",
+    summarize: "Summarize",
+    quizMe: "Quiz me",
+    sectionActions: "Section actions",
   },
   chat: {
     chatSettings: "Chat settings",
@@ -474,6 +477,8 @@ export const esES = {
     noChats: "No chats yet",
     renameChat: "Rename",
     chatAboutThis: "Chatear sobre esto",
+    explain: "Explain",
+    saveNote: "Save note",
     discussingPassage: "Hablando de este fragmento",
     attachImage: "Adjuntar imagen",
     attachVideo: "Adjuntar vídeo",

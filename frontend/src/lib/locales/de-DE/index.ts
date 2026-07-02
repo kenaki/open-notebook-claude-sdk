@@ -461,6 +461,9 @@ export const deDE = {
     tableOfContents: "Table of Contents",
     loadingChapters: "Loading chapters...",
     untitledSection: "Untitled Section",
+    summarize: "Summarize",
+    quizMe: "Quiz me",
+    sectionActions: "Section actions",
   },
   chat: {
     chatSettings: "Chat settings",
@@ -477,6 +480,8 @@ export const deDE = {
     noChats: "No chats yet",
     renameChat: "Rename",
     chatAboutThis: "Dazu chatten",
+    explain: "Explain",
+    saveNote: "Save note",
     discussingPassage: "Diese Passage besprechen",
     attachImage: "Bild anhängen",
     attachVideo: "Video anhängen",

@@ -125,10 +125,16 @@ export function ChatPanel({
   const refClickDeps = useRef({ openModal, t })
   refClickDeps.current = { openModal, t }
 
+  // Phase3 forwards an optional cited page (`[source:id#p=N]`) as a 3rd arg; a
+  // 2-arg handler stays assignable. C4 consumes the id for a section-anchor jump
+  // (see below); the page → inline-PDF-page open is not wired here (needs the
+  // source-detail tab wrapper to control its tab + forward `initialPage`, which
+  // is outside C4's file set — tracked as a decision gate).
   const handleReferenceClick = useCallback((type: string, id: string) => {
     const { openModal, t } = refClickDeps.current
     if (type === 'source' && typeof document !== 'undefined') {
       const sel = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(id) : id
+      // 1. Notebook sources-list card (existing behavior).
       const card = document.querySelector<HTMLElement>(`[data-source-id="${sel}"]`)
       if (card) {
         card.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
@@ -136,6 +142,13 @@ export function ChatPanel({
         void card.offsetWidth
         card.classList.add('source-flash')
         window.setTimeout(() => card.classList.remove('source-flash'), 1700)
+        return
+      }
+      // 2. Chaptered source detail (C4): if the citation id matches a rendered
+      //    chapter anchor, scroll to that section instead of opening a modal.
+      const sectionEl = document.querySelector<HTMLElement>(`[data-section-id="${sel}"]`)
+      if (sectionEl) {
+        sectionEl.scrollIntoView({ behavior: 'smooth', block: 'start' })
         return
       }
     }

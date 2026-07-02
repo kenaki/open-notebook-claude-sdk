@@ -458,6 +458,9 @@ export const plPL = {
     tableOfContents: "Table of Contents",
     loadingChapters: "Loading chapters...",
     untitledSection: "Untitled Section",
+    summarize: "Summarize",
+    quizMe: "Quiz me",
+    sectionActions: "Section actions",
   },
   chat: {
     chatSettings: "Chat settings",
@@ -474,6 +477,8 @@ export const plPL = {
     noChats: "No chats yet",
     renameChat: "Rename",
     chatAboutThis: "Porozmawiaj o tym",
+    explain: "Explain",
+    saveNote: "Save note",
     discussingPassage: "Omawianie tego fragmentu",
     attachImage: "Dołącz obraz",
     attachVideo: "Dołącz wideo",

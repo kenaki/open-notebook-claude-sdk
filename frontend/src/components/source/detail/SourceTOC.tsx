@@ -1,16 +1,28 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { ChevronDown, ChevronRight, MoreVertical } from 'lucide-react'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import type { SourceSectionNode } from '@/lib/types/api'
+
+/** Per-chapter AI action fired from a section row's ⋮ menu (C4). */
+export type SectionActionKind = 'summarize' | 'quiz'
 
 interface SourceTOCProps {
   sections: SourceSectionNode[]
   activeSectionId: string | null
   onSectionClick: (id: string) => void
+  // C4: per-chapter AI actions (Summarize / Quiz me) dispatched to the source
+  // chat. When omitted, the ⋮ menu is hidden (surfaces with no chat to send to).
+  onSectionAction?: (kind: SectionActionKind, section: SourceSectionNode) => void
 }
 
 /**
@@ -49,6 +61,8 @@ function SectionRow({
   expandedIds,
   onToggle,
   untitledLabel,
+  onSectionAction,
+  labels,
 }: {
   section: SourceSectionNode
   depth: number
@@ -57,6 +71,8 @@ function SectionRow({
   expandedIds: Set<string>
   onToggle: (id: string) => void
   untitledLabel: string
+  onSectionAction?: (kind: SectionActionKind, section: SourceSectionNode) => void
+  labels: { actions: string; summarize: string; quiz: string }
 }) {
   const hasChildren = section.children.length > 0
   const isExpanded = expandedIds.has(section.id)
@@ -78,7 +94,7 @@ function SectionRow({
           }
         }}
         className={cn(
-          'flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm cursor-pointer hover:bg-muted transition-colors',
+          'group flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm cursor-pointer hover:bg-muted transition-colors',
           isActive ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground'
         )}
         style={{ paddingLeft: `${8 + depth * 14}px` }}
@@ -103,6 +119,29 @@ function SectionRow({
         )}
         <span className="flex-1 truncate">{title}</span>
         {range && <span className="shrink-0 text-xs text-muted-foreground">{range}</span>}
+        {onSectionAction && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label={labels.actions}
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => e.stopPropagation()}
+                className="shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-accent focus:opacity-100 focus-visible:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"
+              >
+                <MoreVertical className="h-3.5 w-3.5" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+              <DropdownMenuItem onSelect={() => onSectionAction('summarize', section)}>
+                {labels.summarize}
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => onSectionAction('quiz', section)}>
+                {labels.quiz}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
       {hasChildren && isExpanded && (
         <div>
@@ -116,6 +155,8 @@ function SectionRow({
               expandedIds={expandedIds}
               onToggle={onToggle}
               untitledLabel={untitledLabel}
+              onSectionAction={onSectionAction}
+              labels={labels}
             />
           ))}
         </div>
@@ -130,9 +171,14 @@ function SectionRow({
  * (level 2+) collapse under their parent until expanded — auto-expanding along
  * the path to whichever section is active.
  */
-export function SourceTOC({ sections, activeSectionId, onSectionClick }: SourceTOCProps) {
+export function SourceTOC({ sections, activeSectionId, onSectionClick, onSectionAction }: SourceTOCProps) {
   const { t } = useTranslation()
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set())
+  const actionLabels = {
+    actions: t('sources.sectionActions'),
+    summarize: t('sources.summarize'),
+    quiz: t('sources.quizMe'),
+  }
 
   useEffect(() => {
     if (!activeSectionId) return
@@ -180,6 +226,8 @@ export function SourceTOC({ sections, activeSectionId, onSectionClick }: SourceT
               expandedIds={expandedIds}
               onToggle={handleToggle}
               untitledLabel={t('sources.untitledSection')}
+              onSectionAction={onSectionAction}
+              labels={actionLabels}
             />
           ))}
         </div>

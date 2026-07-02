@@ -458,6 +458,9 @@ export const caES = {
     tableOfContents: "Table of Contents",
     loadingChapters: "Loading chapters...",
     untitledSection: "Untitled Section",
+    summarize: "Summarize",
+    quizMe: "Quiz me",
+    sectionActions: "Section actions",
   },
   chat: {
     chatSettings: "Chat settings",
@@ -474,6 +477,8 @@ export const caES = {
     noChats: "No chats yet",
     renameChat: "Rename",
     chatAboutThis: "Conversa sobre això",
+    explain: "Explain",
+    saveNote: "Save note",
     discussingPassage: "Parlant d'aquest fragment",
     attachImage: "Adjunta una imatge",
     attachVideo: "Adjunta un vídeo",

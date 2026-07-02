@@ -458,6 +458,9 @@ export const bnIN = {
     tableOfContents: "Table of Contents",
     loadingChapters: "Loading chapters...",
     untitledSection: "Untitled Section",
+    summarize: "Summarize",
+    quizMe: "Quiz me",
+    sectionActions: "Section actions",
   },
   chat: {
     chatSettings: "Chat settings",
@@ -474,6 +477,8 @@ export const bnIN = {
     noChats: "No chats yet",
     renameChat: "Rename",
     chatAboutThis: "এটি নিয়ে চ্যাট করুন",
+    explain: "Explain",
+    saveNote: "Save note",
     discussingPassage: "এই অংশ নিয়ে আলোচনা",
     attachImage: "ছবি সংযুক্ত করুন",
     attachVideo: "ভিডিও সংযুক্ত করুন",

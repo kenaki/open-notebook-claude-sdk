@@ -458,6 +458,9 @@ export const trTR = {
     tableOfContents: "Table of Contents",
     loadingChapters: "Loading chapters...",
     untitledSection: "Untitled Section",
+    summarize: "Summarize",
+    quizMe: "Quiz me",
+    sectionActions: "Section actions",
   },
   chat: {
     chatSettings: "Chat settings",
@@ -474,6 +477,8 @@ export const trTR = {
     noChats: "No chats yet",
     renameChat: "Rename",
     chatAboutThis: "Bunun hakkında sohbet et",
+    explain: "Explain",
+    saveNote: "Save note",
     discussingPassage: "Bu pasaj tartışılıyor",
     attachImage: "Görsel ekle",
     attachVideo: "Video ekle",

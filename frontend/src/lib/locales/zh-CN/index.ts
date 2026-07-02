@@ -458,6 +458,9 @@ export const zhCN = {
     tableOfContents: "Table of Contents",
     loadingChapters: "Loading chapters...",
     untitledSection: "Untitled Section",
+    summarize: "Summarize",
+    quizMe: "Quiz me",
+    sectionActions: "Section actions",
   },
   chat: {
     chatSettings: "Chat settings",
@@ -474,6 +477,8 @@ export const zhCN = {
     noChats: "No chats yet",
     renameChat: "Rename",
     chatAboutThis: "讨论这个",
+    explain: "Explain",
+    saveNote: "Save note",
     discussingPassage: "正在讨论此段落",
     attachImage: "添加图片",
     attachVideo: "添加视频",

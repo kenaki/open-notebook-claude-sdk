@@ -458,6 +458,9 @@ export const zhTW = {
     tableOfContents: "Table of Contents",
     loadingChapters: "Loading chapters...",
     untitledSection: "Untitled Section",
+    summarize: "Summarize",
+    quizMe: "Quiz me",
+    sectionActions: "Section actions",
   },
   chat: {
     chatSettings: "Chat settings",
@@ -474,6 +477,8 @@ export const zhTW = {
     noChats: "No chats yet",
     renameChat: "Rename",
     chatAboutThis: "討論這個",
+    explain: "Explain",
+    saveNote: "Save note",
     discussingPassage: "正在討論此段落",
     attachImage: "附加圖片",
     attachVideo: "附加影片",
