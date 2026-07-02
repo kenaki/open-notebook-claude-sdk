@@ -316,6 +316,20 @@ async def submit_sections(state: SourceState) -> dict:
             f"Failed to submit verify_clean_source for {source.id}: {exc}"
         )
 
+    # B3: fire-and-forget per-section summarize + doc-abstract fan-out. Like
+    # B2's verify trigger above, this is non-blocking and non-fatal; ordering
+    # between verify and summarize is eventual (summarize_section prefers
+    # cleaned_content but works on raw content when verify hasn't landed
+    # yet). Also callable manually as a re-run path via
+    # Source.summarize_sections().
+    try:
+        await source.summarize_sections()
+        logger.info(f"Submitted summarize_sections fan-out for source {source.id}")
+    except Exception as exc:
+        logger.warning(
+            f"Failed to submit summarize_sections for {source.id}: {exc}"
+        )
+
     return {}
 
 

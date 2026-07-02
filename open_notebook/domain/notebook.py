@@ -374,6 +374,20 @@ class SourceSection(ObjectModel):
     nullable_fields = ["parent", "cleaned_content", "summary", "page_start", "page_end", "token_count", "created", "updated"]
 
 
+def _flatten_section_ids(nodes: List[Dict]) -> List[str]:
+    """Depth-first flatten of a ``get_sections()``/``get_outline()`` tree into
+    a list of section ids, document order. Shared helper for
+    ``Source.summarize_sections()`` (B3).
+    """
+    ids: List[str] = []
+    for node in nodes:
+        nid = node.get("id")
+        if nid:
+            ids.append(str(nid))
+        ids.extend(_flatten_section_ids(node.get("children") or []))
+    return ids
+
+
 class Source(ObjectModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -693,6 +707,56 @@ class Source(ObjectModel):
         except Exception as e:
             logger.error(f"Error submitting create_insight for source {self.id}: {e}")
             return None
+
+    async def summarize_sections(self) -> List[str]:
+        """
+        Fan out one ``summarize_section`` background job per section, then
+        submit ``generate_source_abstract`` to roll the summaries up into a
+        document-level abstract once they land (B3).
+
+        Fire-and-forget (Decisions #4/#7): returns immediately without
+        waiting for any job to complete. ``generate_source_abstract`` retries
+        with backoff until every text-bearing section has a summary (see
+        ``commands/summary_commands.py``), so the two submissions here don't
+        need to be ordered/awaited relative to each other. Safe to call again
+        manually — summaries are overwritten in place and the abstract
+        insight is replaced (not duplicated) on each regeneration.
+
+        Returns:
+            List[str]: command_ids of every job submitted (sections then
+            abstract), in submission order. A submit failure for one section
+            is logged and skipped rather than aborting the rest.
+        """
+        tree = await self.get_sections()
+        section_ids = _flatten_section_ids(tree)
+
+        command_ids: List[str] = []
+        for section_id in section_ids:
+            try:
+                cmd_id = submit_command(
+                    "open_notebook",
+                    "summarize_section",
+                    {"source_section_id": section_id},
+                )
+                command_ids.append(str(cmd_id))
+            except Exception as e:
+                logger.warning(
+                    f"Failed to submit summarize_section for {section_id}: {e}"
+                )
+
+        try:
+            abstract_cmd_id = submit_command(
+                "open_notebook",
+                "generate_source_abstract",
+                {"source_id": str(self.id)},
+            )
+            command_ids.append(str(abstract_cmd_id))
+        except Exception as e:
+            logger.warning(
+                f"Failed to submit generate_source_abstract for {self.id}: {e}"
+            )
+
+        return command_ids
 
     def _prepare_save_data(self) -> dict:
         """Override to ensure command field is always RecordID format for database"""

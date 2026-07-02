@@ -11,6 +11,7 @@ from .example_commands import analyze_data_command, process_text_command
 from .podcast_commands import generate_podcast_command
 from .section_commands import backfill_sections_command, build_sections_command
 from .source_commands import process_source_command
+from .summary_commands import generate_source_abstract, summarize_section
 from .verify_commands import verify_clean_section, verify_clean_source
 
 __all__ = [
@@ -25,6 +26,9 @@ __all__ = [
     # Vision verify-clean commands
     "verify_clean_section",
     "verify_clean_source",
+    # Per-section summaries + doc abstract commands
+    "summarize_section",
+    "generate_source_abstract",
     # Other commands
     "chat_completion_command",
     "generate_podcast_command",
