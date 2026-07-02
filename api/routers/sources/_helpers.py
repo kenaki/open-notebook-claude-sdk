@@ -13,11 +13,15 @@ def source_to_response(
     processing_info: Optional[dict] = None,
     file_available: Optional[bool] = None,
     notebooks: Optional[List[str]] = None,
+    has_sections: bool = False,
+    sections_count: int = 0,
 ) -> SourceResponse:
     """Build a SourceResponse from a Source domain object.
 
     Pass include_asset=False for async-create responses where the asset
     has not been processed yet and should not be exposed.
+    Pass has_sections/sections_count from a pre-fetched count query to signal
+    whether chaptering data is available (avoids loading full section trees here).
     """
     asset = None
     if include_asset and source.asset:
@@ -40,4 +44,6 @@ def source_to_response(
         processing_info=processing_info,
         file_available=file_available,
         notebooks=notebooks,
+        has_sections=has_sections,
+        sections_count=sections_count,
     )

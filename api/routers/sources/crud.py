@@ -179,6 +179,13 @@ async def get_source(source_id: str):
         )
         notebook_ids = [str(nb_id) for nb_id in notebooks_query] if notebooks_query else []
 
+        # Cheap count query — avoids loading the full section tree for every GET /sources/{id}
+        sections_count_result = await repo_query(
+            "SELECT count() AS cnt FROM source_section WHERE source = $sid GROUP ALL",
+            {"sid": ensure_record_id(source.id or source_id)},
+        )
+        sections_count = sections_count_result[0]["cnt"] if sections_count_result else 0
+
         return source_to_response(
             source,
             embedded_chunks,
@@ -187,6 +194,8 @@ async def get_source(source_id: str):
             processing_info=processing_info,
             file_available=_is_source_file_available(source),
             notebooks=notebook_ids,
+            has_sections=sections_count > 0,
+            sections_count=sections_count,
         )
     except HTTPException:
         raise

@@ -362,6 +362,29 @@ class SourceUpdate(BaseModel):
     topics: Optional[List[str]] = Field(None, description="Source topics")
 
 
+class SourceSectionNode(BaseModel):
+    id: str
+    title: str
+    level: int
+    order: int
+    page_start: Optional[int] = None
+    page_end: Optional[int] = None
+    summary: Optional[str] = None
+    content: Optional[str] = None  # only included when explicitly requested
+    children: List["SourceSectionNode"] = []
+
+
+SourceSectionNode.model_rebuild()  # needed for self-referential models
+
+
+class SourceSectionResponse(BaseModel):
+    id: str
+    title: Optional[str]
+    has_sections: bool
+    sections_count: int
+    sections: List[SourceSectionNode] = []
+
+
 class SourceResponse(BaseModel):
     id: str
     title: Optional[str]
@@ -379,6 +402,9 @@ class SourceResponse(BaseModel):
     processing_info: Optional[Dict] = None
     # Notebook associations
     notebooks: Optional[List[str]] = None
+    # Section metadata
+    has_sections: bool = False
+    sections_count: int = 0
 
 
 class SourceListResponse(BaseModel):
