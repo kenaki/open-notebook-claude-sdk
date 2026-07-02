@@ -17,7 +17,13 @@ from typing import Any
 
 from claude_agent_sdk import create_sdk_mcp_server, tool
 
-from open_notebook.domain.notebook import Note, Notebook, Source, text_search
+from open_notebook.domain.notebook import (
+    Note,
+    Notebook,
+    Source,
+    SourceSection,
+    text_search,
+)
 
 MCP_SERVER_NAME = "open_notebook"
 
@@ -106,7 +112,9 @@ async def list_sources(args: dict) -> dict:
 
 @tool(
     "get_source",
-    "Get a source's title, topics, full text, and insights by id.",
+    "Get a source's title, topics, full text, and insights by id. For long/chaptered "
+    "documents, prefer get_source_outline to navigate chapters and get_section to read "
+    "a specific chapter instead of the full text.",
     {"source_id": str},
 )
 async def get_source(args: dict) -> dict:
@@ -122,6 +130,8 @@ async def get_source(args: dict) -> dict:
                 {"insight_type": i.insight_type, "content": i.content}
                 for i in insights
             ],
+            "hint": "Use get_source_outline to navigate chapters and get_section to "
+            "read a specific chapter.",
         }
     )
 
@@ -156,6 +166,46 @@ async def search(args: dict) -> dict:
     )
 
 
+@tool(
+    "get_source_outline",
+    "Get the chapter/section outline of a source document. Returns title, page "
+    "ranges, and summary for each chapter. Use this to navigate a long document "
+    "before drilling into a specific section.",
+    {"source_id": str},
+)
+async def get_source_outline(args: dict) -> dict:
+    source = await Source.get(args["source_id"])
+    outline = await source.get_outline()
+    return _result(
+        {
+            "source_id": args["source_id"],
+            "title": source.title,
+            "outline": outline,
+        }
+    )
+
+
+@tool(
+    "get_section",
+    "Get the full content of a specific section of a document by section ID (from "
+    "get_source_outline). Returns cleaned content when available, otherwise raw "
+    "parsed content.",
+    {"source_id": str, "section_id": str},
+)
+async def get_section(args: dict) -> dict:
+    section = await SourceSection.get(args["section_id"])
+    content = section.cleaned_content or section.content
+    return _result(
+        {
+            "section_id": args["section_id"],
+            "title": section.title,
+            "page_start": section.page_start,
+            "page_end": section.page_end,
+            "content": _truncate(content),
+        }
+    )
+
+
 def build_open_notebook_mcp_server():
     """Build the in-process MCP server exposing the Open Notebook data tools."""
     return create_sdk_mcp_server(
@@ -166,6 +216,8 @@ def build_open_notebook_mcp_server():
             get_notebook,
             list_sources,
             get_source,
+            get_source_outline,
+            get_section,
             get_note,
             search,
         ],
