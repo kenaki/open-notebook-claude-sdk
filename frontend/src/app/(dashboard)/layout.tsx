@@ -10,6 +10,7 @@ import { ModalProvider } from '@/components/providers/ModalProvider'
 import { CreateDialogsProvider } from '@/lib/hooks/use-create-dialogs'
 import { CommandPalette } from '@/components/common/CommandPalette'
 import { JobsRuntime } from '@/components/jobs/JobsRuntime'
+import { JobTray } from '@/components/jobs/JobTray'
 
 export default function DashboardLayout({
   children,
@@ -59,6 +60,7 @@ export default function DashboardLayout({
         <ModalProvider />
         <CommandPalette />
         <JobsRuntime />
+        <JobTray />
       </CreateDialogsProvider>
     </ErrorBoundary>
   )
