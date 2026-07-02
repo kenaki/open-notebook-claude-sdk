@@ -458,6 +458,9 @@ export const deDE = {
     viewPdf: "Original PDF",
     loadingPdf: "Loading PDF...",
     pdfLoadError: "Failed to load PDF",
+    tableOfContents: "Table of Contents",
+    loadingChapters: "Loading chapters...",
+    untitledSection: "Untitled Section",
   },
   chat: {
     chatSettings: "Chat settings",

@@ -455,6 +455,9 @@ export const enUS = {
     viewPdf: "Original PDF",
     loadingPdf: "Loading PDF...",
     pdfLoadError: "Failed to load PDF",
+    tableOfContents: "Table of Contents",
+    loadingChapters: "Loading chapters...",
+    untitledSection: "Untitled Section",
   },
   chat: {
     chatAboutThis: "Chat about this",

@@ -1,12 +1,17 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Link as LinkIcon, ExternalLink, Youtube } from 'lucide-react'
 import { useTranslation } from '@/lib/hooks/use-translation'
-import { SourceDetailResponse } from '@/lib/types/api'
+import { sourcesApi } from '@/lib/api/sources'
+import { SourceDetailResponse, SourceSectionNode } from '@/lib/types/api'
+import { LoadingSpinner } from '@/components/common/LoadingSpinner'
+import { SourceTOC, getSectionPageRangeLabel } from './SourceTOC'
+import { cn } from '@/lib/utils'
 
 function getYouTubeVideoId(url: string): string | null {
   const patterns = [
@@ -21,12 +26,37 @@ function getYouTubeVideoId(url: string): string | null {
   return null
 }
 
+/** DFS-flattens a section tree into document order (root before children). */
+function flattenSections(nodes: SourceSectionNode[]): SourceSectionNode[] {
+  const result: SourceSectionNode[] = []
+  const walk = (list: SourceSectionNode[]) => {
+    for (const node of list) {
+      result.push(node)
+      if (node.children?.length) walk(node.children)
+    }
+  }
+  walk(nodes)
+  return result
+}
+
+function findSectionById(nodes: SourceSectionNode[], id: string): SourceSectionNode | undefined {
+  for (const node of nodes) {
+    if (node.id === id) return node
+    if (node.children?.length) {
+      const found = findSectionById(node.children, id)
+      if (found) return found
+    }
+  }
+  return undefined
+}
+
 interface SourceContentTabProps {
   source: SourceDetailResponse
 }
 
 export function SourceContentTab({ source }: SourceContentTabProps) {
   const { t } = useTranslation()
+  const [activeSectionId, setActiveSectionId] = useState<string | null>(null)
 
   const youTubeVideoId = useMemo(() => {
     if (!source.asset?.url) return null
@@ -34,6 +64,40 @@ export function SourceContentTab({ source }: SourceContentTabProps) {
   }, [source.asset?.url])
 
   const isYouTubeUrl = Boolean(youTubeVideoId)
+
+  // Document Foundation Track C (C3): chapter tree for chaptered sources (PDFs /
+  // long documents — Decision #12). Outline-only fetch first (summary inline,
+  // no content) — lightweight, drives the TOC and the has_sections gate.
+  const { data: sectionsData } = useQuery({
+    queryKey: ['sections', source.id],
+    queryFn: () => sourcesApi.getSections(source.id),
+    enabled: Boolean(source.id),
+  })
+
+  const hasSections = Boolean(sectionsData?.has_sections)
+  const outlineSections = useMemo(() => sectionsData?.sections ?? [], [sectionsData])
+
+  // Full (cleaned) content is fetched only once we know sections exist
+  // (Q-section-content-payload default: summary inline, content on demand) —
+  // one extra round trip per chaptered source, not one per chapter click.
+  const { data: contentData, isLoading: contentLoading } = useQuery({
+    queryKey: ['sections', source.id, 'content'],
+    queryFn: () => sourcesApi.getSections(source.id, true),
+    enabled: hasSections,
+  })
+
+  const contentSections = contentData?.sections ?? outlineSections
+
+  // Default to the first section (document order) once the outline loads.
+  useEffect(() => {
+    if (!hasSections || activeSectionId) return
+    const first = flattenSections(outlineSections)[0]
+    if (first) setActiveSectionId(first.id)
+  }, [hasSections, outlineSections, activeSectionId])
+
+  const activeSection = activeSectionId ? findSectionById(contentSections, activeSectionId) : undefined
+  const activeSectionRange = activeSection ? getSectionPageRangeLabel(activeSection) : null
+  const isLoadingActiveContent = hasSections && contentLoading && !activeSection?.content
 
   return (
     <Card>
@@ -83,31 +147,59 @@ export function SourceContentTab({ source }: SourceContentTabProps) {
             )}
           </div>
         )}
-        <div className="prose prose-sm prose-neutral dark:prose-invert max-w-none prose-headings:font-semibold prose-a:text-blue-600 prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-p:mb-4 prose-p:leading-7 prose-li:mb-2">
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            components={{
-              p: ({ children }) => <p className="mb-4">{children}</p>,
-              h1: ({ children }) => <h1 className="text-2xl font-bold mt-6 mb-4">{children}</h1>,
-              h2: ({ children }) => <h2 className="text-xl font-bold mt-5 mb-3">{children}</h2>,
-              h3: ({ children }) => <h3 className="text-lg font-semibold mt-4 mb-2">{children}</h3>,
-              ul: ({ children }) => <ul className="mb-4 list-disc pl-6">{children}</ul>,
-              ol: ({ children }) => <ol className="mb-4 list-decimal pl-6">{children}</ol>,
-              li: ({ children }) => <li className="mb-1">{children}</li>,
-              table: ({ children }) => (
-                <div className="my-4 overflow-x-auto">
-                  <table className="min-w-full border-collapse border border-border">{children}</table>
-                </div>
-              ),
-              thead: ({ children }) => <thead className="bg-muted">{children}</thead>,
-              tbody: ({ children }) => <tbody>{children}</tbody>,
-              tr: ({ children }) => <tr className="border-b border-border">{children}</tr>,
-              th: ({ children }) => <th className="border border-border px-3 py-2 text-left font-semibold">{children}</th>,
-              td: ({ children }) => <td className="border border-border px-3 py-2">{children}</td>,
-            }}
-          >
-            {source.full_text || t('sources.noContent')}
-          </ReactMarkdown>
+        <div className={cn(hasSections && 'flex flex-col gap-6 lg:flex-row')}>
+          {hasSections && (
+            <SourceTOC
+              sections={outlineSections}
+              activeSectionId={activeSectionId}
+              onSectionClick={setActiveSectionId}
+            />
+          )}
+          <div className={cn(hasSections && 'min-w-0 flex-1')}>
+            {hasSections && (
+              <div data-section-id={activeSection?.id} className="mb-4">
+                <h2 className="text-xl font-bold">
+                  {activeSection?.title?.trim() || t('sources.untitledSection')}
+                </h2>
+                {activeSectionRange && (
+                  <p className="mt-1 text-sm text-muted-foreground">{activeSectionRange}</p>
+                )}
+              </div>
+            )}
+            {isLoadingActiveContent ? (
+              <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+                <LoadingSpinner size="sm" />
+                {t('sources.loadingChapters')}
+              </div>
+            ) : (
+              <div className="prose prose-sm prose-neutral dark:prose-invert max-w-none prose-headings:font-semibold prose-a:text-blue-600 prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-p:mb-4 prose-p:leading-7 prose-li:mb-2">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    p: ({ children }) => <p className="mb-4">{children}</p>,
+                    h1: ({ children }) => <h1 className="text-2xl font-bold mt-6 mb-4">{children}</h1>,
+                    h2: ({ children }) => <h2 className="text-xl font-bold mt-5 mb-3">{children}</h2>,
+                    h3: ({ children }) => <h3 className="text-lg font-semibold mt-4 mb-2">{children}</h3>,
+                    ul: ({ children }) => <ul className="mb-4 list-disc pl-6">{children}</ul>,
+                    ol: ({ children }) => <ol className="mb-4 list-decimal pl-6">{children}</ol>,
+                    li: ({ children }) => <li className="mb-1">{children}</li>,
+                    table: ({ children }) => (
+                      <div className="my-4 overflow-x-auto">
+                        <table className="min-w-full border-collapse border border-border">{children}</table>
+                      </div>
+                    ),
+                    thead: ({ children }) => <thead className="bg-muted">{children}</thead>,
+                    tbody: ({ children }) => <tbody>{children}</tbody>,
+                    tr: ({ children }) => <tr className="border-b border-border">{children}</tr>,
+                    th: ({ children }) => <th className="border border-border px-3 py-2 text-left font-semibold">{children}</th>,
+                    td: ({ children }) => <td className="border border-border px-3 py-2">{children}</td>,
+                  }}
+                >
+                  {(hasSections ? activeSection?.content : source.full_text) || t('sources.noContent')}
+                </ReactMarkdown>
+              </div>
+            )}
+          </div>
         </div>
       </CardContent>
     </Card>
