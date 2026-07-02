@@ -29,6 +29,18 @@ Once the decisions are answered + the live checks pass, flip the ◐ chunks to �
 > **Update (2026-07-02, post-fix):** Decision #21 (B4 non-PDF fallback) **✅ RESOLVED** in-run (commit
 > 8c0b606, tested). The only remaining *decision* on the punch-list is **#20 (citation→PDF-page-open
 > follow-up)**; everything else is a **live spot-check** needing running services + a real PDF.
+>
+> **Update (2026-07-02, executor resume — verified live):** All df code confirmed present on HEAD
+> `cac282e`; `on-api`/`on-worker`/`on-frontend` all active. **Migration 20 (Phase3) IS APPLIED — verified
+> against the live DB** (correcting an earlier misread: the up-list is `[1..17, 19, 20]` = 19 entries with
+> 18 skipped, and the version counter is *positional*, so "database version 19" = all 19 entries applied,
+> **including `20.surrealql`**). Confirmed the schema is live: `source_embedding.page_number/bbox/section`,
+> `source.page_map/page_offset/page_labels`, `source_section` table, and **`fn::vector_search` defined**
+> (the risky REMOVE+DEFINE succeeded, no SurrealQL errors). ⇒ **Phase3's "migration-apply" live-check is
+> DONE.** Still pending for Phase3: a real PDF **re-embed** to populate `page_number` *values* + a chat
+> **`#p=N` citation** → PDF-open smoke (the latter is Decision #20's follow-up). Two runtime bugs fixed
+> this turn (see Changelog): the `pdfjs`/`canvas` build error and a `RunnableConfig` NameError 500 in
+> source-chat. df stays un-archived pending the remaining live spot-checks.
 
 **Orchestrator prompt (paste to drive a wave from the meta-coordinator):**
 ```
@@ -345,6 +357,32 @@ mv .claude/plans/pdf-viewer-citations.md .claude/plans/archived/pdf-viewer-citat
 
 ## Changelog
 
+- 2026-07-02 (executor resume, build-fix) — **Fixed a blocking frontend build error in Phase1 code**
+  (user-reported). `pdfjs-dist` (via @react-pdf-viewer, imported by `PDFViewer.tsx`) does
+  `require("canvas")` in its NodeCanvasFactory — an optional NATIVE module that is not installed and is
+  never needed in the browser/SSR bundle. Turbopack failed to resolve it ("Can't resolve 'canvas'") now
+  that `PDFViewer` is eagerly bundled via the dashboard layout (`ModalProvider → SourceDialog →
+  SourceDetailContent → PDFViewer`). Fix: `turbopack.resolveAlias.canvas → ./empty-module.ts` stub in
+  `next.config.ts` (a webpack `alias.canvas=false` can't be used — Next 16 hard-errors on a webpack
+  config without a turbopack config; see the note in that file). Verified: `npm run build` EXIT=0,
+  "Compiled successfully", TS clean, 14 routes generated; `on-frontend` restarted, `GET /notebooks` 200
+  (the exact failing import chain, now clean). Files: `frontend/next.config.ts`, `frontend/empty-module.ts`
+  (new). **Unblocks the Phase1 browser-render + C3/C4/B4/B5 visual live-checks** (frontend was build-broken).
+- 2026-07-02 (executor resume, runtime bug-fix #2) — **Fixed a `RunnableConfig` NameError → 500 in
+  source-chat.** `api/routers/source_chat.py` used `RunnableConfig(...)` at :206 (in `get_source_chat_session`)
+  without importing it → every "open a source" 500'd (`GET /sources/{id}/chat/sessions/{sid}`), surfacing
+  as error toasts. Fix: added `from langchain_core.runnables import RunnableConfig` (the canonical import
+  used in 8 other files). `on-api` WatchFiles-reloaded; import smoke clean; the exact failing URL now
+  returns **200 OK**, zero new NameErrors. File: `api/routers/source_chat.py`.
+- 2026-07-02 (executor resume, verification — CORRECTS a prior note) — Re-verified state after wave5d. Git
+  HEAD `cac282e` matches every recorded commit (no unrecorded landings). **Migration 20 (Phase3) IS APPLIED
+  — verified against the live DB**, correcting the earlier read-only claim that it was unapplied. The
+  version counter is positional and the up-list is `[1..17,19,20]` (18 skipped) = 19 entries, so "version
+  19" = all applied incl. `20.surrealql`. Live schema confirmed: `source_embedding.page_number/bbox/section`,
+  `source.page_map/page_offset/page_labels`, `source_section` table, `fn::vector_search` defined (REMOVE+DEFINE
+  succeeded). ⇒ **Phase3 migration-apply live-check DONE.** Remaining Phase3 live-checks: real re-embed →
+  `page_number` values, and `#p=N` citation → PDF-open (Decision #20). No plan chunks executed (two runtime
+  bugs fixed instead); df remains un-archived.
 - 2026-07-02 (post-wave5d fix) — **Decision #21 RESOLVED (commit 8c0b606).** Orchestrator integration-fix
   reconciling B4's #7 vs #12: non-chaptered sources (empty outline) now fall back to `full_text` in long
   context; `Notebook.get_context` re-fetches full_text; `format_source_long_context` renders the raw body
