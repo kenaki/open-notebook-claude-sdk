@@ -103,8 +103,10 @@ class TestNotebookDomain:
         assert notebook_archived.archived is True
 
     @pytest.mark.asyncio
-    async def test_notebook_get_context_includes_source_full_text(self):
-        """Test notebook context includes full source content for podcasts."""
+    async def test_notebook_get_context_includes_source_abstract_and_outline(self):
+        """Test notebook context surfaces the tiered digest (abstract + chapter
+        outline) for podcasts/LLM workflows, never the raw full_text blob
+        (document-foundation Decision #7/#9 — B4 tiered get_context)."""
         notebook = Notebook(id="notebook:test", name="Test", description="Test")
         sources = [
             Source(
@@ -130,18 +132,38 @@ class TestNotebookDomain:
         async def fake_get_insights(self):
             return []
 
+        async def fake_get_outline(self):
+            return [
+                {
+                    "id": f"source_section:{self.id}",
+                    "title": f"Chapter of {self.title}",
+                    "level": 1,
+                    "order": 1,
+                    "page_start": 1,
+                    "page_end": 2,
+                    "summary": f"Summary of {self.title}.",
+                    "children": [],
+                }
+            ]
+
         with (
             patch.object(Notebook, "get_sources", new=fake_get_sources),
             patch.object(Notebook, "get_notes", new=fake_get_notes),
             patch.object(Source, "get_insights", new=fake_get_insights),
+            patch.object(Source, "get_outline", new=fake_get_outline),
         ):
             context = await notebook.get_context()
 
-        assert get_sources_calls == [True]
+        # Sources are no longer fetched with full_text (B4 digestion fix).
+        assert get_sources_calls == [False]
         assert "## Source: First Source" in context
-        assert "First source full text for podcast generation." in context
+        assert "Chapter of First Source" in context
+        assert "Summary of First Source." in context
         assert "## Source: Second Source" in context
-        assert "Second source full text for podcast generation." in context
+        assert "Chapter of Second Source" in context
+        assert "Summary of Second Source." in context
+        assert "First source full text for podcast generation." not in context
+        assert "Second source full text for podcast generation." not in context
         assert "Notebook(id=" not in context
 
     @pytest.mark.asyncio
@@ -455,7 +477,8 @@ class TestPodcastService:
 
     @pytest.mark.asyncio
     async def test_submit_generation_job_uses_notebook_context_content(self):
-        """Test notebook podcast jobs submit real source content, not model repr."""
+        """Test notebook podcast jobs submit the tiered digest (abstract + chapter
+        outline), not full_text or model repr (document-foundation B4)."""
         notebook = Notebook(id="notebook:test", name="Test", description="Test")
         sources = [
             Source(
@@ -480,6 +503,20 @@ class TestPodcastService:
         async def fake_get_insights(self):
             return []
 
+        async def fake_get_outline(self):
+            return [
+                {
+                    "id": f"source_section:{self.id}",
+                    "title": f"Chapter of {self.title}",
+                    "level": 1,
+                    "order": 1,
+                    "page_start": 1,
+                    "page_end": 2,
+                    "summary": f"Summary of {self.title}.",
+                    "children": [],
+                }
+            ]
+
         def fake_submit_command(app_name, command_name, command_args):
             submitted_args.update(command_args)
             return "command:podcast"
@@ -502,6 +539,7 @@ class TestPodcastService:
             patch.object(Notebook, "get_sources", new=fake_get_sources),
             patch.object(Notebook, "get_notes", new=fake_get_notes),
             patch.object(Source, "get_insights", new=fake_get_insights),
+            patch.object(Source, "get_outline", new=fake_get_outline),
             patch("api.podcast_service.submit_command", new=fake_submit_command),
             patch.dict(
                 sys.modules, {"commands.podcast_commands": fake_commands_module}
@@ -516,8 +554,12 @@ class TestPodcastService:
 
         assert job_id == "command:podcast"
         content = submitted_args["content"]
-        assert "First source full text for submitted podcast content." in content
-        assert "Second source full text for submitted podcast content." in content
+        assert "Chapter of First Source" in content
+        assert "Summary of First Source." in content
+        assert "Chapter of Second Source" in content
+        assert "Summary of Second Source." in content
+        assert "First source full text for submitted podcast content." not in content
+        assert "Second source full text for submitted podcast content." not in content
         assert "Notebook(id=" not in content
 
 

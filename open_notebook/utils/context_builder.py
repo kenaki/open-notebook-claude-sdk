@@ -167,6 +167,12 @@ class ContextBuilder:
             context_size: Literal["short", "long"] = (
                 "long" if "full content" in inclusion_level else "short"
             )
+            # source_context is consumed opaquely here (stored as ContextItem.content,
+            # stringified only for token counting) — no full_text key is read off it.
+            # Since document-foundation B4, "long" is the tiered digest (title +
+            # insights + abstract + chapter outline), never the raw full_text blob,
+            # so this naturally shrinks the token budget without any format change
+            # needed in this builder.
             source_context = await source.get_context(context_size=context_size)
 
             # Add source item

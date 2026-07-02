@@ -14,6 +14,52 @@ from open_notebook.domain.base import ObjectModel
 from open_notebook.exceptions import DatabaseOperationError, InvalidInputError
 
 
+def _format_outline_chapters(
+    outline: List[Dict[str, Any]], _counter: Optional[List[int]] = None
+) -> List[str]:
+    """
+    Flatten a Source.get_outline() tree into "- Ch N: title (pp. X-Y) — summary"
+    lines (document-foundation Decision #7/#9). Recurses depth-first so nested
+    sub-sections are numbered in reading order alongside their parents.
+    """
+    counter = _counter if _counter is not None else [0]
+    lines: List[str] = []
+    for node in outline:
+        counter[0] += 1
+        title = node.get("title") or "Untitled"
+        page_start = node.get("page_start")
+        page_end = node.get("page_end")
+        if page_start is not None and page_end is not None:
+            page_range = f" (pp. {page_start}–{page_end})"
+        elif page_start is not None:
+            page_range = f" (p. {page_start})"
+        else:
+            page_range = ""
+        summary = node.get("summary")
+        summary_part = f" — {summary}" if summary else ""
+        lines.append(f"- Ch {counter[0]}: {title}{page_range}{summary_part}")
+        children = node.get("children") or []
+        if children:
+            lines.extend(_format_outline_chapters(children, counter))
+    return lines
+
+
+def format_source_long_context(source_context: Dict[str, Any]) -> str:
+    """
+    Render a Source.get_context("long") dict (title/abstract/outline — no
+    full_text, document-foundation Decision #7/#9) as an "Abstract" + flattened
+    "Chapters" text block for embedding into an LLM prompt.
+    """
+    parts: List[str] = []
+    abstract = source_context.get("abstract")
+    if abstract:
+        parts.append(f"Abstract: {abstract}")
+    chapter_lines = _format_outline_chapters(source_context.get("outline") or [])
+    if chapter_lines:
+        parts.append("Chapters:\n" + "\n".join(chapter_lines))
+    return "\n\n".join(parts).strip()
+
+
 class Notebook(ObjectModel):
     table_name: ClassVar[str] = "notebook"
     name: str
@@ -77,8 +123,10 @@ class Notebook(ObjectModel):
 
         Normal list retrieval omits large source/note bodies, so this method uses
         opt-in full-content fetches and formats only substantive context blocks.
+        Sources are digested via title + abstract + chapter outline (tiered
+        context, Decision #7/#9) — full_text is never fetched or dumped here.
         """
-        sources = await self.get_sources(include_full_text=True)
+        sources = await self.get_sources(include_full_text=False)
         notes = await self.get_notes(include_content=True)
         context_blocks = []
 
@@ -86,12 +134,15 @@ class Notebook(ObjectModel):
             source_context = await source.get_context(context_size="long")
             if isinstance(source_context, dict):
                 title = source_context.get("title") or source.title or "Untitled source"
-                full_text = source_context.get("full_text")
                 insights = source_context.get("insights") or []
 
                 content_parts = []
-                if full_text:
-                    content_parts.append(str(full_text))
+                # Tiered context (Decision #7/#9): abstract + chapter outline,
+                # never the raw full_text blob — keeps textbook-sized sources
+                # from ballooning the prompt.
+                outline_block = format_source_long_context(source_context)
+                if outline_block:
+                    content_parts.append(outline_block)
 
                 insight_lines = []
                 for insight in insights:
@@ -471,14 +522,29 @@ class Source(ObjectModel):
     async def get_context(
         self, context_size: Literal["short", "long"] = "short"
     ) -> Dict[str, Any]:
+        """
+        Build LLM-facing context for this source.
+
+        "short" is a lightweight pointer (id/title/insights) for retrieval-style
+        prompts. "long" is the tiered digest (document-foundation Decision #7/#9):
+        title + insights + doc abstract + chapter outline (titles, page ranges,
+        summaries) — it never includes the raw full_text blob, so a textbook-sized
+        source no longer balloons the prompt. Detail retrieval for specific
+        passages goes through vector_search / the agent's get_section tool
+        instead.
+        """
         insights_list = await self.get_insights()
         insights = [insight.model_dump() for insight in insights_list]
         if context_size == "long":
+            abstract_insight = next(
+                (i for i in insights_list if i.insight_type == "abstract"), None
+            )
             return dict(
                 id=self.id,
                 title=self.title,
                 insights=insights,
-                full_text=self.full_text,
+                abstract=abstract_insight.content if abstract_insight else None,
+                outline=await self.get_outline(),
             )
         else:
             return dict(id=self.id, title=self.title, insights=insights)
