@@ -1,12 +1,17 @@
 'use client'
 
 import { useEffect, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 
 import { commandsApi } from '@/lib/api/commands'
 import { QUERY_KEYS } from '@/lib/api/query-client'
+import { useTranslation } from '@/lib/hooks/use-translation'
 import { BackgroundJob, JobKind, JobStatus, useJobsStore } from '@/lib/stores/jobs-store'
 import { CommandJobSummary } from '@/lib/types/api'
+import { getApiErrorMessage } from '@/lib/utils/error-handler'
+import { jobOrigin } from '@/lib/utils/job-origin'
 
 // Grace period before removing a completed/failed job from the store (ms).
 // Gives the UI a brief window to show final state before disappearing from tray.
@@ -93,6 +98,8 @@ function serverRowToJob(row: CommandJobSummary): BackgroundJob {
  */
 export function useJobsPoller() {
   const queryClient = useQueryClient()
+  const router = useRouter()
+  const { t } = useTranslation()
   const { jobs, register, update, remove } = useJobsStore()
 
   // Track when we last saw a new job arrive so we can use the fast-poll window.
@@ -187,12 +194,11 @@ export function useJobsPoller() {
 
   /** Handle a job transitioning to completed or failed. */
   function handleTermination(jobId: string, job: BackgroundJob) {
+    const isChatJob = job.kind === 'notebook_chat' || job.kind === 'source_chat'
+
     if (job.status === 'completed') {
       // Invalidate the originating session cache so the answer appears in chat.
-      if (
-        (job.kind === 'notebook_chat' || job.kind === 'source_chat') &&
-        job.sessionId
-      ) {
+      if (isChatJob && job.sessionId) {
         if (job.kind === 'notebook_chat') {
           queryClient.invalidateQueries({
             queryKey: QUERY_KEYS.notebookChatSession(job.sessionId),
@@ -211,6 +217,24 @@ export function useJobsPoller() {
           }
         }
       }
+
+      // Notify only for chat jobs (Q-toast-noise): podcasts/embeds/transforms
+      // still update the tray silently, they'd just be noisy if batched.
+      if (isChatJob) {
+        toast.success(t('jobs.chatReady'), {
+          action: {
+            label: t('jobs.view'),
+            onClick: () => router.push(jobOrigin(job)),
+          },
+        })
+      }
+    } else if (job.status === 'failed' && isChatJob) {
+      toast.error(getApiErrorMessage(job.error, t, 'jobs.chatFailed'), {
+        action: {
+          label: t('jobs.view'),
+          onClick: () => router.push(jobOrigin(job)),
+        },
+      })
     }
 
     // Schedule removal after grace period (allows tray + toast to show final state).

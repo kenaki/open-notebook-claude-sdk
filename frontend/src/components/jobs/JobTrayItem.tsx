@@ -6,27 +6,7 @@ import type { LucideIcon } from 'lucide-react'
 
 import { JobStatusBadge } from './JobStatusBadge'
 import type { BackgroundJob, JobKind } from '@/lib/stores/jobs-store'
-
-// Minimal inline origin switch (Chunk B2). Refactored into the shared
-// `jobOrigin()` helper in Chunk B3 (`frontend/src/lib/utils/job-origin.ts`),
-// which the completion/failure toasts also use.
-function jobOrigin(job: BackgroundJob): string {
-  switch (job.kind) {
-    case 'notebook_chat':
-      if (job.notebookId && job.sessionId) {
-        return `/notebooks/${job.notebookId}/chat/${job.sessionId}`
-      }
-      return job.notebookId ? `/notebooks/${job.notebookId}` : '/notebooks'
-    case 'source_chat':
-    case 'source':
-    case 'transformation':
-      return job.targetId ? `/sources/${job.targetId}` : '/sources'
-    case 'podcast':
-      return '/podcasts'
-    default:
-      return '/notebooks'
-  }
-}
+import { jobOrigin } from '@/lib/utils/job-origin'
 
 const KIND_ICONS: Record<JobKind, LucideIcon> = {
   notebook_chat: MessageCircle,
