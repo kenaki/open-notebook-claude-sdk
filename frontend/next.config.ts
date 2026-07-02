@@ -21,18 +21,20 @@ const nextConfig: NextConfig = {
     proxyClientMaxBodySize: '100mb',
   } as NextConfig['experimental'],
 
-  // PDF.js worker alias for @react-pdf-viewer (Next.js 16 / webpack 5)
-  // Aliases the legacy .js worker entry to the ESM build so webpack
-  // can bundle it without "Can't resolve" errors.
-  // The PDFViewer component uses a CDN workerUrl at runtime; this alias
-  // only affects webpack module resolution (import side).
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  webpack: (config: any) => {
-    config.resolve = config.resolve || {}
-    config.resolve.alias = config.resolve.alias || {}
-    config.resolve.alias['pdfjs-dist/build/pdf.worker.min.js'] =
-      'pdfjs-dist/build/pdf.worker.min.mjs'
-    return config
+  // NOTE: @react-pdf-viewer loads the PDF.js worker from a CDN URL at runtime
+  // (see PDFViewer.tsx `<Worker workerUrl=...>`), so no webpack/turbopack worker
+  // alias is needed. Next 16 defaults to Turbopack; a `webpack` config with no
+  // `turbopack` config is a hard build error, so it was intentionally omitted.
+  //
+  // `pdfjs-dist` (via @react-pdf-viewer) has a NodeCanvasFactory that does
+  // `require("canvas")` — an optional NATIVE Node module that is NOT installed
+  // and is never needed in the browser/SSR bundle. Turbopack still resolves the
+  // import at build time and fails ("Can't resolve 'canvas'"). Alias it to an
+  // empty stub module so the unused Node-only path resolves harmlessly.
+  turbopack: {
+    resolveAlias: {
+      canvas: "./empty-module.ts",
+    },
   },
 
   // API Rewrites: Proxy /api/* requests to FastAPI backend
