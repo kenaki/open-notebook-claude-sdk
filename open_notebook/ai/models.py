@@ -66,7 +66,7 @@ class DefaultModels(RecordModel):
     large_context_model: Optional[str] = None
     default_text_to_speech_model: Optional[str] = None
     default_speech_to_text_model: Optional[str] = None
-    # default_vision_model: Optional[str]
+    default_vision_model: Optional[str] = None
     default_embedding_model: Optional[str] = None
     default_tools_model: Optional[str] = None
 
@@ -215,6 +215,18 @@ class ModelManager:
         model = await self.get_model(model_id, **kwargs)
         assert model is None or isinstance(model, EmbeddingModel), (
             f"Expected EmbeddingModel but got {type(model)}"
+        )
+        return model
+
+    async def get_vision_model(self, **kwargs) -> Optional[LanguageModel]:
+        """Get the default vision-capable model (falls back to None if not configured)."""
+        defaults = await self.get_defaults()
+        model_id = defaults.default_vision_model
+        if not model_id:
+            return None
+        model = await self.get_model(model_id, **kwargs)
+        assert model is None or isinstance(model, LanguageModel), (
+            f"Expected LanguageModel but got {type(model)}"
         )
         return model
 

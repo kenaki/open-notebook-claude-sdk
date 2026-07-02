@@ -44,7 +44,15 @@ def _media_to_data_uri(item: dict) -> Optional[str]:
     ``CHAT_MEDIA_FOLDER``. We resolve by basename (path-traversal guarded) and
     inline the bytes as a data URI so the model provider does not need to reach
     back to this server. Returns ``None`` if the file can't be read.
+
+    If the item already carries a precomputed ``data_uri`` (e.g. in-memory bytes
+    that were never written to ``CHAT_MEDIA_FOLDER`` — see
+    ``open_notebook.ai.vision_utils.provision_vision_message``), it is returned
+    as-is and no disk lookup happens.
     """
+    if item.get("data_uri"):
+        return item["data_uri"]
+
     url = item.get("url") or ""
     safe_name = os.path.basename(url)
     if not safe_name:
