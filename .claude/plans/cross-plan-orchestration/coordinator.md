@@ -272,7 +272,12 @@ Legend: ☐ todo · ◐ in-flight · ☑ done. Update the per-plan coordinator's
 | 5 | D1 | background-jobs | 🔵 | ☑ (ec88bce — background-jobs COMPLETE + archived) |
 | 5 | C2 | document-foundation | 🔵 | ☑ (22eca7c) |
 | 5 | Phase3 | document-foundation | 🔵 | ◐ (b525c88 — code done, live checks parked) |
-| 5b | B2 | document-foundation | 🔵 | ☐ (unblocked; Phase3 freed source.py) |
+| 5b | B2 | document-foundation | 🔵 | ◐ (09c0fed — code done, live quality check parked) |
+| 5b | C3 | document-foundation | 🔵 | ☑ (887bf95) |
+| 5c | B3 | document-foundation | 🔵 | ☐ (‖ C4) |
+| 5c | C4 | document-foundation | 🔵 | ☐ (‖ B3) |
+| 5d | B4 | document-foundation | 🔵 | ☐ (‖ B5 — file-disjoint) |
+| 5d | B5 | document-foundation | 🔵 | ☐ (‖ B4) |
 | 6+ | chat-foundation W1–W6 ‖ df tail (B3,B4,B5,C3,C4) | — | mixed | ☐ |
 | last | T3-d | codebase-cleanup-audit | 🟣 | ☐ |
 | last | Phase4 (deferred) | document-foundation | 🔵 | ☐ |
@@ -303,6 +308,11 @@ does not duplicate chunk specs.
 - **ds4-deepseek-v4-flash** — research/decision-gated; orthogonal.
 
 ## Changelog
+- 2026-07-02 (wave5b) — **C3 ☑ (887bf95), B2 ◐ (09c0fed).** 2 parallel worktree agents (B2 backend ‖
+  C3 frontend). C3 = TOC sidebar + per-chapter render (reuses ReactMarkdown, fallback preserved). B2 =
+  per-section verify-clean vision command + fan-out + fire-and-forget trigger; left ◐ (live quality run
+  parked). Merged-tree verify green vs baseline (pytest 31; verify_commands register; frontend tsc
+  baseline-only). Remaining Lane B: **B3 ‖ C4** (5c) → **B4 ‖ B5** (5d, file-disjoint parallelizable).
 - 2026-07-02 (wave5) — **Wave 5 ran; background-jobs COMPLETE + archived.** Orchestrated via
   chunk-plan-execute, 3 parallel worktree agents (bg D1 ‖ df C2 ‖ df Phase3, all file-disjoint). Landed:
   **bg D1** (ec88bce → cherry-pick 5725154) — `jobs.*` i18n across 14 locales, closing background-jobs

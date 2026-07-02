@@ -68,7 +68,7 @@ new Open Questions → commit → announce "✅ Chunk B.n complete — safe to c
 | Chunk | Title | Status | Notes |
 |------:|-------|--------|-------|
 | B1 🚧 | Vision-verifier plumbing + validation-gate pilot | ☑ | commit 87de266 (wave4 2026-07-02); plumbing + real pilot run. **Human-blessed GO-WITH-CAVEATS 2026-07-02.** Gate-bypass credential also fixed (Q-vision-gate-bypass resolved) — B2 unblocked |
-| B2 | Per-chapter verify-clean background command | ☐ | **Unblocked** (B1 GO'd). Must pass `max_tokens>=8192` explicitly (pilot found silent-empty-output bug otherwise); treat single-pass vision output as draft — route low-confidence pages through `verify_flag` rather than blind overwrite; math handling untested, spot-check before trusting |
+| B2 | Per-chapter verify-clean background command | ◐ | commit 09c0fed (wave5b 2026-07-02); `verify_clean_section`+`verify_clean_source` in `commands/verify_commands.py`, fire-and-forget trigger in `submit_sections`, `commands/__init__.py` wired. PyMuPDF 2× render → `get_vision_model(max_tokens=8192)` (direct, not provision — see coord Decisions #14) → `cleaned_content` (raw immutable) + `verify_flag` insight. Static verify green (import+register, pytest 31). **LIVE quality spot-check parked** (real section: cleaned>raw, immutable raw, verify_flag, fan-out, failure isolation; math untested). Auto-decisions #14–16 in coordinator |
 | B3 | Per-section summaries + doc abstract | ☐ | |
 | B4 | Tiered get_context rewrite (the digestion fix) | ☐ | |
 | B5 | Agent tools get_source_outline / get_section | ☐ | |
@@ -79,6 +79,16 @@ Legend: ☐ todo · ◐ in progress · ☑ done · ⏸ blocked
 
 ## Changelog (this track)
 
+- 2026-07-02 (wave5b) — **B2 ◐ (commit 09c0fed).** `commands/verify_commands.py`: `verify_clean_section`
+  renders a section's pages (PyMuPDF `get_pixmap` @2×, off-loop) → vision verifier (`get_vision_model(
+  max_tokens=8192)` directly, avoiding provision's non-vision large-context auto-upgrade) → writes
+  `section.cleaned_content` (raw `content`/`full_text` untouched); discrepancies → `source.add_insight(
+  "verify_flag", …)`. `verify_clean_source` fans out one job/section with per-section isolation; fired
+  fire-and-forget from the `submit_sections` node after `build_sections`. Registered via `commands/__init__.py`.
+  Static verify: py_compile clean, registry shows both commands, `pytest tests/test_domain.py` 31 pass.
+  **Left ◐** — the "cleaned visibly better than raw" deliverable + fan-out/failure-isolation + math path
+  need a live worker + real PDF + vision model (parked). Three auto-decisions (coordinator Decisions
+  #14–16): direct vision provisioning, real retry schema, `_MAX_VERIFY_PAGES=50` skip-with-flag. **B3 next.**
 - 2026-07-02 (wave4) — **B1 ☑ plumbing (commit 87de266), pilot run, parked at human gate.**
   `default_vision_model` + `get_vision_model()` in `ai/models.py`; `ai/vision_utils.py:provision_vision_message()`;
   `_media_to_data_uri()` data_uri passthrough in `graphs/chat.py`. Live pilot against `qwen3.6:35b`

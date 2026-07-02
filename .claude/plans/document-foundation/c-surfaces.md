@@ -73,7 +73,7 @@ note new Open Questions → commit → announce "✅ Chunk C.n complete — safe
 |------:|-------|--------|-------|
 | C1 | GET /sources/{id}/sections + schemas + has_sections flag | ☐ | Needs A ☑; sources.py is a package |
 | C2 | Frontend types + getSections API client | ☑ | commit 22eca7c (wave5 2026-07-02); types + getSections client. tsc clean. ⚠ `title` non-optional per spec vs nullable backend — C3 tolerate null |
-| C3 | TOC sidebar + per-chapter rendering (SourceContentTab) | ☐ | Anchors in SourceContentTab.tsx. Runnable now (C2 ☑). ⚠ appends locale keys — do not run same wave as another locale editor |
+| C3 | TOC sidebar + per-chapter rendering (SourceContentTab) | ☑ | commit 887bf95 (wave5b 2026-07-02); SourceTOC.tsx + two-col SourceContentTab (single ReactMarkdown reused), content via getSections(id,true), fallback preserved, null-title tolerated, 3 keys ×14. tsc clean. Anchors + getSectionPageRangeLabel ready for C4. ⚠ visual spot-check parked |
 | C4 | Interaction: selection actions + per-chapter AI + citation→section jump | ☐ | |
 
 Legend: ☐ todo · ◐ in progress · ☑ done · ⏸ blocked

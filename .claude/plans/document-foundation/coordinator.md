@@ -14,11 +14,14 @@
 
 ## SESSION HANDOFF (read first)
 
-**State (2026-07-02, wave5):** Track A fully ☑. Track B: B1 ☑ (GO-blessed). Track C: **C1 ☑, C2 ☑**
-(wave5). Phase1 ☑. **Phase3 ◐** (wave5, commit b525c88 — code landed + static-verified; live checks
-parked: migration-apply, re-embed→page_number, citation→PDF, npm build). Remaining build-now: **B2**
-(runnable now — Phase3 freed graphs/source.py), **B3–B5**, **C3–C4**. Next wave (5b): **B2 ‖ C3**
-(file-disjoint: B2 backend verify_commands.py+source.py; C3 frontend SourceContentTab/SourceTOC+locales).
+**State (2026-07-02, wave5b):** Track A fully ☑. Track B: B1 ☑, **B2 ◐** (5b — code+static done, live
+quality check parked). Track C: **C1 ☑, C2 ☑, C3 ☑** (5b). Phase1 ☑. **Phase3 ◐** (code+static done;
+live checks parked). Remaining build-now: **B3, B4, B5, C4**. Next wave (5c): **B3 ‖ C4** (file-disjoint:
+B3 backend summary_commands.py+notebook.py+source.py; C4 frontend PassageSelectionMenu/SourceTOC/
+source-references/ChatPanel+locales). Then **B4 ‖ B5** (file-disjoint: B4 notebook.py+context_builder.py;
+B5 claude_agent_tools.py — B5 uses A3's get_outline, not B4's rewrite, so they parallelize). Archival
+gated on the parked live spot-checks (Phase3 migration-apply, B2/B3 real-section runs, B4 chat-context) —
+those are on the run's end punch-list; document-foundation archives only once they clear to ☑.
 
 **Orchestrator prompt (paste to drive a wave from the meta-coordinator):**
 ```
@@ -135,13 +138,13 @@ Legend: ☐ todo · ◐ in progress · ☑ done · ⏸ blocked · ⊘ deferred
 | A | A2 | Docling extraction + page provenance (folds pdf Phase 2) | ☑ | commit 7e13d72; content-core[docling] dep + page_map provenance + PyMuPDF fallback. wave2 2026-06-29. ⚠ GPU spot-check on real textbook still pending (manual) |
 | A | A3 | Chaptering: section tree + get_sections/get_outline + tagged chunks + backfill | ☑ | commit 6ba9f40; build_sections+backfill_sections commands, section tree + get_sections/get_outline, chunk→section stamping, graph rewire. pytest 31 pass; worker 16 cmds; api clean. ⚠ live-ingest spot-check pending. **Track A fully ☑ → B & C unblocked; Phase3 unblocked.** wave3 2026-06-29 |
 | B | B1 🚧 | Vision-verifier plumbing + **validation-gate pilot** | ☑ | commit 87de266 (wave4 2026-07-02). Real pilot run — **GO-WITH-CAVEATS, human-blessed 2026-07-02.** Gate-bypass credential fixed same session |
-| B | B2 | Per-chapter verify-clean background command | ☐ | **Unblocked.** Must force `max_tokens>=8192`; route low-confidence pages through `verify_flag`; math untested |
+| B | B2 | Per-chapter verify-clean background command | ◐ | commit 09c0fed (wave5b 2026-07-02); `verify_clean_section`+`verify_clean_source` cmds, PyMuPDF 2× render, cleaned→`cleaned_content` (raw immutable), discrepancies→`verify_flag` insight, fire-and-forget trigger in `submit_sections`. Static verify green (imports+register, pytest 31). **LIVE spot-check parked:** run on a real section → cleaned better + raw byte-unchanged + verify_flag + fan-out + failure isolation; math path untested. Auto-decisions: direct `get_vision_model(max_tokens=8192)` (NOT `provision_langchain_model` — avoids >105k non-vision large-context swap); retry schema→`max_attempts=3/fixed 10s/stop_on ValueError,ConfigError`; `_MAX_VERIFY_PAGES=50` skip-with-flag |
 | B | B3 | Per-section summaries + doc abstract | ☐ | |
 | B | B4 | Tiered get_context rewrite | ☐ | The digestion fix |
 | B | B5 | Agent tools get_source_outline / get_section | ☐ | |
 | C | C1 | GET /sources/{id}/sections + schemas + has_sections flag | ☑ | commit c498aa4 (wave4 2026-07-02); recovered from a prior session's unmerged worktree (orig 67c3b7d) — implementation complete and verified, just never integrated. `pytest tests/test_models_api.py` 12 passed |
 | C | C2 | Frontend types + getSections API client | ☑ | commit 22eca7c (wave5 2026-07-02); SourceSectionNode/SourceSectionResponse types + has_sections?/sections_count? on SourceDetailResponse + getSections client. tsc clean (baseline only). ⚠ `title` typed non-optional per verbatim spec; backend `title` is nullable — C3 should tolerate null |
-| C | C3 | TOC sidebar + per-chapter rendering (SourceContentTab) | ☐ | Anchors in SourceContentTab.tsx |
+| C | C3 | TOC sidebar + per-chapter rendering (SourceContentTab) | ☑ | commit 887bf95 (wave5b 2026-07-02); `SourceTOC.tsx` (sticky collapsible tree, `data-section-id` anchors) + two-col `SourceContentTab` reusing the existing ReactMarkdown; content via `getSections(id,true)`; unchaptered fallback preserved; null-title tolerated; 3 locale keys ×14. tsc clean (baseline only). ⚠ visual spot-check parked (TOC renders for chaptered PDF; flat render for web/pasted). Exposes `getSectionPageRangeLabel` + anchors for C4 |
 | C | C4 | Interaction: selection actions + per-chapter AI + citation→jump | ☐ | |
 | — | Phase1 | PDFViewer.tsx inline viewer (FE-only, dep-free) | ☑ | commit 1608053; @react-pdf-viewer + PDFViewer.tsx + Original PDF tab + 14 locales + next.config worker. wave2 2026-06-29. ⚠ browser render spot-check still pending (manual) |
 | — | Phase3 | page_number/bbox + vector_search + #p=N citations (mig 20) | ◐ | commit b525c88 (wave5 2026-07-02); mig20 (page_map/page_number/bbox + fn::vector_search REMOVE+DEFINE redefine) + provenance chunking (build_page_char_map/find_chunk_page) + embed_source page_number stamping + backfill_page_numbers cmd + #p=N parser (forwards `page` arg to C4). Static verify green (pytest 65 + test_chunking 34, imports OK, mig20 in both lists). **LIVE spot-checks PARKED:** (1) migration-apply on API restart — WATCH the fn::vector_search redefine for SurrealQL errors; (2) re-embed PDF → page_number; (3) chat emits #p=N; (4) citation→PDF-open (final wiring is C4's — parser already forwards page); (5) npm build |
@@ -192,6 +195,9 @@ Human viewer gets: TOC + per-chapter render (cleaned content) + inline PDF + cit
 | 11 | Migrations? | 17 = taken (chat_tag_colors). 18 = reserved for chat-foundation B1. **19** = this plan's A1 (source_section + all additive source fields). **20** = Phase3 (page_number/bbox on source_embedding). 21 = Phase4 source_annotation (deferred). |
 | 12 | Which sources? | **PDFs / long documents only** in v1. Web pages, pasted text, transcripts keep current behavior. |
 | 13 | Viewer lib peer-dep risk? | Validate @react-pdf-viewer in Phase1. If React 19/Next 16 peer-dep fails, fall back to react-pdf + a custom highlight layer. Do NOT block B or C on this — Phase1 is independent. |
+| 14 | B2 vision provisioning path? | **auto-decided (B2, 2026-07-02):** call `get_vision_model(max_tokens=8192).to_langchain()` **directly**, NOT `provision_langchain_model(...)` — the latter auto-upgrades >105k-token content to a non-vision `large_context_model` → garbage on large sections. Direct path also returns None cleanly when unconfigured (the required skip path). **Confirm if you'd prefer routing through provision.** |
+| 15 | B2 retry config? | **auto-decided (B2):** the plan's `{max_retries, delay_seconds}` fields don't exist in the installed `surreal_commands.RetryConfig` (silently ignored). Translated to `{max_attempts:3, wait_strategy:"fixed", wait_time:10, stop_on:[ValueError, ConfigurationError]}` = 1 initial + 2 retries, fixed 10s. Verified against the library. |
+| 16 | B2 pathological page span? | **auto-decided (B2):** a headingless PDF chapters into one whole-doc section → rendering hundreds of page-images into one vision call blows context. `_MAX_VERIFY_PAGES=50`: over the cap → **skip-with-`verify_flag`** (never truncate — truncation violates "preserve all content"). **Confirm the cap value (50).** |
 
 ---
 
@@ -327,6 +333,17 @@ mv .claude/plans/pdf-viewer-citations.md .claude/plans/archived/pdf-viewer-citat
 
 ## Changelog
 
+- 2026-07-02 (wave5b) — **C3 ☑ (887bf95); B2 ◐ (09c0fed).** Orchestrated run, 2 parallel worktree agents
+  (B2 backend ‖ C3 frontend, disjoint). **C3** — `SourceTOC.tsx` + two-column `SourceContentTab` reusing
+  the single existing ReactMarkdown; chapter content fetched once via `getSections(id,true)`; unchaptered
+  fallback (flat `full_text`) preserved; C2's nullable `title` tolerated; `data-section-id` anchors +
+  `getSectionPageRangeLabel` exposed for C4. **B2** — `verify_clean_section` (PyMuPDF 2× page render →
+  vision verifier → `cleaned_content`, raw `content`/`full_text` immutable; discrepancies → `verify_flag`
+  SourceInsight) + `verify_clean_source` fan-out + fire-and-forget trigger in `submit_sections`. **Left ◐**
+  — its deliverable ("cleaned visibly better than raw") is only confirmable on a live run (worker + real
+  PDF + vision model). Three B2 auto-decisions recorded (see Decisions log #14–16). Merged-tree verify:
+  `pytest tests/test_domain.py` 31 pass; verify_commands import+register OK; source graph imports; frontend
+  `tsc` clean (baseline only). Next: B3 ‖ C4.
 - 2026-07-02 (wave5) — **C2 ☑ (22eca7c); Phase3 ◐ (b525c88).** Orchestrated run (chunk-plan-execute,
   3 parallel worktree agents: bg D1 ‖ df C2 ‖ df Phase3). **C2** — `SourceSectionNode`/`SourceSectionResponse`
   TS types + `has_sections?`/`sections_count?` on `SourceDetailResponse` + `sourcesApi.getSections`.
