@@ -52,7 +52,7 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections,
   // Subscribe to all jobs so getIsSending re-derives on any status change.
   const storeJobs = useJobsStore((s) => s.jobs)
 
-  const { buildContext, tokenCount, charCount } = useBuildNotebookContext({
+  const { buildContext, tokenCount, charCount, contextData } = useBuildNotebookContext({
     notebookId,
     sources,
     notes,
@@ -280,6 +280,7 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections,
     loadingSessions,
     tokenCount,
     charCount,
+    contextData,
     pendingModelOverride,
 
     getMessages,

@@ -109,6 +109,13 @@ async def process_source_command(
                 "apply_transformations": transformations,
                 "embed": input_data.embed,
                 "source_id": input_data.source_id,  # Add the source_id to the state
+                # Pass this command's own record id so graph nodes can report
+                # live progress (phase) onto the job row for the tray to display.
+                "job_id": (
+                    str(input_data.execution_context.command_id)
+                    if input_data.execution_context
+                    else None
+                ),
             }
         )
 

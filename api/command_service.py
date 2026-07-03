@@ -100,7 +100,7 @@ class CommandService:
         safe_limit = max(1, min(int(limit), 1000))
 
         query = (
-            "SELECT id, app, name, args, status, result, error_message, created, updated "
+            "SELECT id, app, name, args, status, result, error_message, created, updated, progress "
             f"FROM command {where_clause} "
             f"ORDER BY created DESC LIMIT {safe_limit}"
         )
@@ -122,6 +122,10 @@ class CommandService:
                         "created": str(row["created"]) if row.get("created") else None,
                         "updated": str(row["updated"]) if row.get("updated") else None,
                         "args": row.get("args"),
+                        # Live per-job phase written by long-running commands (e.g.
+                        # source ingest → "Parsing PDF with Docling"). None for
+                        # commands that don't report progress.
+                        "progress": row.get("progress"),
                     }
                 )
             return result

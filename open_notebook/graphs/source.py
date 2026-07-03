@@ -29,6 +29,9 @@ class SourceState(TypedDict):
     embed: bool
     # A2: per-block page provenance from Docling (None for non-PDF or on fallback)
     page_map: NotRequired[Optional[List[Dict]]]
+    # This command's own record id, so nodes can stamp live progress (phase)
+    # onto the job row for the background-jobs tray. None when not run as a job.
+    job_id: NotRequired[Optional[str]]
 
 
 class TransformationState(TypedDict):
@@ -86,6 +89,27 @@ def _extract_docling_page_map(file_path: str) -> Tuple[str, List[Dict]]:
     return full_text, page_map
 
 
+# ---------------------------------------------------------------------------
+# Live progress reporting (best-effort; never breaks ingestion)
+# ---------------------------------------------------------------------------
+
+async def _report_progress(job_id: Optional[str], phase: str) -> None:
+    """Stamp a human-readable phase onto the running ``command`` row so the
+    background-jobs tray can show live status (e.g. "Parsing PDF with Docling").
+
+    Best-effort: a missing job_id or any DB error is swallowed — progress
+    reporting must never break the ingest pipeline.
+    """
+    if not job_id:
+        return
+    try:
+        from open_notebook.database.repository import repo_update
+
+        await repo_update("command", job_id, {"progress": {"phase": phase}})
+    except Exception as exc:
+        logger.debug(f"progress report skipped (phase={phase!r}): {exc!r}")
+
+
 async def content_process(state: SourceState) -> dict:
     content_settings = ContentSettings(
         default_content_processing_engine_doc="auto",
@@ -105,13 +129,28 @@ async def content_process(state: SourceState) -> dict:
         ],
     )
     content_state: Dict[str, Any] = state["content_state"]  # type: ignore[assignment]
+    job_id = state.get("job_id")
 
     content_state["url_engine"] = (
         content_settings.default_content_processing_engine_url or "auto"
     )
-    content_state["document_engine"] = (
-        content_settings.default_content_processing_engine_doc or "auto"
-    )
+    # content-core's "auto" routes PDFs to Docling, whose default PDF pipeline
+    # eagerly initialises an OCR model (RapidOCR). On this box that OCR init
+    # raises `Unsupported configuration: torch.PP-OCRv6.det.small` (RapidOCR's
+    # PyTorch backend lacks the PP-OCRv6 weights) — a ValueError, so
+    # `process_source` fails permanently (stop_on=[ValueError], no retry) and
+    # every PDF upload dies at extraction. For PDFs we re-extract below with our
+    # own `_extract_docling_page_map` (do_ocr=False → structured markdown +
+    # page_map), so content-core's PDF pass is redundant: route it to the
+    # lightweight "simple" (PyMuPDF) engine, which never touches OCR. Non-PDF
+    # documents keep "auto" (Docling's docx/pptx structuring uses no OCR pipeline).
+    _fp = (content_state.get("file_path") or "").lower()
+    if _fp.endswith(".pdf"):
+        content_state["document_engine"] = "simple"
+    else:
+        content_state["document_engine"] = (
+            content_settings.default_content_processing_engine_doc or "auto"
+        )
     content_state["output_format"] = "markdown"
 
     # Add speech-to-text model configuration from Default Models
@@ -130,6 +169,7 @@ async def content_process(state: SourceState) -> dict:
         logger.warning(f"Failed to retrieve speech-to-text model configuration: {e}")
         # Continue without custom audio model (content-core will use its default)
 
+    await _report_progress(job_id, "Extracting text")
     processed_state = await extract_content(content_state)
 
     # content-core signals a soft extraction failure (e.g. an unreachable or
@@ -170,6 +210,7 @@ async def content_process(state: SourceState) -> dict:
         processed_state.identified_type == "application/pdf"
         and processed_state.file_path
     ):
+        await _report_progress(job_id, "Parsing PDF with Docling")
         try:
             full_text, page_map = await asyncio.to_thread(
                 _extract_docling_page_map, processed_state.file_path
@@ -196,6 +237,7 @@ async def content_process(state: SourceState) -> dict:
 
 async def save_source(state: SourceState) -> dict:
     content_state = state["content_state"]
+    await _report_progress(state.get("job_id"), "Saving & indexing")
 
     # Get existing source using the provided source_id
     source = await Source.get(state["source_id"])

@@ -8,7 +8,8 @@
 <!-- [![LinkedIn][linkedin-shield]][linke$$din-url] -->
 
 ## Note: This is a fork from an original project https://github.com/lfnovo/open-notebook
-# This project just integrates the claude agent sdk, so you can utilize your claude max plan
+# This fork adds: Claude Agent SDK integration (use your Claude Max plan instead of API billing), a multi-panel chat workspace (main + side chats, pop-out panels, promote-to-main), document intelligence (inline PDF viewer, AI-powered chaptering, per-source chat), and job-tracked async processing throughout.
+# It's actively evolving from a research tool into a broader personal knowledge platform — see "Where This Is Headed" below.
 
 <!-- PROJECT LOGO -->
 <br />
@@ -60,12 +61,13 @@ In a world dominated by Artificial Intelligence, having the ability to think �
 
 **Open Notebook empowers you to:**
 - 🔒 **Control your data** - Keep your research private and secure
-- 🤖 **Choose your AI models** - Support for 18+ providers including OpenAI, Anthropic, Ollama, LM Studio, and more
-- 📚 **Organize multi-modal content** - PDFs, videos, audio, web pages, and more
+- 🤖 **Choose your AI models** - Support for 18+ providers including OpenAI, Anthropic, Ollama, LM Studio, plus native Claude Agent SDK support (run on your Claude Max plan)
+- 📚 **Organize multi-modal content** - PDFs, videos, audio, web pages, and more, with inline PDF viewing and AI-generated chapter/section trees
+- 🗂️ **Work across multiple chats at once** - A multi-panel chat workspace: a main conversation per notebook, unlimited side chats, pop-out panels, and promote-side-to-main
 - 🎙️ **Generate professional podcasts** - Advanced multi-speaker podcast generation
-- 🔍 **Search intelligently** - Full-text and vector search across all your content
-- 💬 **Chat with context** - AI conversations powered by your research
-- 🌐 **Multi-language UI** - English, Portuguese, Chinese (Simplified & Traditional), Japanese, Russian, and Bengali support
+- 🔍 **Search intelligently** - Full-text and vector search across all your content, notebook-agnostic
+- 💬 **Chat with context** - AI conversations powered by your research, at the notebook level or scoped to a single source
+- 🌐 **Multi-language UI** - 14 languages including English, Portuguese, Chinese (Simplified & Traditional), Japanese, Russian, Turkish, Polish, Catalan, Bengali, and more
 
 Learn more about our project at [https://www.open-notebook.ai](https://www.open-notebook.ai)
 
@@ -235,10 +237,23 @@ Thanks to the [Esperanto](https://github.com/lfnovo/esperanto) library, we suppo
 - **💬 Context-Aware Chat**: AI conversations powered by your research materials
 - **📝 AI-Assisted Notes**: Generate insights or write notes manually
 
+### Multi-Panel Chat Workspace
+- **🗂️ Main + Side Chats**: One primary conversation per notebook, plus any number of scoped side chats, all tagged and searchable in a chat gallery
+- **📌 Pop-Out Panels**: Detach a chat into its own panel to reference two conversations side-by-side
+- **⬆️ Promote to Main**: Turn a promising side chat into the notebook's main conversation without losing history
+- **🎯 Per-Source Chat**: Chat directly with a single source's extracted content and insights, independent of the notebook-level conversation
+- **🧠 Claude Agent SDK Mode**: Select the Claude Agent SDK as an execution path for chat, running on your Claude Max plan instead of metered API usage
+
+### Document Intelligence
+- **📖 Inline PDF Viewer**: Read the original PDF alongside chat, notes, and extracted content in the same tab
+- **🗺️ AI-Generated Chaptering**: Automatic section trees and outlines with page-level provenance (Docling extraction, PyMuPDF fallback)
+- **🏷️ Tagged, Provenanced Chunks**: Retrieval-ready chunks tied back to their page and section for accurate citations
+
 ### Advanced Features
 - **⚡ Reasoning Model Support**: Full support for thinking models like DeepSeek-R1 and Qwen3
 - **🔧 Content Transformations**: Powerful customizable actions to summarize and extract insights
 - **🌐 Comprehensive REST API**: Full programmatic access for custom integrations [![API Docs](https://img.shields.io/badge/API-Documentation-blue?style=flat-square)](http://localhost:5055/docs)
+- **⚙️ Async Job Tracking**: Long-running work (podcasts, embeddings, source ingestion, source chat) runs as trackable background jobs, not blocking requests
 - **🔐 Optional Password Protection**: Secure public deployments with authentication
 - **📊 Fine-Grained Context Control**: Choose exactly what to share with AI models
 - **📎 Citations**: Get answers with proper source citations
@@ -275,24 +290,29 @@ Thanks to the [Esperanto](https://github.com/lfnovo/esperanto) library, we suppo
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
-## 🗺️ Roadmap
+## 🧭 Where This Is Headed
 
-### Upcoming Features
-- **Live Front-End Updates**: Real-time UI updates for smoother experience
-- **Async Processing**: Faster UI through asynchronous content processing
-- **Cross-Notebook Sources**: Reuse research materials across projects
-- **Bookmark Integration**: Connect with your favorite bookmarking apps
+This fork started as "Open Notebook + Claude Agent SDK," but the direction is shifting toward something broader: a self-hosted, privacy-first **personal knowledge platform** — not just a research/citation tool, but a daily-use home for chats, documents, and notes. That reframing is still being designed, not shipped, but it's shaping current priorities:
+
+- **"Notebook" → "Space"** *(under consideration)* — a notebook today is really a container for chats + sources + notes. "Space" better fits a platform meant for more than research projects (e.g. a work space, a personal space, a project space). This would be a substantial rename (the identifier "notebook" currently touches ~200 files across the API, backend domain models, and frontend routing/i18n), so it'll be scoped and planned as its own effort before any code changes.
+- **Daily Notes / Journaling** *(planned, not started)* — there's currently no journaling or daily-notes concept in the data model; notes are either AI-generated insights or manual notes attached to a notebook. Adding a daily-notes surface is greenfield work.
+- **Voice Chat** *(in planning)* — speech-to-speech study mode using local STT → chat → TTS, push-to-talk and hands-free voice activity detection.
+- **Local-Only AI Track** *(research stage)* — running larger local models (e.g. DeepSeek V4 Flash) fully offline as an alternative to hosted providers.
+- **Document Foundation, next phases** *(in progress)* — the section-tree/chaptering and PDF viewer work already landed; deeper citation linking and cross-source navigation are next.
 
 ### Recently Completed ✅
+- **Multi-Panel Chat Workspace**: Main + side chats, pop-out panels, promote-to-main, tagged chat gallery
+- **Claude Agent SDK Integration**: Chat and per-source chat can run on the Claude Agent SDK (Claude Max plan) as an alternative to metered provider APIs
+- **Document Foundation (Phase 1)**: Inline PDF viewer, Docling-based extraction with PyMuPDF fallback, AI-generated section trees/outlines with page-level provenance
+- **Per-Source Chat**: Chat scoped to a single source's extracted content, now job-tracked and cache-backed
+- **Async Job Infrastructure**: Background job tracking (via surreal-commands) extended across source ingestion, embeddings, podcasts, and source chat
+- **Notebook Flow Optimization**: Optimistic navigation, chat-spawn, and error-handling polish
 - **Next.js Frontend**: Modern React-based frontend with improved performance
 - **Comprehensive REST API**: Full programmatic access to all functionality
 - **Multi-Model Support**: 18+ AI providers including OpenAI, Anthropic, Ollama, LM Studio
 - **Advanced Podcast Generator**: Professional multi-speaker podcasts with Episode Profiles
-- **Content Transformations**: Powerful customizable actions for content processing
-- **Enhanced Citations**: Improved layout and finer control for source citations
-- **Multiple Chat Sessions**: Manage different conversations within notebooks
 
-See the [open issues](https://github.com/lfnovo/open-notebook/issues) for a full list of proposed features and known issues.
+See the [open issues](https://github.com/lfnovo/open-notebook/issues) for the upstream project's list of proposed features and known issues.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 

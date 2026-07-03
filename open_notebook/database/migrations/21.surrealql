@@ -1,0 +1,101 @@
+-- Migration 21: document-foundation Phase3 follow-up — per-passage page fidelity (X-page-accuracy)
+--
+-- Fixes wrong `#p=N` page citations. The migration-20 fn::vector_search grouped ALL matched
+-- rows BY SOURCE ID, so a source's many matched chunks collapsed into ONE row that carried
+-- only the FIRST chunk's page_number (`array::first(...)`) against a merged multi-page text
+-- blob (`array::flatten(content)`). The answering LLM then had a single page for many
+-- passages and guessed which page each came from (observed: cited pp.52–56 when only p.62
+-- was actually supplied).
+--
+-- Fix (Open Question X-page-accuracy, option b): STOP grouping source_embedding rows — each
+-- retrieved passage is now its own result row carrying its own page_number + bbox.
+-- source_insight / note rows keep the existing per-record grouping (their id is already
+-- unique per record, and they have no page provenance → page_number/bbox NONE).
+--
+-- The returned ROW SHAPE is unchanged — id, parent_id, title, similarity, matches (string[]),
+-- page_number, bbox — so both consumers keep working unchanged: the ask/chat citation path
+-- (ask.py → query_process.jinja) and the global search API (search.py → frontend
+-- `matches: string[]`). Only CARDINALITY changes: a heavily-matched source now yields several
+-- rows (its top passages, each with its own page) instead of one merged row. `matches` on a
+-- source_embedding row is a single-element array to preserve the [string] shape callers expect.
+--
+-- Idempotent REMOVE + DEFINE IF NOT EXISTS, same pattern proven in migrations 4 and 20.
+
+REMOVE FUNCTION IF EXISTS fn::vector_search;
+
+DEFINE FUNCTION IF NOT EXISTS fn::vector_search($query: array<float>, $match_count: int, $sources: bool, $show_notes: bool, $min_similarity: float) {
+    -- Source chunks: each matched chunk is its OWN row (NO grouping) so it keeps its own
+    -- physical page_number + bbox. matches wraps the single content to keep the [string] shape.
+    let $source_embedding_search =
+        IF $sources {(
+            SELECT
+                source.id as id,
+                source.id as parent_id,
+                source.title as title,
+                array::flatten([content]) as matches,
+                page_number,
+                bbox,
+                vector::similarity::cosine(embedding, $query) as similarity
+            FROM source_embedding
+            WHERE vector::similarity::cosine(embedding, $query) >= $min_similarity
+            ORDER BY similarity DESC
+            LIMIT $match_count
+        )}
+        ELSE { [] };
+
+    let $source_insight_search =
+        IF $sources {(
+            SELECT
+                id,
+                insight_type + ' - ' + (source.title OR '') as title,
+                content,
+                source.id as parent_id,
+                vector::similarity::cosine(embedding, $query) as similarity
+            FROM source_insight
+            WHERE vector::similarity::cosine(embedding, $query) >= $min_similarity
+            ORDER BY similarity DESC
+            LIMIT $match_count
+        )}
+        ELSE { [] };
+
+    let $note_content_search =
+        IF $show_notes {(
+            SELECT
+                id,
+                title,
+                content,
+                id as parent_id,
+                vector::similarity::cosine(embedding, $query) as similarity
+            FROM note
+            WHERE vector::similarity::cosine(embedding, $query) >= $min_similarity
+            ORDER BY similarity DESC
+            LIMIT $match_count
+        )}
+        ELSE { [] };
+
+    -- Insights + notes keep per-record grouping. No page provenance → page_number/bbox NONE.
+    let $insight_note_union = array::union($source_insight_search, $note_content_search);
+    let $insight_note_grouped = (
+        SELECT
+            id,
+            parent_id,
+            title,
+            math::max(similarity) as similarity,
+            array::flatten(content) as matches,
+            NONE as page_number,
+            NONE as bbox
+        FROM $insight_note_union
+        WHERE id IS NOT NONE
+        GROUP BY id, parent_id, title
+    );
+
+    let $all_results = array::union($source_embedding_search, $insight_note_grouped);
+
+    RETURN (
+        SELECT id, parent_id, title, similarity, matches, page_number, bbox
+        FROM $all_results
+        WHERE id IS NOT NONE
+        ORDER BY similarity DESC
+        LIMIT $match_count
+    );
+};

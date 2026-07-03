@@ -3,6 +3,7 @@
 import { useEffect, useMemo } from 'react'
 import { ChatPanel } from '@/components/source/chat'
 import { ChatModelPicker } from './ChatModelPicker'
+import { ContextPreviewPopover } from './ContextPreview'
 import { SideChatDefaultMenu } from './SideChatDefaultMenu'
 import { SideChatsMenu } from './SideChatsMenu'
 import { useChatWorkspaceStore } from '@/lib/stores/chat-workspace-store'
@@ -152,7 +153,15 @@ export function ChatDock({ notebookId, chat, contextStats }: ChatDockProps) {
   const dockControls = (
     <>
       <ChatModelPicker compact value={activeOverride} onChange={chat.setModelOverride} />
-      <span className="text-[11px] text-text-3 truncate">{meterText}</span>
+      <ContextPreviewPopover
+        contextData={chat.contextData}
+        tokenCount={tokenCount}
+        charCount={contextStats.charCount ?? 0}
+        sourceCount={sourceCount}
+        notesCount={contextStats.notesCount}
+      >
+        <span className="text-[11px] text-text-3 truncate">{meterText}</span>
+      </ContextPreviewPopover>
       {activeMainId && (
         <SideChatsMenu sideSessions={chat.sideSessionsOf(activeMainId)} onOpen={openChat} />
       )}

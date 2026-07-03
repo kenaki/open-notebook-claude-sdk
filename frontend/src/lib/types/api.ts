@@ -380,6 +380,8 @@ export interface CommandJobSummary {
   created?: string | null
   updated?: string | null
   args?: Record<string, unknown> | null
+  /** Live per-job phase written by long-running commands (e.g. ingest). */
+  progress?: { phase?: string } | null
 }
 
 // Notebook Multi-Chat Workspace (Plan C) — client-only per-chat workspace state.

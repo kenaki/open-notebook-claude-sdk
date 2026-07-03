@@ -8,14 +8,28 @@ import { toast } from 'sonner'
 import { commandsApi } from '@/lib/api/commands'
 import { QUERY_KEYS } from '@/lib/api/query-client'
 import { useTranslation } from '@/lib/hooks/use-translation'
-import { BackgroundJob, JobKind, JobStatus, useJobsStore } from '@/lib/stores/jobs-store'
+import { BackgroundJob, JobKind, JobStatus, KIND_LABEL_KEY, useJobsStore } from '@/lib/stores/jobs-store'
 import { CommandJobSummary } from '@/lib/types/api'
 import { getApiErrorMessage } from '@/lib/utils/error-handler'
 import { jobOrigin } from '@/lib/utils/job-origin'
 
-// Grace period before removing a completed/failed job from the store (ms).
-// Gives the UI a brief window to show final state before disappearing from tray.
-const REMOVE_GRACE_MS = 5_000
+// How long a completed/failed job lingers in the tray before it auto-clears (ms).
+// Long enough to notice a whole pipeline settle; users can also dismiss sooner
+// with the tray's "Clear finished" button.
+const REMOVE_GRACE_MS = 60_000
+
+// Kinds whose *completion* is worth an interrupting toast. A single upload fans
+// out into hundreds of embed/verify/summarize jobs, so toasting every one of
+// those completions would be a storm — they stay visible silently in the tray
+// instead. Milestone kinds (chat, podcast, source ready, doc abstract) do toast.
+// FAILURES toast for every kind regardless (see handleTermination).
+const TOAST_ON_COMPLETE: ReadonlySet<JobKind> = new Set<JobKind>([
+  'notebook_chat',
+  'source_chat',
+  'podcast',
+  'source',
+  'abstract',
+])
 
 // While any active job is running, poll at this interval (ms).
 const POLL_INTERVAL_ACTIVE = 4_000
@@ -27,6 +41,14 @@ const POLL_INTERVAL_FAST = 1_500
 // How long (ms) after a new job registers to use the fast interval.
 const FAST_WINDOW_MS = 10_000
 
+// When nothing is active, keep a slow baseline poll (rather than stopping) so
+// backend-initiated jobs the frontend never registered — source ingestion and
+// its fire-and-forget downstream pipeline (embed / chapter / verify-clean /
+// summarize / abstract) — surface in the tray within a few seconds. Without
+// this the poller sleeps after going idle and only a client-registered job
+// (e.g. chat) could ever wake it, so uploads processed invisibly.
+const POLL_INTERVAL_IDLE = 10_000
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /** Map a server command `name` + its `args` to our client-side `JobKind`. */
@@ -37,11 +59,26 @@ function deriveKind(name: string, args: Record<string, unknown> | null | undefin
     case 'generate_podcast':
       return 'podcast'
     case 'run_transformation':
-      return 'transformation'
+    case 'create_insight':
+      return 'insight'
+    case 'build_sections':
+    case 'backfill_sections':
+      return 'chapters'
+    case 'verify_clean_section':
+    case 'verify_clean_source':
+      return 'verify'
+    case 'summarize_section':
+      return 'summarize'
+    case 'generate_source_abstract':
+      return 'abstract'
     case 'process_source':
+      return 'source'
     default:
-      if (name.startsWith('embed_')) return 'source'
-      if (name === 'process_source') return 'source'
+      // embed_source / embed_note / embed_insight / embed_chunk / vectorize_source
+      // / rebuild_embeddings / backfill_page_numbers → indexing for search.
+      if (name.startsWith('embed_') || name.startsWith('vectorize') || name === 'rebuild_embeddings' || name === 'backfill_page_numbers') {
+        return 'embed'
+      }
       return 'source'
   }
 }
@@ -67,10 +104,20 @@ function serverRowToJob(row: CommandJobSummary): BackgroundJob {
       : typeof args.target_id === 'string'
         ? args.target_id
         : undefined
+  // Custom label only for jobs that pass one (chat sessions). Everything else
+  // leaves label empty and the row derives a human title from `kind`
+  // (KIND_LABEL_KEY) — the raw command name is preserved separately as metadata.
   const label =
-    typeof args.label === 'string' && args.label.length > 0
-      ? args.label
-      : row.name
+    typeof args.label === 'string' && args.label.length > 0 ? args.label : ''
+  // Live phase comes from the job's `progress` column, written by long-running
+  // commands (e.g. source ingest → "Parsing PDF with Docling"); fall back to a
+  // phase passed in args for any client-registered job.
+  const phase =
+    row.progress && typeof row.progress.phase === 'string'
+      ? row.progress.phase
+      : typeof args.phase === 'string'
+        ? args.phase
+        : undefined
 
   return {
     jobId: row.job_id,
@@ -79,7 +126,9 @@ function serverRowToJob(row: CommandJobSummary): BackgroundJob {
     notebookId,
     targetId,
     label,
+    command: row.name,
     status: coerceStatus(row.status),
+    progress: phase ? { phase } : undefined,
     startedAt: row.created ?? new Date().toISOString(),
     error: row.error_message ?? undefined,
   }
@@ -132,8 +181,9 @@ export function useJobsPoller() {
       )
       if (hasPersistedActive) return POLL_INTERVAL_ACTIVE
 
-      // Nothing active — stop polling.
-      return false
+      // Nothing active — keep a slow baseline poll so backend-started jobs
+      // (source ingestion + its downstream pipeline) still appear in the tray.
+      return POLL_INTERVAL_IDLE
     },
     meta: { silent: true },
     staleTime: 0,
@@ -156,10 +206,18 @@ export function useJobsPoller() {
         lastNewJobAt.current = Date.now()
         prevStatuses.current.set(row.job_id, incoming.status)
       } else {
-        // Seen job — update status / error if changed.
+        // Seen job — update status / error / live phase if changed.
         const prevStatus = prevStatuses.current.get(row.job_id) ?? existing.status
-        if (existing.status !== incoming.status || existing.error !== incoming.error) {
-          update(row.job_id, { status: incoming.status, error: incoming.error })
+        if (
+          existing.status !== incoming.status ||
+          existing.error !== incoming.error ||
+          existing.progress?.phase !== incoming.progress?.phase
+        ) {
+          update(row.job_id, {
+            status: incoming.status,
+            error: incoming.error,
+            progress: incoming.progress,
+          })
         }
 
         // Detect transition to terminal state.
@@ -192,9 +250,18 @@ export function useJobsPoller() {
     }
   }, [query.data]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  /** Human title for a job in a toast (custom label, else its kind's label). */
+  function jobTitle(job: BackgroundJob): string {
+    return job.label && job.label.trim() ? job.label : t(KIND_LABEL_KEY[job.kind])
+  }
+
   /** Handle a job transitioning to completed or failed. */
   function handleTermination(jobId: string, job: BackgroundJob) {
     const isChatJob = job.kind === 'notebook_chat' || job.kind === 'source_chat'
+    const viewAction = {
+      label: t('jobs.view'),
+      onClick: () => router.push(jobOrigin(job)),
+    }
 
     if (job.status === 'completed') {
       // Invalidate the originating session cache so the answer appears in chat.
@@ -218,23 +285,22 @@ export function useJobsPoller() {
         }
       }
 
-      // Notify only for chat jobs (Q-toast-noise): podcasts/embeds/transforms
-      // still update the tray silently, they'd just be noisy if batched.
+      // Completion toasts: chat gets its tailored copy; other milestone kinds
+      // (TOAST_ON_COMPLETE) get a generic "finished" toast. High-cardinality
+      // fan-out jobs (embed/verify/summarize) complete silently in the tray.
       if (isChatJob) {
-        toast.success(t('jobs.chatReady'), {
-          action: {
-            label: t('jobs.view'),
-            onClick: () => router.push(jobOrigin(job)),
-          },
+        toast.success(t('jobs.chatReady'), { action: viewAction })
+      } else if (TOAST_ON_COMPLETE.has(job.kind)) {
+        toast.success(t('jobs.finishedToast').replace('{job}', jobTitle(job)), {
+          action: viewAction,
         })
       }
-    } else if (job.status === 'failed' && isChatJob) {
-      toast.error(getApiErrorMessage(job.error, t, 'jobs.chatFailed'), {
-        action: {
-          label: t('jobs.view'),
-          onClick: () => router.push(jobOrigin(job)),
-        },
-      })
+    } else if (job.status === 'failed') {
+      // Every kind's failure is surfaced — failures are rare and worth knowing.
+      const message = isChatJob
+        ? getApiErrorMessage(job.error, t, 'jobs.chatFailed')
+        : t('jobs.failedToast').replace('{job}', jobTitle(job))
+      toast.error(message, { action: viewAction })
     }
 
     // Schedule removal after grace period (allows tray + toast to show final state).

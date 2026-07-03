@@ -105,7 +105,11 @@ async def provide_answer(state: SubGraphState, config: RunnableConfig) -> dict:
         if len(results) == 0:
             return {"answers": []}
         payload["results"] = results
-        ids = [r["id"] for r in results]
+        # X-page-accuracy: fn::vector_search now returns one row per matched passage, so a
+        # source id can repeat across several rows. Dedupe (order-preserving) so the citable
+        # id list handed to the prompt stays clean — the per-passage page lives on each result
+        # row, not on this list.
+        ids = list(dict.fromkeys(r["id"] for r in results))
         payload["ids"] = ids
         system_prompt = Prompter(prompt_template="ask/query_process").render(data=payload)  # type: ignore[arg-type]
         model = await provision_langchain_model(

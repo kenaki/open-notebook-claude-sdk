@@ -9,13 +9,14 @@ import { defaultLayoutPlugin } from '@react-pdf-viewer/default-layout'
 import '@react-pdf-viewer/core/lib/styles/index.css'
 import '@react-pdf-viewer/default-layout/lib/styles/index.css'
 import { sourcesApi } from '@/lib/api/sources'
-import { useEffect, useState } from 'react'
+import { memo, useEffect, useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from '@/lib/hooks/use-translation'
 
-// Worker is served from the CDN to avoid Next.js webpack public/ copy complexity.
-// Version must match the pdfjs-dist version pinned in package.json (^3.11.174).
-const PDFJS_WORKER_URL =
-  'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js'
+// Worker is served from public/pdf.worker.min.js (copied from
+// node_modules/pdfjs-dist/build) so PDF viewing works offline/self-hosted.
+// Keep the copy in sync with the pdfjs-dist version pinned in package.json.
+const PDFJS_WORKER_URL = '/pdf.worker.min.js'
 
 interface PDFViewerProps {
   sourceId: string
@@ -27,38 +28,44 @@ interface PDFViewerProps {
   initialPage?: number
 }
 
-export function PDFViewer({ sourceId, initialPage = 0 }: PDFViewerProps) {
+// memo: the parent's tab-switch state changes must not re-render the viewer —
+// each re-render creates a fresh defaultLayoutPlugin and re-runs pdf.js layout,
+// which costs seconds on a large book. Props are a string and a number, so the
+// shallow compare is exact.
+export const PDFViewer = memo(function PDFViewer({
+  sourceId,
+  initialPage = 0,
+}: PDFViewerProps) {
   const { t } = useTranslation()
-  const [pdfUrl, setPdfUrl] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
   const layoutPlugin = defaultLayoutPlugin()
 
+  // The blob lives in the TanStack cache under a root key deliberately OUTSIDE
+  // the ['sources'] tree: source mutations broadly invalidate ['sources'], and
+  // that must never re-download a multi-MB file. The uploaded asset is
+  // immutable, so staleTime: Infinity is safe. Errors surface inline below
+  // (meta.silent opts out of the global query-error toast).
+  const { data: pdfBlob, error } = useQuery({
+    queryKey: ['source-file', sourceId],
+    queryFn: async () => (await sourcesApi.downloadFile(sourceId)).data,
+    staleTime: Infinity,
+    meta: { silent: true },
+  })
+
+  // Fresh object URL per mount from the cached blob; revoked on unmount.
+  const pdfUrl = useMemo(
+    () => (pdfBlob ? URL.createObjectURL(pdfBlob) : null),
+    [pdfBlob]
+  )
   useEffect(() => {
-    let objectUrl: string | null = null
-
-    sourcesApi
-      .downloadFile(sourceId)
-      .then((response) => {
-        objectUrl = URL.createObjectURL(response.data)
-        setPdfUrl(objectUrl)
-      })
-      .catch((err) => {
-        console.error('PDFViewer: failed to fetch PDF', err)
-        setError(String(err?.message ?? err))
-      })
-
     return () => {
-      if (objectUrl) {
-        URL.revokeObjectURL(objectUrl)
-      }
+      if (pdfUrl) URL.revokeObjectURL(pdfUrl)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sourceId])
+  }, [pdfUrl])
 
   if (error) {
     return (
       <div className="flex items-center justify-center p-8 text-destructive">
-        {error}
+        {error instanceof Error ? error.message : String(error)}
       </div>
     )
   }
@@ -82,4 +89,4 @@ export function PDFViewer({ sourceId, initialPage = 0 }: PDFViewerProps) {
       </div>
     </Worker>
   )
-}
+})

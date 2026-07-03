@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { chatApi } from '@/lib/api/chat'
-import type { SourceListResponse, NoteResponse } from '@/lib/types/api'
+import type { SourceListResponse, NoteResponse, BuildContextResponse } from '@/lib/types/api'
 import type { ContextSelections } from '@/lib/types/notebook-context'
 
 // Builds the context payload for notebook chat from the current source/note
@@ -22,6 +22,9 @@ export function useBuildNotebookContext({
 }) {
   const [tokenCount, setTokenCount] = useState(0)
   const [charCount, setCharCount] = useState(0)
+  // Last-built context payload, retained so the dock's meter can preview exactly
+  // what's in the window on hover (the counts alone don't say what's inside).
+  const [contextData, setContextData] = useState<BuildContextResponse['context'] | null>(null)
 
   const buildContext = useCallback(async () => {
     const context_config: { sources: Record<string, string>; notes: Record<string, string> } = {
@@ -52,6 +55,7 @@ export function useBuildNotebookContext({
     const response = await chatApi.buildContext({ notebook_id: notebookId, context_config })
     setTokenCount(response.token_count)
     setCharCount(response.char_count)
+    setContextData(response.context)
     return response.context
   }, [notebookId, sources, notes, contextSelections])
 
@@ -84,5 +88,5 @@ export function useBuildNotebookContext({
     }
   }, [buildContext])
 
-  return { buildContext, tokenCount, charCount }
+  return { buildContext, tokenCount, charCount, contextData }
 }

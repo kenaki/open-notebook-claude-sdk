@@ -108,6 +108,11 @@ export function useCreateSource() {
         })
       }
 
+      // Wake the background-jobs tray immediately so the new source's ingestion
+      // job (and its downstream pipeline) is visible without waiting for the
+      // poller's idle baseline tick.
+      queryClient.invalidateQueries({ queryKey: ['commands', 'active'] })
+
       // Show different messages based on processing mode
       if (variables.async_processing) {
         toast({
@@ -190,6 +195,8 @@ export function useFileUpload() {
         queryKey: QUERY_KEYS.sourcesInfinite(variables.notebookId),
         refetchType: 'active'
       })
+      // Wake the background-jobs tray so ingestion progress is visible at once.
+      queryClient.invalidateQueries({ queryKey: ['commands', 'active'] })
       toast({
         title: t('common.success'),
         description: t('sources.fileUploadedSuccess'),
@@ -243,6 +250,8 @@ export function useRetrySource() {
       // in multiple notebook lists (status badges), so we can't scope to one list.
       queryClient.invalidateQueries({ queryKey: ['sources'] })
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.source(sourceId) })
+      // Wake the background-jobs tray so the requeued job is visible at once.
+      queryClient.invalidateQueries({ queryKey: ['commands', 'active'] })
 
       toast({
         title: t('sources.sourceRequeued'),

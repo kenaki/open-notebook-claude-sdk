@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useQuery } from '@tanstack/react-query'
@@ -55,7 +55,12 @@ interface SourceContentTabProps {
   source: SourceDetailResponse
 }
 
-export function SourceContentTab({ source }: SourceContentTabProps) {
+// memo: with keep-alive tabs this stays mounted while the user switches tabs;
+// without it every tab switch re-renders (and ReactMarkdown re-parses) the whole
+// active chapter. `source` is a stable state object from useSourceDetail.
+export const SourceContentTab = memo(function SourceContentTab({
+  source,
+}: SourceContentTabProps) {
   const { t } = useTranslation()
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null)
 
@@ -224,4 +229,4 @@ export function SourceContentTab({ source }: SourceContentTabProps) {
       </CardContent>
     </Card>
   )
-}
+})

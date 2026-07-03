@@ -13,9 +13,16 @@ export function jobOrigin(job: BackgroundJob): string {
       }
       return job.notebookId ? `/notebooks/${job.notebookId}` : '/notebooks'
 
+    // All source-bound work (chat, ingestion, indexing, chaptering, proofing,
+    // summarizing, abstract, insights) opens the source it targets.
     case 'source_chat':
     case 'source':
-    case 'transformation':
+    case 'embed':
+    case 'chapters':
+    case 'verify':
+    case 'summarize':
+    case 'abstract':
+    case 'insight':
       return job.targetId ? `/sources/${job.targetId}` : '/sources'
 
     case 'podcast':
