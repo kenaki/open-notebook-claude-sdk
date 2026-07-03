@@ -130,6 +130,7 @@ export function PoppedChatPanel({
         contextType="notebook"
         messages={chat.getMessages(session.id)}
         isStreaming={chat.getIsSending(session.id)}
+        activeProgress={chat.getActiveProgress(session.id)}
         contextIndicators={null}
         onSendMessage={(message, _model, media) => handleSend(message, media)}
         notebookId={notebookId}

@@ -44,12 +44,12 @@ export function SourceDialog({ open, onOpenChange, sourceId, initialPage }: Sour
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl max-h-[90vh] flex flex-col p-0">
+      <DialogContent className="flex h-[88vh] max-h-[88vh] w-[92vw] flex-col gap-0 p-0 sm:max-w-6xl">
         {/* Accessibility title (hidden visually but read by screen readers) */}
         <DialogTitle className="sr-only">{t('sources.detailsTitle')}</DialogTitle>
 
         {/* Source detail content */}
-        <div className="flex-1 overflow-y-auto min-h-0">
+        <div className="flex min-h-0 flex-1 flex-col">
           <SourceDetailContent
             sourceId={sourceIdWithPrefix}
             showChatButton={true}

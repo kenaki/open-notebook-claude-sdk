@@ -111,13 +111,21 @@ function serverRowToJob(row: CommandJobSummary): BackgroundJob {
     typeof args.label === 'string' && args.label.length > 0 ? args.label : ''
   // Live phase comes from the job's `progress` column, written by long-running
   // commands (e.g. source ingest → "Parsing PDF with Docling"); fall back to a
-  // phase passed in args for any client-registered job.
+  // phase passed in args for any client-registered job. The chat tool loop
+  // additionally writes `tool_name`/`tool_input` so the chat UI can render a
+  // localized, icon-matched label instead of the raw English `phase` string.
   const phase =
     row.progress && typeof row.progress.phase === 'string'
       ? row.progress.phase
       : typeof args.phase === 'string'
         ? args.phase
         : undefined
+  const toolName =
+    row.progress && typeof row.progress.tool_name === 'string' ? row.progress.tool_name : undefined
+  const toolInput =
+    row.progress && row.progress.tool_input && typeof row.progress.tool_input === 'object'
+      ? row.progress.tool_input
+      : undefined
 
   return {
     jobId: row.job_id,
@@ -128,7 +136,7 @@ function serverRowToJob(row: CommandJobSummary): BackgroundJob {
     label,
     command: row.name,
     status: coerceStatus(row.status),
-    progress: phase ? { phase } : undefined,
+    progress: phase ? { phase, tool_name: toolName, tool_input: toolInput } : undefined,
     startedAt: row.created ?? new Date().toISOString(),
     error: row.error_message ?? undefined,
   }
@@ -159,6 +167,10 @@ export function useJobsPoller() {
 
   // Completion grace-period timers (jobId → timer handle).
   const removeTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+
+  // Jobs currently being resolved via a single-job lookup (see resolveDisappearedJob),
+  // so an overlapping poll tick doesn't fire a second lookup/toast for the same job.
+  const resolvingIds = useRef<Set<string>>(new Set())
 
   const query = useQuery({
     queryKey: ['commands', 'active'] as const,
@@ -233,22 +245,50 @@ export function useJobsPoller() {
     }
 
     // -- Handle persisted jobs that are no longer in the active list ------------
-    // A job disappears from the active list when it transitions out of new/running.
-    // We need to reflect that in our store (it likely completed while we were away).
+    // A job disappears from the active list when it transitions out of new/running
+    // — that includes `failed`, not just `completed`. Look up its real terminal
+    // status/error instead of assuming success, so a fast failure (e.g. a
+    // provider error) surfaces as a failure toast instead of a false "ready" one.
     for (const stored of jobs) {
       if (stored.status !== 'new' && stored.status !== 'running') continue
       if (serverIds.has(stored.jobId)) continue
 
-      // Was in-flight, no longer active → treat as completed (most common case).
-      // The server may have already moved it to completed; we mark it and invalidate.
       const prevStatus = prevStatuses.current.get(stored.jobId) ?? stored.status
-      if (prevStatus === 'new' || prevStatus === 'running') {
-        update(stored.jobId, { status: 'completed' })
-        prevStatuses.current.set(stored.jobId, 'completed')
-        handleTermination(stored.jobId, { ...stored, status: 'completed' })
-      }
+      if (prevStatus !== 'new' && prevStatus !== 'running') continue
+      if (resolvingIds.current.has(stored.jobId)) continue
+
+      resolvingIds.current.add(stored.jobId)
+      resolveDisappearedJob(stored).finally(() => {
+        resolvingIds.current.delete(stored.jobId)
+      })
     }
   }, [query.data]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  /**
+   * A job vanished from the active-jobs poll. Fetch its real terminal status
+   * via the single-job endpoint rather than assuming it completed — a job can
+   * just as easily have failed between two poll ticks. Falls back to the old
+   * "assume completed" behavior only if the lookup itself can't be resolved
+   * (e.g. the job record was purged), so the UI never gets stuck.
+   */
+  async function resolveDisappearedJob(stored: BackgroundJob) {
+    let finalStatus: JobStatus = 'completed'
+    let error: string | undefined
+    try {
+      const row = await commandsApi.getJob(stored.jobId)
+      finalStatus = coerceStatus(row.status)
+      error = row.error_message ?? undefined
+      // Genuinely still active (rare race) — leave it for the next poll tick
+      // instead of forcing a terminal state.
+      if (finalStatus !== 'completed' && finalStatus !== 'failed') return
+    } catch {
+      // Lookup failed — fall back to the previous best-effort assumption
+      // rather than leaving the job stuck in the tray forever.
+    }
+    update(stored.jobId, { status: finalStatus, error })
+    prevStatuses.current.set(stored.jobId, finalStatus)
+    handleTermination(stored.jobId, { ...stored, status: finalStatus, error })
+  }
 
   /** Human title for a job in a toast (custom label, else its kind's label). */
   function jobTitle(job: BackgroundJob): string {

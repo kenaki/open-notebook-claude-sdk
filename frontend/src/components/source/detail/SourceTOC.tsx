@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { ChevronDown, ChevronRight, MoreVertical } from 'lucide-react'
+import { ChevronDown, ChevronRight, MoreVertical, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   DropdownMenu,
@@ -174,6 +174,7 @@ function SectionRow({
 export function SourceTOC({ sections, activeSectionId, onSectionClick, onSectionAction }: SourceTOCProps) {
   const { t } = useTranslation()
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set())
+  const [collapsed, setCollapsed] = useState(false)
   const actionLabels = {
     actions: t('sources.sectionActions'),
     summarize: t('sources.summarize'),
@@ -206,13 +207,43 @@ export function SourceTOC({ sections, activeSectionId, onSectionClick, onSection
 
   if (sections.length === 0) return null
 
+  // Collapsed: shrink to a thin control so the chapter content reclaims the
+  // width (the sibling content pane is flex-1 and grows automatically).
+  if (collapsed) {
+    return (
+      <div className="shrink-0 lg:sticky lg:top-0 lg:self-start">
+        <button
+          type="button"
+          onClick={() => setCollapsed(false)}
+          aria-label={t('sources.tableOfContents')}
+          title={t('sources.tableOfContents')}
+          className="flex items-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        >
+          <PanelLeftOpen className="h-4 w-4" />
+          <span className="lg:hidden">{t('sources.tableOfContents')}</span>
+        </button>
+      </div>
+    )
+  }
+
   return (
     <nav
       aria-label={t('sources.tableOfContents')}
       className="w-full shrink-0 lg:sticky lg:top-0 lg:w-[250px] lg:self-start"
     >
-      <div className="px-2 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        {t('sources.tableOfContents')}
+      <div className="flex items-center justify-between px-2 py-1.5">
+        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          {t('sources.tableOfContents')}
+        </span>
+        <button
+          type="button"
+          onClick={() => setCollapsed(true)}
+          aria-label={t('sources.tableOfContents')}
+          title={t('sources.tableOfContents')}
+          className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <PanelLeftClose className="h-4 w-4" />
+        </button>
       </div>
       <ScrollArea className="h-[50vh] lg:h-[70vh]">
         <div className="pr-3">

@@ -6,20 +6,30 @@ import { ToolUseDisclosure as ToolUseData } from '@/lib/types/api'
 import { useTranslation } from '@/lib/hooks/use-translation'
 
 // Map a raw MCP tool name (Q-toolnames: backend sends raw names, the UI maps)
-// to a friendly i18n key + an icon. Anything unrecognized falls back to a
-// generic "Used a tool".
-function describeTool(toolName: string): { key: string; Icon: typeof Search } {
-  if (toolName.includes('search')) return { key: 'chat.searchedYourSources', Icon: Search }
-  if (toolName.includes('note')) return { key: 'chat.readNote', Icon: StickyNote }
-  if (toolName.includes('notebook')) return { key: 'chat.readNotebook', Icon: BookOpen }
-  if (toolName.includes('source')) return { key: 'chat.readSources', Icon: FileText }
-  return { key: 'chat.usedTool', Icon: Wrench }
+// to a friendly i18n key + an icon. `liveKey` is the present-continuous variant
+// ("Searching…" vs "Searched…"), used while the tool call is still in flight
+// (see the live progress indicator in MessageList) — same bucket, same icon,
+// just a different tense. Anything unrecognized falls back to a generic tool key.
+export function describeTool(toolName: string): { key: string; liveKey: string; Icon: typeof Search } {
+  if (toolName.includes('search')) {
+    return { key: 'chat.searchedYourSources', liveKey: 'chat.searchingYourSources', Icon: Search }
+  }
+  if (toolName.includes('note')) {
+    return { key: 'chat.readNote', liveKey: 'chat.readingNote', Icon: StickyNote }
+  }
+  if (toolName.includes('notebook')) {
+    return { key: 'chat.readNotebook', liveKey: 'chat.readingNotebook', Icon: BookOpen }
+  }
+  if (toolName.includes('source')) {
+    return { key: 'chat.readSources', liveKey: 'chat.readingSources', Icon: FileText }
+  }
+  return { key: 'chat.usedTool', liveKey: 'chat.usingTool', Icon: Wrench }
 }
 
 // Pull a short, human-meaningful detail out of the tool arguments: the search
 // query when present, otherwise the targeted record id, otherwise the first
 // string value. Shown monospace next to each tool row.
-function detailFor(toolInput: Record<string, unknown>): string | null {
+export function detailFor(toolInput: Record<string, unknown>): string | null {
   const candidate =
     toolInput.query ?? toolInput.q ?? toolInput.id ?? toolInput.source_id ?? toolInput.note_id ?? toolInput.notebook_id
   if (typeof candidate === 'string' && candidate.trim()) return candidate

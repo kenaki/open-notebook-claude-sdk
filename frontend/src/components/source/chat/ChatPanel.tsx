@@ -32,6 +32,10 @@ interface NotebookContextStats {
 interface ChatPanelProps {
   messages: SourceChatMessage[]
   isStreaming: boolean
+  // Live phase (+ tool name/input) for the in-flight job, if any (Track: live
+  // tool-call progress). Undefined for chat kinds without a tool loop (source
+  // chat) or before the model has reported anything yet.
+  activeProgress?: { phase?: string; tool_name?: string; tool_input?: Record<string, unknown> }
   contextIndicators: SourceChatContextIndicator | null
   onSendMessage: (message: string, modelOverride?: string, media?: MediaItem[]) => void | Promise<{ ok: boolean } | void>
   modelOverride?: string
@@ -67,6 +71,7 @@ interface ChatPanelProps {
 export function ChatPanel({
   messages,
   isStreaming,
+  activeProgress,
   contextIndicators,
   onSendMessage,
   modelOverride,
@@ -196,6 +201,7 @@ export function ChatPanel({
     <MessageList
       messages={messages}
       isStreaming={isStreaming}
+      activeProgress={activeProgress}
       isDock={isDock}
       emptyStateTitle={emptyStateTitle}
       emptyStateHelper={emptyStateHelper}

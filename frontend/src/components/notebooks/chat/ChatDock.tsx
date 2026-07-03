@@ -180,6 +180,7 @@ export function ChatDock({ notebookId, chat, contextStats }: ChatDockProps) {
           contextType="notebook"
           messages={chat.getMessages(activeMainId)}
           isStreaming={chat.getIsSending(activeMainId)}
+          activeProgress={chat.getActiveProgress(activeMainId)}
           contextIndicators={null}
           onSendMessage={(message, _model, media) => handleSend(message, media)}
           notebookId={notebookId}

@@ -139,18 +139,18 @@ export function SourceDetailContent({
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="pb-4 px-2">
+      <div className={`px-2 pb-2 ${showChatButton ? 'pr-12' : ''}`}>
         <div className="flex items-start justify-between">
-          <div className="flex-1">
+          <div className="min-w-0 flex-1">
             <InlineEdit
               value={source.title || ''}
               onSave={handleUpdateTitle}
-              className="text-2xl font-bold"
-              inputClassName="text-2xl font-bold"
+              className="text-lg font-bold"
+              inputClassName="text-lg font-bold"
               placeholder={t('sources.titlePlaceholder')}
               emptyText={t('sources.untitledSource')}
             />
-            <p className="mt-1 text-sm text-muted-foreground">
+            <p className="mt-0.5 truncate text-xs text-muted-foreground">
               {t('sources.id')}: {source.id}
             </p>
           </div>
@@ -213,9 +213,9 @@ export function SourceDetailContent({
       </div>
 
       {/* Tabs Content */}
-      <div className="flex-1 overflow-y-auto px-2">
-        <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
-          <TabsList className={`grid w-full ${isPdfAsset(source) ? 'grid-cols-4' : 'grid-cols-3'} sticky top-0 z-10`}>
+      <div className="flex min-h-0 flex-1 flex-col px-2">
+        <Tabs value={activeTab} onValueChange={handleTabChange} className="flex min-h-0 w-full flex-1 flex-col">
+          <TabsList className={`grid w-full ${isPdfAsset(source) ? 'grid-cols-4' : 'grid-cols-3'} flex-shrink-0`}>
             <TabsTrigger value="content">{t('sources.content')}</TabsTrigger>
             <TabsTrigger value="insights">
               {t('common.insights')} {insights.length > 0 && `(${insights.length})`}
@@ -229,11 +229,11 @@ export function SourceDetailContent({
           {/* forceMount + data-[state=inactive]:hidden keeps visited panels
               alive across switches; mountedTabs defers each panel's first
               mount until its tab is opened. */}
-          <TabsContent value="content" forceMount className="mt-6 data-[state=inactive]:hidden">
+          <TabsContent value="content" forceMount className="mt-3 min-h-0 flex-1 overflow-y-auto data-[state=inactive]:hidden">
             {mountedTabs.has('content') && <SourceContentTab source={source} />}
           </TabsContent>
 
-          <TabsContent value="insights" forceMount className="mt-6 data-[state=inactive]:hidden">
+          <TabsContent value="insights" forceMount className="mt-3 min-h-0 flex-1 overflow-y-auto data-[state=inactive]:hidden">
             {mountedTabs.has('insights') && (
               <SourceInsightsTab
                 insights={insights}
@@ -249,7 +249,7 @@ export function SourceDetailContent({
             )}
           </TabsContent>
 
-          <TabsContent value="details" forceMount className="mt-6 data-[state=inactive]:hidden">
+          <TabsContent value="details" forceMount className="mt-3 min-h-0 flex-1 overflow-y-auto data-[state=inactive]:hidden">
             {mountedTabs.has('details') && (
               <SourceDetailsTab
                 source={source}
@@ -268,7 +268,7 @@ export function SourceDetailContent({
           </TabsContent>
 
           {isPdfAsset(source) && (
-            <TabsContent value="pdf" forceMount className="mt-6 data-[state=inactive]:hidden">
+            <TabsContent value="pdf" forceMount className="mt-3 flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
               {/* initialPage is 0-based; the citation page is 1-indexed physical.
                   key remounts the viewer when the cited page changes. */}
               {mountedTabs.has('pdf') && (

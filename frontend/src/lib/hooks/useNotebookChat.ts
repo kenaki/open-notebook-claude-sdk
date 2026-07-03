@@ -140,6 +140,21 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections,
     },
     [sendingBySession, storeJobs]
   )
+  // Live phase (+ tool name/input) for the session's active job, if any — lets
+  // the chat UI show what a slow local-model turn is doing (e.g. searching
+  // sources) instead of a bare spinner. Undefined when nothing's been
+  // reported yet (fast path) or no job is active.
+  const getActiveProgress = useCallback(
+    (sessionId: string | null) => {
+      if (!sessionId) return undefined
+      return storeJobs.find(
+        (j) =>
+          j.sessionId === sessionId &&
+          (j.status === 'new' || j.status === 'running')
+      )?.progress
+    },
+    [storeJobs]
+  )
 
   // Auto-select most recent session when sessions are loaded.
   useEffect(() => {
@@ -277,6 +292,7 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections,
     currentSessionId,
     messages: getMessages(currentSessionId),
     isSending: getIsSending(currentSessionId),
+    activeProgress: getActiveProgress(currentSessionId),
     loadingSessions,
     tokenCount,
     charCount,
@@ -285,6 +301,7 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections,
 
     getMessages,
     getIsSending,
+    getActiveProgress,
     sendMessageTo,
 
     mainSessions,

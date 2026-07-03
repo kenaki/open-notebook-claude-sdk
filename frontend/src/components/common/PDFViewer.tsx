@@ -80,7 +80,7 @@ export const PDFViewer = memo(function PDFViewer({
 
   return (
     <Worker workerUrl={PDFJS_WORKER_URL}>
-      <div style={{ height: '80vh' }}>
+      <div className="min-h-0 flex-1">
         <Viewer
           fileUrl={pdfUrl}
           plugins={[layoutPlugin]}

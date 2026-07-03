@@ -17,6 +17,7 @@ from open_notebook.domain.content_settings import ContentSettings
 from open_notebook.domain.notebook import Asset, Source
 from open_notebook.domain.transformation import Transformation
 from open_notebook.graphs.transformation import graph as transform_graph
+from open_notebook.utils.job_progress import report_job_progress as _report_progress
 
 
 class SourceState(TypedDict):
@@ -87,27 +88,6 @@ def _extract_docling_page_map(file_path: str) -> Tuple[str, List[Dict]]:
                 pass
 
     return full_text, page_map
-
-
-# ---------------------------------------------------------------------------
-# Live progress reporting (best-effort; never breaks ingestion)
-# ---------------------------------------------------------------------------
-
-async def _report_progress(job_id: Optional[str], phase: str) -> None:
-    """Stamp a human-readable phase onto the running ``command`` row so the
-    background-jobs tray can show live status (e.g. "Parsing PDF with Docling").
-
-    Best-effort: a missing job_id or any DB error is swallowed — progress
-    reporting must never break the ingest pipeline.
-    """
-    if not job_id:
-        return
-    try:
-        from open_notebook.database.repository import repo_update
-
-        await repo_update("command", job_id, {"progress": {"phase": phase}})
-    except Exception as exc:
-        logger.debug(f"progress report skipped (phase={phase!r}): {exc!r}")
 
 
 async def content_process(state: SourceState) -> dict:

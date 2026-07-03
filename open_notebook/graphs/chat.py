@@ -6,7 +6,7 @@ import sqlite3
 from typing import Annotated, Optional
 
 from ai_prompter import Prompter
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from loguru import logger
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite import SqliteSaver
@@ -14,6 +14,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 
+from open_notebook.ai.chat_tools import CHAT_TOOLS
 from open_notebook.ai.claude_agent import (
     generate_with_claude_agent,
     get_claude_agent_model,
@@ -25,7 +26,23 @@ from open_notebook.domain.notebook import Notebook
 from open_notebook.exceptions import OpenNotebookError
 from open_notebook.utils import clean_thinking_content
 from open_notebook.utils.error_classifier import classify_error
+from open_notebook.utils.job_progress import report_job_progress
 from open_notebook.utils.text_utils import extract_text_content
+
+# Hard cap on search/outline/section round-trips per turn. Each round is a full
+# model invoke, so this bounds worst-case latency (esp. for single-stream local
+# models like ds4, which pay this serially with no batching).
+_MAX_TOOL_ITERATIONS = 5
+
+# Human-readable phase label per chat tool, reported live so the UI can show
+# what the model is doing instead of a generic spinner during a multi-minute
+# tool loop (see open_notebook.ai.chat_tools). Falls back to a generic label
+# for any tool not listed here.
+_TOOL_PHASE_LABELS = {
+    "search_sources": "Searching your sources",
+    "get_source_outline": "Reading document outline",
+    "get_section": "Reading a section",
+}
 
 
 class ThreadState(TypedDict):
@@ -35,6 +52,9 @@ class ThreadState(TypedDict):
     context_config: Optional[dict]
     model_override: Optional[str]
     quote: Optional[str]
+    # This command's own record id, so the tool loop can stamp live progress
+    # (phase + which tool) onto the job row. None when not run as a job.
+    job_id: Optional[str]
 
 
 def _media_to_data_uri(item: dict) -> Optional[str]:
@@ -113,12 +133,80 @@ def _attach_media_blocks(payload: list) -> list:
     return new_payload
 
 
-async def _generate_ai_message(model_id, payload, config: RunnableConfig) -> AIMessage:
+async def _run_tool_loop(
+    model_with_tools, payload: list, ai_message: AIMessage, job_id: Optional[str] = None
+) -> AIMessage:
+    """Execute any tool calls the model made, feeding results back until it
+    returns a final answer or ``_MAX_TOOL_ITERATIONS`` is hit.
+
+    ``ai_message`` is the response from the caller's first invoke (so the no
+    -tool-calls case costs nothing extra). Tool-use disclosures accumulate in
+    OpenAI-shaped dicts, then get attached to the final message so the API/UI
+    can render "Searched your sources" the same way it does for the Claude
+    Agent path (see ``api/routers/chat/citations.py``).
+
+    Before each tool call, stamps a live phase (+ tool name/input) onto the
+    job row via ``report_job_progress`` so the chat UI can show what's
+    happening instead of a bare spinner for the duration of the round-trip.
+    """
+    tools_by_name = {t.name: t for t in CHAT_TOOLS}
+    conversation = list(payload)
+    disclosures: list[dict] = []
+
+    for _ in range(_MAX_TOOL_ITERATIONS):
+        if not getattr(ai_message, "tool_calls", None):
+            break
+        conversation.append(ai_message)
+        for call in ai_message.tool_calls:
+            tool_fn = tools_by_name.get(call["name"])
+            is_error = tool_fn is None
+            phase = _TOOL_PHASE_LABELS.get(call["name"], f"Using {call['name']}")
+            await report_job_progress(
+                job_id, phase, tool_name=call["name"], tool_input=call["args"]
+            )
+            if tool_fn is None:
+                result = f"Unknown tool: {call['name']}"
+            else:
+                try:
+                    result = await tool_fn.ainvoke(call["args"])
+                except Exception as e:
+                    result = f"Tool error: {e}"
+                    is_error = True
+            disclosures.append(
+                {
+                    "id": call["id"],
+                    "tool_name": call["name"],
+                    "tool_input": call["args"],
+                    "tool_result": str(result),
+                    "is_error": is_error,
+                }
+            )
+            conversation.append(ToolMessage(content=str(result), tool_call_id=call["id"]))
+        ai_message = model_with_tools.invoke(_attach_media_blocks(conversation))
+
+    if disclosures:
+        ai_message = ai_message.model_copy(
+            update={
+                "additional_kwargs": {
+                    **ai_message.additional_kwargs,
+                    "tool_uses": disclosures,
+                }
+            }
+        )
+    return ai_message
+
+
+async def _generate_ai_message(
+    model_id, payload, config: RunnableConfig, job_id: Optional[str] = None
+) -> AIMessage:
     """Produce the chat AIMessage for the selected model.
 
     Routes to the Claude Agent SDK when the selected/default model is the
-    ``claude_agent`` sentinel; otherwise uses the standard Esperanto/LangChain
-    provisioning path (unchanged behavior).
+    ``claude_agent`` sentinel. Otherwise uses the standard Esperanto/LangChain
+    provisioning path, binding the search/outline/section tools (see
+    ``open_notebook.ai.chat_tools``) when the model supports tool calling so it
+    can navigate a chaptered document instead of only seeing the context blob.
+    Models that don't support ``bind_tools`` fall back to plain chat, unchanged.
     """
     if await is_claude_agent_selected(model_id):
         thread_id = config.get("configurable", {}).get("thread_id")
@@ -139,7 +227,14 @@ async def _generate_ai_message(model_id, payload, config: RunnableConfig) -> AIM
     )
     # Provision on the text payload (above) so token counting is unaffected by
     # large base64 blobs; inline media only for the actual invoke.
-    return model.invoke(_attach_media_blocks(payload))
+    try:
+        model_with_tools = model.bind_tools(CHAT_TOOLS)
+    except NotImplementedError:
+        logger.debug(f"Model {model_id!r} does not support tool calling; plain chat")
+        return model.invoke(_attach_media_blocks(payload))
+
+    first_message = model_with_tools.invoke(_attach_media_blocks(payload))
+    return await _run_tool_loop(model_with_tools, payload, first_message, job_id=job_id)
 
 
 def call_model_with_messages(state: ThreadState, config: RunnableConfig) -> dict:
@@ -153,6 +248,7 @@ def call_model_with_messages(state: ThreadState, config: RunnableConfig) -> dict
         model_id = config.get("configurable", {}).get("model_id") or state.get(
             "model_override"
         )
+        job_id = state.get("job_id")
 
         # Handle async generation from sync context (reused event-loop bridging)
         def run_in_new_loop():
@@ -161,7 +257,7 @@ def call_model_with_messages(state: ThreadState, config: RunnableConfig) -> dict
             try:
                 asyncio.set_event_loop(new_loop)
                 return new_loop.run_until_complete(
-                    _generate_ai_message(model_id, payload, config)
+                    _generate_ai_message(model_id, payload, config, job_id=job_id)
                 )
             finally:
                 new_loop.close()
@@ -178,7 +274,9 @@ def call_model_with_messages(state: ThreadState, config: RunnableConfig) -> dict
                 ai_message = future.result()
         except RuntimeError:
             # No event loop running, safe to use asyncio.run()
-            ai_message = asyncio.run(_generate_ai_message(model_id, payload, config))
+            ai_message = asyncio.run(
+                _generate_ai_message(model_id, payload, config, job_id=job_id)
+            )
 
         # Clean thinking content from AI response (e.g., <think>...</think> tags)
         content = extract_text_content(ai_message.content)

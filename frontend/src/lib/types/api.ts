@@ -380,8 +380,14 @@ export interface CommandJobSummary {
   created?: string | null
   updated?: string | null
   args?: Record<string, unknown> | null
-  /** Live per-job phase written by long-running commands (e.g. ingest). */
-  progress?: { phase?: string } | null
+  /**
+   * Live per-job phase written by long-running commands (e.g. ingest).
+   * `tool_name`/`tool_input` are set by the chat tool loop (see
+   * open_notebook.graphs.chat) so the chat UI can render a localized,
+   * icon-matched label via ToolUseDisclosure's `describeTool`/`detailFor`
+   * instead of the raw English `phase` string.
+   */
+  progress?: { phase?: string; tool_name?: string; tool_input?: Record<string, unknown> } | null
 }
 
 // Notebook Multi-Chat Workspace (Plan C) — client-only per-chat workspace state.

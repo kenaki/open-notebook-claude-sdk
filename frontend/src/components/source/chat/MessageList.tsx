@@ -13,7 +13,7 @@ import { MarkdownCodeBlock } from './MarkdownCodeBlock'
 import { MessageActions } from './MessageActions'
 import { MessageReferences } from './MessageReferences'
 import { MessageMedia } from './MessageMedia'
-import { ToolUseDisclosure } from './ToolUseDisclosure'
+import { ToolUseDisclosure, describeTool, detailFor } from './ToolUseDisclosure'
 import { convertReferencesToCompactMarkdown, createCompactReferenceLinkComponent } from '@/lib/utils/source-references'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import type { SourceChatMessage } from '@/lib/types/api'
@@ -30,6 +30,9 @@ const MSG_SCROLL_MARGIN = { scrollMarginTop: 8 }
 interface MessageListProps {
   messages: SourceChatMessage[]
   isStreaming: boolean
+  // Live phase (+ tool name/input) for the in-flight job, if any. Undefined
+  // for chat kinds without a tool loop, or before anything's been reported.
+  activeProgress?: { phase?: string; tool_name?: string; tool_input?: Record<string, unknown> }
   isDock: boolean
   emptyStateTitle?: string
   emptyStateHelper?: string
@@ -45,6 +48,7 @@ interface MessageListProps {
 export function MessageList({
   messages,
   isStreaming,
+  activeProgress,
   isDock,
   emptyStateTitle,
   emptyStateHelper,
@@ -106,11 +110,11 @@ export function MessageList({
                   className="flex justify-start"
                 >
                   <div
-                    className="px-3.5 py-2.5 bg-muted text-foreground"
+                    className="flex items-center gap-2 px-3.5 py-2.5 bg-muted text-foreground"
                     style={{ borderRadius: AI_BUBBLE_RADIUS }}
                   >
                     <LoadingSpinner size="sm" />
-                    <span className="sr-only">{t('chat.generating')}</span>
+                    <LiveProgressLabel activeProgress={activeProgress} />
                   </div>
                 </div>
               )
@@ -198,13 +202,18 @@ export function MessageList({
             )
           })
         )}
-        {isStreaming && (
+        {/* Only for the brief pre-registration round-trip: once the job is
+            registered, sendMessageTo/useSourceChat insert a `pending` placeholder
+            message (rendered above) that owns the spinner for the rest of the
+            job's lifetime — showing both would double up. */}
+        {isStreaming && !messages.some((message) => message.pending) && (
           <div className="flex justify-start">
             <div
-              className="px-3.5 py-2.5 bg-muted text-foreground"
+              className="flex items-center gap-2 px-3.5 py-2.5 bg-muted text-foreground"
               style={{ borderRadius: AI_BUBBLE_RADIUS }}
             >
               <LoadingSpinner size="sm" />
+              <LiveProgressLabel activeProgress={activeProgress} />
             </div>
           </div>
         )}
@@ -215,6 +224,31 @@ export function MessageList({
       </div>
     </ScrollArea>
   )
+}
+
+// Live label next to the generating spinner. When the backend has reported a
+// tool call in progress (see open_notebook.graphs.chat's tool loop), shows
+// the same localized, icon-matched label as the post-hoc ToolUseDisclosure
+// but in present-continuous tense ("Searching…" not "Searched…") — otherwise
+// falls back to the generic "Generating…" copy.
+function LiveProgressLabel({
+  activeProgress,
+}: {
+  activeProgress?: { phase?: string; tool_name?: string; tool_input?: Record<string, unknown> }
+}) {
+  const { t } = useTranslation()
+  if (activeProgress?.tool_name) {
+    const { liveKey, Icon } = describeTool(activeProgress.tool_name)
+    const detail = activeProgress.tool_input ? detailFor(activeProgress.tool_input) : null
+    return (
+      <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+        <Icon className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+        <span className="flex-shrink-0">{t(liveKey)}</span>
+        {detail && <span className="truncate font-mono text-text-3">{detail}</span>}
+      </span>
+    )
+  }
+  return <span className="text-xs text-muted-foreground">{t('chat.generating')}</span>
 }
 
 // Renders AI message markdown with clickable references. Memoized so a new turn

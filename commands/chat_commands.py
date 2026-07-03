@@ -85,6 +85,14 @@ async def chat_completion_command(
         if not session:
             raise ValueError("Session not found")
 
+        # This command's own record id, so the chat graph's tool loop can
+        # stamp live progress (phase + tool) onto the job row for the UI.
+        job_id = (
+            str(input_data.execution_context.command_id)
+            if input_data.execution_context
+            else None
+        )
+
         # Model override: explicit arg wins, else the session-level setting.
         model_override = (
             input_data.model_override
@@ -123,6 +131,7 @@ async def chat_completion_command(
             state_values["notebook"] = notebook
             state_values["model_override"] = model_override
             state_values["quote"] = getattr(session, "quote", None)
+            state_values["job_id"] = job_id
 
             additional_kwargs = {}
             if input_data.media:

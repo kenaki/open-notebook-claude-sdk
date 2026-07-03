@@ -138,13 +138,15 @@ export function ContextPreviewPopover({
         side="top"
         align="end"
         sideOffset={8}
+        collisionPadding={16}
         onMouseEnter={openNow}
         onMouseLeave={scheduleClose}
         // Don't steal focus on a hover-open — keeps the composer caret in place.
         onOpenAutoFocus={(e) => e.preventDefault()}
-        className="w-96 max-w-[calc(100vw-2rem)] p-0"
+        className="flex w-96 max-w-[calc(100vw-2rem)] flex-col overflow-hidden p-0"
+        style={{ maxHeight: 'min(28rem, var(--radix-popover-content-available-height, 28rem))' }}
       >
-        <div className="flex items-baseline justify-between gap-2 border-b px-3 py-2">
+        <div className="flex shrink-0 items-baseline justify-between gap-2 border-b px-3 py-2">
           <span className="text-xs font-medium">{t('chat.contextPreviewTitle')}</span>
           <span className="text-[11px] text-muted-foreground">
             {t('chat.contextPreviewTotal')
@@ -162,7 +164,7 @@ export function ContextPreviewPopover({
             {t('chat.contextPreviewEmpty')}
           </p>
         ) : (
-          <ScrollArea className="max-h-[50vh]">
+          <ScrollArea className="min-h-0 flex-1" viewportClassName="overscroll-contain">
             <div className="flex flex-col gap-3 px-3 py-3">
               {sources.length > 0 && (
                 <section className="flex flex-col gap-2">

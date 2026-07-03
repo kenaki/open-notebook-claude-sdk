@@ -46,7 +46,7 @@ export interface BackgroundJob {
   /** Raw backend command name (e.g. "embed_source") — shown as row metadata. */
   command?: string
   status: JobStatus
-  progress?: { phase?: string }
+  progress?: { phase?: string; tool_name?: string; tool_input?: Record<string, unknown> }
   startedAt: string
   error?: string
 }

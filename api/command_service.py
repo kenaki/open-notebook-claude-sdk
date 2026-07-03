@@ -61,11 +61,24 @@ class CommandService:
                 "updated": str(status.updated)
                 if status and hasattr(status, "updated") and status.updated
                 else None,
-                "progress": getattr(status, "progress", None) if status else None,
+                # surreal_commands' CommandResult doesn't carry the `progress`
+                # field we stamp via report_job_progress(), so fetch it directly.
+                "progress": await CommandService._get_progress(job_id)
+                if status
+                else None,
             }
         except Exception as e:
             logger.error(f"Failed to get command status: {e}")
             raise
+
+    @staticmethod
+    async def _get_progress(job_id: str) -> Optional[Dict[str, Any]]:
+        from open_notebook.database.repository import ensure_record_id, repo_query
+
+        rows = await repo_query(
+            "SELECT progress FROM $job_id", {"job_id": ensure_record_id(job_id)}
+        )
+        return rows[0].get("progress") if rows else None
 
     @staticmethod
     async def list_command_jobs(
