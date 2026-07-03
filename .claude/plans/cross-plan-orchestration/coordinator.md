@@ -67,6 +67,26 @@ P-5/P-6. (2) df Phase3 now persists `page_map` (mig 20 + `graphs/source.py` + `d
 resolves Q-page-map-provenance but adds file collisions: **df B2 ∦ df Phase3** (Wave-5 caveat below) and
 **chatF F4 → df C4** on ChatPanel.tsx (cross-lane table). No landed code affected; Waves 4–5 packing adjusted.
 
+**State (2026-07-03, cross-plan STABILIZE pass — reconciled against actual git):** A `chunk-plan-execute`
+run scoped by the user to **"stabilize + finish document-foundation first"** (chat-foundation deferred). Actions:
+- **Committed the dirty working tree** (was blocking all worktree isolation). Two commits on `feature/multipanelchat`:
+  `3537d09` = an uncommitted feature snapshot (live job-progress + tool-calling doc-nav for Esperanto/ds4 chat
+  models: new `open_notebook/ai/chat_tools.py`, `utils/job_progress.py`, `graphs/chat.py` tool-loop, live-progress
+  UI + document-surface UI polish) — verified backend-imports + `tsc` clean before commit; `407c2e5` = `to-fix/`
+  backlog + ds4 serving doc. ⚠ This feature **overlaps chat-foundation's files** (`chat.py`, `chat_commands.py`,
+  `use-jobs-poller.ts`, `MessageList.tsx`) — when chat-foundation runs, it builds ON TOP of these commits.
+- **document-foundation reconciled to code-complete:** B3/B4/B5 confirmed ☑ (live-verified in prior waves; the
+  meta table was stale). **X-page-accuracy ✅ RESOLVED** — migration 21 (`8009995`) is landed + applied live (DB
+  positional v20) + verified (8 passages → distinct pages). Phase3 now ◐ **only** for the visual click smoke.
+- **Still parked (df cannot archive):** **B2** (◐ — quality run data-blocked on a ≤50-page-section PDF *plus* the
+  open `to-fix/b2-b3` backend bug, both deferred per scope) and the **visual browser smokes** (Phase1/C3/C4/Phase3-click).
+- **Verify:** backend core suite 66 pass (+ known isolation-only `test_models_api` collection flake); `tsc` clean modulo baseline.
+
+**⟶ NEXT (a SEPARATE run, when the user chooses):** **chat-foundation** (Lane A #2, 16 chunks / ~6 waves) with its
+**two human gates** — B7 vision+relevance S-gate and W1–W3 SSRF/image-safety review — then the **T3-d** tail. Its own
+waves are pre-computed in `chat-foundation/coordinator.md`. Before that run: mind the WIP overlap above, and re-check the
+migration-18 slot (chat-foundation B1 still owns 18; df now uses 19/20/**21**, Phase4→22).
+
 **Orchestrator resume prompt (paste into a fresh Opus chat to drive a wave):**
 
 ```
@@ -271,14 +291,15 @@ Legend: ☐ todo · ◐ in-flight · ☑ done. Update the per-plan coordinator's
 | 4 | C1 | document-foundation | 🔵 | ☑ |
 | 5 | D1 | background-jobs | 🔵 | ☑ (ec88bce — background-jobs COMPLETE + archived) |
 | 5 | C2 | document-foundation | 🔵 | ☑ (22eca7c) |
-| 5 | Phase3 | document-foundation | 🔵 | ◐ (b525c88 — code done, live checks parked) |
-| 5b | B2 | document-foundation | 🔵 | ◐ (09c0fed — code done, live quality check parked) |
+| 5 | Phase3 | document-foundation | 🔵 | ◐ (b525c88 + mig21 8009995 — code + #p=N + X-page-accuracy DONE & applied live; only visual click-smoke parked) |
+| 5b | B2 | document-foundation | 🔵 | ◐ (09c0fed — code done; quality run data-blocked + to-fix/b2-b3 backend bug open, both deferred this run) |
 | 5b | C3 | document-foundation | 🔵 | ☑ (887bf95) |
-| 5c | B3 | document-foundation | 🔵 | ◐ (abb9444 — code done, live run parked) |
+| 5c | B3 | document-foundation | 🔵 | ☑ (abb9444 — live-verified 2026-07-02: 1434-char summary + 764-char abstract) |
 | 5c | C4 | document-foundation | 🔵 | ☑ (a530bfa — Track C COMPLETE) |
-| 5d | B4 | document-foundation | 🔵 | ◐ (c6f6004 + fix 8c0b606 — Decision #21 RESOLVED; only live no-balloon check parked) |
-| 5d | B5 | document-foundation | 🔵 | ◐ (1effece — code done; live tool-call check parked) |
-| 6+ | chat-foundation W1–W6 ‖ df tail (B3,B4,B5,C3,C4) | — | mixed | ☐ |
+| 5d | B4 | document-foundation | 🔵 | ☑ (c6f6004 + fix 8c0b606 — Decision #21 RESOLVED; live-verified 281,733→3,378 chars, no balloon) |
+| 5d | B5 | document-foundation | 🔵 | ☑ (1effece — live-verified 2026-07-03: agent called get_source_outline+get_section) |
+| 5e | X-page | document-foundation | 🔵 | ☑ (mig 21 8009995 — ungroup vector_search per-passage page fidelity; applied + verified live 2026-07-03) |
+| 6+ | chat-foundation W1–W6 (Lane A #2 — DEFERRED to a separate gated run; 2 human gates) | — | mixed | ☐ |
 | last | T3-d | codebase-cleanup-audit | 🟣 | ☐ |
 | last | Phase4 (deferred) | document-foundation | 🔵 | ☐ |
 
@@ -308,6 +329,17 @@ does not duplicate chunk specs.
 - **ds4-deepseek-v4-flash** — research/decision-gated; orthogonal.
 
 ## Changelog
+- 2026-07-03 (STABILIZE pass — chunk-plan-execute, user-scoped to "finish document-foundation first") — No new
+  feature waves; repo hygiene + reconciliation. **(1) Cleared the dirty working tree** (it blocked all worktree
+  isolation): committed an in-progress feature snapshot — live job-progress + tool-calling doc-nav for Esperanto/ds4
+  chat models (`chat_tools.py`, `job_progress.py`, `chat.py` tool-loop, live-progress UI + doc-surface polish) — as
+  `3537d09` after verifying backend imports + `tsc` clean; `to-fix/` backlog + ds4 doc as `407c2e5`. **(2)
+  X-page-accuracy ✅ RESOLVED** — migration 21 (`8009995`, per-passage `fn::vector_search`) confirmed landed +
+  applied live (DB v20) + verified (8 passages → distinct pages); repurposed the 21 slot from Phase4 (→22).
+  **(3) Reconciled the stale meta table** — df B3/B4/B5 flipped ◐→☑ (were live-verified in prior waves), Phase3 note
+  updated, added the X-page row. **(4) document-foundation still un-archived** — B2 ◐ (data-blocked + `to-fix/b2-b3`
+  bug, both deferred) + visual browser smokes remain; both need a human. **(5) Pruned leftover worktrees** (see note).
+  Verify: backend 66 pass (+known flake), `tsc` baseline-only. **chat-foundation + T3-d remain ☐ — a separate gated run.**
 - 2026-07-02 (wave5d — final code wave) — **B4 ◐ (c6f6004), B5 ◐ (1effece). ALL document-foundation
   code landed + integrated + green** (backend full suite 214; frontend tsc baseline-only). B4 = tiered
   get_context; B5 = MCP agent tools. B4 surfaced Decision #21 (non-PDF long-context) — **resolved in-run

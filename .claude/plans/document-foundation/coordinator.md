@@ -57,6 +57,16 @@ Once the decisions are answered + the live checks pass, flip the ◐ chunks to �
 > **Residual PUNCH-LIST for the user:** (1) visual smoke of Phase1 PDF render, C3 TOC, C4 selection menu,
 > Phase3 citation-click→page; (2) decide `X-page-accuracy`; (3) provide a bookmarked/short PDF to close B2.
 > Nothing else is machine-verifiable headlessly. df stays un-archived until (1)–(3) land.
+>
+> **Update (2026-07-03, cross-plan stabilize pass — meta-orchestrator):** Punch-list item (2) is now
+> **CLOSED**: **`X-page-accuracy` ✅ RESOLVED** via **migration 21** (`fn::vector_search` ungrouped so each
+> matched source_embedding chunk is its own row with its own `page_number`; `ask.py` dedupes repeatable
+> source ids). Landed on `feature/multipanelchat` (commit `8009995`, folded in via merge `a6e0c3f`),
+> **applied live (DB positional version 20) + verified** (8 passages → distinct pages 60/62/63/64/69/73/132).
+> ⇒ **Phase3 now stays ◐ ONLY for the visual click-lands-on-page browser smoke** (item 1, manual).
+> **Residual punch-list is now just (1) the visual browser smokes + (3) a ≤50-page-section PDF to close B2.**
+> B2 also has a real backend bug logged separately (`to-fix/b2-b3-pipeline-empty-output.md`, left open per
+> the run's scope). df **still un-archived** — B2 ◐ (data + bug) and the visual smokes both need a human.
 
 **Orchestrator prompt (paste to drive a wave from the meta-coordinator):**
 ```
@@ -182,7 +192,7 @@ Legend: ☐ todo · ◐ in progress · ☑ done · ⏸ blocked · ⊘ deferred
 | C | C3 | TOC sidebar + per-chapter rendering (SourceContentTab) | ☑ | commit 887bf95 (wave5b 2026-07-02); `SourceTOC.tsx` (sticky collapsible tree, `data-section-id` anchors) + two-col `SourceContentTab` reusing the existing ReactMarkdown; content via `getSections(id,true)`; unchaptered fallback preserved; null-title tolerated; 3 locale keys ×14. tsc clean (baseline only). ⚠ visual spot-check parked (TOC renders for chaptered PDF; flat render for web/pasted). Exposes `getSectionPageRangeLabel` + anchors for C4 |
 | C | C4 | Interaction: selection actions + per-chapter AI + citation→jump | ☑ | commit a530bfa (wave5c 2026-07-02); PassageSelectionMenu Explain+Save-note, SourceTOC per-chapter Summarize/Quiz (onSectionAction prop-down, Q-c4-chat-scope resolved), ChatPanel citation→section-anchor scroll, 5 keys ×14. tsc clean; reuse confirmed; no annotations (Phase4 OUT). **Track C fully ☑.** ⚠ visual spot-checks parked. ⚠ **citation→PDF-page-open last mile = follow-up** (needs SourceDetailContent controlled tabs + PDFViewer initialPage — outside C4's files; Q-citation-pdf-open). Section-anchor scroll dormant until citations carry section ids |
 | — | Phase1 | PDFViewer.tsx inline viewer (FE-only, dep-free) | ☑ | commit 1608053; @react-pdf-viewer + PDFViewer.tsx + Original PDF tab + 14 locales + next.config worker. wave2 2026-06-29. ⚠ browser render spot-check still pending (manual) |
-| — | Phase3 | page_number/bbox + vector_search + #p=N citations (mig 20) | ◐ | commit b525c88 (wave5 2026-07-02); mig20 (page_map/page_number/bbox + fn::vector_search REMOVE+DEFINE redefine) + provenance chunking (build_page_char_map/find_chunk_page) + embed_source page_number stamping + backfill_page_numbers cmd + #p=N parser (forwards `page` arg to C4). Static verify green (pytest 65 + test_chunking 34, imports OK, mig20 in both lists). **LIVE (executor 2026-07-02):** (1) migration-apply ✅ VERIFIED (mig19+20 live in DB: page_number/bbox/section, page_map, source_section, fn::vector_search — REMOVE+DEFINE succeeded, no SurrealQL errors); (2) re-embed→page_number ✅ **VERIFIED** — after fixing Docling OCR (`do_ocr=False`, commit 18e0ea0) + the `embed_source` section query (`ORDER BY order` needs `order` projected, commit fc47c64): **285/286 chunks stamped with real physical page_number, 286/286 with section**; `vector_search` now returns `page_number` (e.g. `[11]`) → feeds `#p=N`; (3) chat emits `#p=N` ✅ **VERIFIED live 2026-07-03 (executor)** — drove the real `ask`/`provide_answer` path (vector_search → `query_process.jinja` → local `qwen3.6:35b`): the model produced a real answer with **6 well-formed `[source:au8…#p=N]` page citations** + correct plain `[source_insight:…]` for no-page rows (needed `max_tokens≥8000`: qwen3.6 is a thinking model — at the ask-graph's default 2000 the answer came back empty after `<think>` stripping); (4) citation→PDF-open ✅ **DONE** (Decision #20, commit ed82b2e); (5) npm build ✅. **Stays ◐** for two items now handed to the user: (a) **visual** click-lands-on-page smoke; (b) ⚠ **page-ACCURACY caveat (X-page-accuracy, new):** `fn::vector_search` groups by source id (`array::first(page_number)` + `array::flatten(content)`), so a source's many matched chunks collapse to one row carrying only the FIRST chunk's page against a multi-page text blob → the model invents plausible page numbers (observed: cited pp.52–56 when only p.62 was provided). Format/wiring works; per-passage page fidelity does not. Improving it (ungroup, or return per-chunk pages) is new scope — see Open Questions |
+| — | Phase3 | page_number/bbox + vector_search + #p=N citations (mig 20) | ◐ | commit b525c88 (wave5 2026-07-02); mig20 (page_map/page_number/bbox + fn::vector_search REMOVE+DEFINE redefine) + provenance chunking (build_page_char_map/find_chunk_page) + embed_source page_number stamping + backfill_page_numbers cmd + #p=N parser (forwards `page` arg to C4). Static verify green (pytest 65 + test_chunking 34, imports OK, mig20 in both lists). **LIVE (executor 2026-07-02):** (1) migration-apply ✅ VERIFIED (mig19+20 live in DB: page_number/bbox/section, page_map, source_section, fn::vector_search — REMOVE+DEFINE succeeded, no SurrealQL errors); (2) re-embed→page_number ✅ **VERIFIED** — after fixing Docling OCR (`do_ocr=False`, commit 18e0ea0) + the `embed_source` section query (`ORDER BY order` needs `order` projected, commit fc47c64): **285/286 chunks stamped with real physical page_number, 286/286 with section**; `vector_search` now returns `page_number` (e.g. `[11]`) → feeds `#p=N`; (3) chat emits `#p=N` ✅ **VERIFIED live 2026-07-03 (executor)** — drove the real `ask`/`provide_answer` path (vector_search → `query_process.jinja` → local `qwen3.6:35b`): the model produced a real answer with **6 well-formed `[source:au8…#p=N]` page citations** + correct plain `[source_insight:…]` for no-page rows (needed `max_tokens≥8000`: qwen3.6 is a thinking model — at the ask-graph's default 2000 the answer came back empty after `<think>` stripping); (4) citation→PDF-open ✅ **DONE** (Decision #20, commit ed82b2e); (5) npm build ✅. **Stays ◐** for two items now handed to the user: (a) **visual** click-lands-on-page smoke; (b) ⚠ **page-ACCURACY caveat (X-page-accuracy, new):** `fn::vector_search` groups by source id (`array::first(page_number)` + `array::flatten(content)`), so a source's many matched chunks collapse to one row carrying only the FIRST chunk's page against a multi-page text blob → the model invents plausible page numbers (observed: cited pp.52–56 when only p.62 was provided). Format/wiring works; per-passage page fidelity does not. Improving it (ungroup, or return per-chunk pages) is new scope — see Open Questions. **✅ 2026-07-03: X-page-accuracy RESOLVED — migration 21 ungroups source_embedding rows so each passage carries its own page_number; applied live (DB v20) + verified (8 passages → distinct pages 60/62/63/64/69/73/132). Phase3 now stays ◐ ONLY for the visual click-lands-on-page browser smoke (manual).** |
 | — | Phase4 | Annotations (source_annotation, mig 21, highlight plugin) | ⊘ | **DEFERRED** — do not start until Phase1+Phase3 ☑ |
 
 ---
@@ -227,7 +237,7 @@ Human viewer gets: TOC + per-chapter render (cleaned content) + inline PDF + cit
 | 8 | Page numbering? | **Physical page indices** everywhere internally. Printed labels = display/citation-only. Auto-detect via PDF `PageLabels`; store as `page_offset` per source (null = identity). |
 | 9 | Viewer content default? | Viewer renders **cleaned per-section content** (when present); raw always accessible via the existing download endpoint. No raw/cleaned toggle in v1. |
 | 10 | Annotations scope? | **Deferred to Phase4.** Phase3 establishes bbox coords; Phase4 uses them for highlight/comment anchoring. |
-| 11 | Migrations? | 17 = taken (chat_tag_colors). 18 = reserved for chat-foundation B1. **19** = this plan's A1 (source_section + all additive source fields). **20** = Phase3 (page_number/bbox on source_embedding). 21 = Phase4 source_annotation (deferred). |
+| 11 | Migrations? | 17 = taken (chat_tag_colors). 18 = reserved for chat-foundation B1. **19** = this plan's A1 (source_section + all additive source fields). **20** = Phase3 (page_number/bbox on source_embedding). **21** = X-page-accuracy fix (ungroup `fn::vector_search` — repurposed 2026-07-03; was earmarked for Phase4). Phase4 `source_annotation` now → **22** (deferred). |
 | 12 | Which sources? | **PDFs / long documents only** in v1. Web pages, pasted text, transcripts keep current behavior. |
 | 13 | Viewer lib peer-dep risk? | Validate @react-pdf-viewer in Phase1. If React 19/Next 16 peer-dep fails, fall back to react-pdf + a custom highlight layer. Do NOT block B or C on this — Phase1 is independent. |
 | 14 | B2 vision provisioning path? | **auto-decided (B2, 2026-07-02):** call `get_vision_model(max_tokens=8192).to_langchain()` **directly**, NOT `provision_langchain_model(...)` — the latter auto-upgrades >105k-token content to a non-vision `large_context_model` → garbage on large sections. Direct path also returns None cleanly when unconfigured (the required skip path). **Confirm if you'd prefer routing through provision.** |
@@ -367,7 +377,7 @@ mv .claude/plans/pdf-viewer-citations.md .claude/plans/archived/pdf-viewer-citat
   (this credential is also linked to `qwen3-embedding:8b`, so both modalities were affected). **Fixed:**
   `base_url` updated to `http://localhost:11435` via `Credential.save()`; verified the gate forwards both
   `/api/tags` and `/api/embeddings` correctly; `on-api`/`on-worker` restarted clean.
-- **X-page-accuracy** *(new, from 2026-07-03 Phase3 live check — emergent, needs-user, ~S2/S3)* — `#p=N`
+- ~~**X-page-accuracy**~~ **✅ RESOLVED (migration 21, 2026-07-03)** *(was emergent/needs-user, ~S2/S3)* — `#p=N`
   page citations emit in the correct format but can point to the **wrong page**. Cause: `fn::vector_search`
   (migration 20) groups matched rows **by source id** and returns `array::first(array::flatten([page_number]))`
   while `matches = array::flatten(content)` merges *all* of that source's matched chunks. So one row carries a
@@ -377,8 +387,16 @@ mv .claude/plans/pdf-viewer-citations.md .claude/plans/archived/pdf-viewer-citat
   *Options:* (a) accept best-effort page hints (do nothing — citations are approximate); (b) stop grouping
   source_embedding rows so each retrieved passage is its own row with its own `page_number` (most faithful,
   but changes result shape/volume and the ask/chat context size); (c) return a `page_number` **array** aligned
-  to `matches` and teach the prompt to map passage→page. *Proposed default:* **(b)** for source_embedding rows
-  (keep grouping only for insights/notes), scoped as a small Phase3 follow-up chunk. **Blocks flipping Phase3 ☑.**
+  to `matches` and teach the prompt to map passage→page. *Chosen default:* **(b)** for source_embedding rows
+  (keep grouping only for insights/notes), scoped as a small Phase3 follow-up chunk.
+  **✅ RESOLVED 2026-07-03 — option (b) implemented in migration 21** (`fn::vector_search` idempotent
+  REMOVE+DEFINE: each matched source_embedding chunk is now its OWN row carrying its own `page_number`/`bbox`;
+  insights/notes keep per-record grouping; `matches` wraps the single content to preserve the `[string]` shape
+  → row shape unchanged, so `ask.py`/`search.py`/`query_process.jinja` are untouched, only cardinality changes).
+  `graphs/ask.py` dedupes the now-repeatable source ids for the citable-id list. Landed on `feature/multipanelchat`
+  (commit `8009995`, merged via `a6e0c3f`); **applied live (DB positional version 20) + verified** — 8 passages
+  from one source returned distinct pages (60/62/63/64/69/73/132) vs the prior single collapsed page. No longer
+  blocks Phase3 (only the visual click-lands-on-page browser smoke remains, manual).
 - **Q-section-content-payload** — Return `content` inline in the sections endpoint or lazy per-section fetch? *Default:* `summary` always inline; `content` only on demand (keep tree payload light). Revisit if UX needs it.
 - **Q-viewer-peer-dep** — @react-pdf-viewer React 19/Next 16 compatibility. *Default:* Phase1 validates; fallback to react-pdf + custom highlight layer. Resolve in Phase1.
 - **Q-section-delete-cleanup** *(new, from A3)* — `Source.delete()` does not remove orphaned `source_section`
@@ -395,6 +413,16 @@ mv .claude/plans/pdf-viewer-citations.md .claude/plans/archived/pdf-viewer-citat
 ---
 
 ## Changelog
+- 2026-07-03 (cross-plan stabilize pass — meta-orchestrator, no new df code) — Reconciled df against actual
+  git state during the cross-plan "finish" run. **`X-page-accuracy` ✅ RESOLVED**: confirmed **migration 21**
+  (ungroup `fn::vector_search` for per-passage `page_number`, + `ask.py` id-dedupe; commit `8009995`) is landed
+  on `feature/multipanelchat` (folded in via merge `a6e0c3f`) **and applied live** — `on-api` reports DB
+  positional version 20 = the 20th up-list entry (`21.surrealql`) applied; the fix's own commit verified 8
+  passages → distinct pages (60/62/63/64/69/73/132). Migration 21 was **repurposed** from its Phase4 earmark
+  (Decision #11 updated; Phase4 → migration 22). ⇒ **Phase3 stays ◐ only for the visual click smoke.**
+  Remaining to archive df: B2 (◐ — data-blocked + the `to-fix/b2-b3` backend bug, both deferred this run) and
+  the visual browser smokes (Phase1/C3/C4/Phase3-click). Backend core suite green (66 pass + the known
+  isolation-only `test_models_api` collection-order flake); frontend `tsc` clean modulo baseline test-file noise.
 
 - 2026-07-03 (executor live-verification pass — no code changes) — Drove the parked non-visual live checks
   against the running services (`on-api`/`on-worker`/`on-frontend` active) + the one real source
