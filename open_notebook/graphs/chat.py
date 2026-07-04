@@ -282,7 +282,15 @@ def call_model_with_messages(state: ThreadState, config: RunnableConfig) -> dict
         # Clean thinking content from AI response (e.g., <think>...</think> tags)
         content = extract_text_content(ai_message.content)
         cleaned_content = clean_thinking_content(content)
-        cleaned_message = ai_message.model_copy(update={"content": cleaned_content, "id": ai_message.id or f"ai-{uuid4().hex}"})
+        # Contract #5: AI messages must carry a stable `ai-` id — provider ids
+        # (lc_run--*, bare UUIDs) don't survive as correlation keys for the
+        # illustration sidecar, so anything unprefixed is replaced.
+        stable_id = (
+            ai_message.id
+            if isinstance(ai_message.id, str) and ai_message.id.startswith("ai-")
+            else f"ai-{uuid4().hex}"
+        )
+        cleaned_message = ai_message.model_copy(update={"content": cleaned_content, "id": stable_id})
 
         return {"messages": cleaned_message}
     except OpenNotebookError:
