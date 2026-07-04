@@ -91,20 +91,20 @@ Chunk ids are stable. **Owns (files)** is the conflict key; **Depends-on** drive
 |------:|------|-----------|-------|--------------|------------|--------|
 | P1 | PRE | — | Background-jobs plan prerequisite (chat-foundation runs after background-jobs lands) | cross-plan gate only | — | ☐ |
 | P2 | PRE | — | Re-anchor plan docs + async compat fixes (post-refactor paths + B5/F3 compat bakes) | `coordinator.md`, `backend.md`, `frontend.md`, `worker.md` | — | ☑ |
-| B1 | MIG | backend.md | Migration 18 (all 3 schema changes) + register | `migrations/18.surrealql`, `18_down.surrealql`, `database/async_migrate.py` | — | ☐ |
+| B1 | MIG | backend.md | Migration 18 (all 3 schema changes) + register | `migrations/18.surrealql`, `18_down.surrealql`, `database/async_migrate.py` | — | ☑ (454d328 — appended at END, positional v21; applied live + schema verified) |
 | B2 | MODELS | backend.md | Domain models: `ChatMessageMedia` + `Notebook.auto_illustrate` + `ChatSession.context_config` | `open_notebook/domain/notebook.py` | B1 | ☐ |
-| B3 | MSGID | backend.md | Stable AIMessage `.id` (checkpoint-persistent) | `open_notebook/graphs/chat.py` | — | ☐ |
+| B3 | MSGID | backend.md | Stable AIMessage `.id` (checkpoint-persistent) | `open_notebook/graphs/chat.py` | — | ☑ (454d328 — hand-applied onto post-tool-loop chat.py:284; plan's :178 anchor was stale) |
 | B4 | CTX-CRUD | backend.md | `context_config` on session schemas + create/update/get | `api/routers/chat/schemas.py` + `api/routers/chat/sessions.py` | B2 | ☐ |
 | B5 | HYDRATE | backend.md | Hydrate-merge sidecar into session reads (per-message lookup in `_build_chat_message`) | `api/routers/chat/citations.py` | B2, B3 | ☐ |
 | B6 | NB-API | backend.md | `auto_illustrate` passthrough on notebook-update | `api/routers/notebooks.py`, `api/models.py` | B2 | ☐ |
-| B7 | SPIKES | worker.md | R3 vision + R4 relevance spikes → **S-gate** | scratch scripts only | — | ☐ |
+| B7 | SPIKES | worker.md | R3 vision + R4 relevance spikes → **S-gate** | scratch scripts only | — | ◐ (spike running; feeds human S-gate, gates W2/W3 only) |
 | W1 | WORKER | worker.md | Enrichment command: trigger (in `chat_completion`) → gate → route → **diagram** → sidecar | `commands/illustrate_commands.py`, `open_notebook/graphs/illustrate.py`, `prompts/illustrate/`, `commands/chat_commands.py` (trigger) | B2, B3, B5 | ☐ |
 | W2 | WORKER | worker.md | **Image** pipeline: expand → search → VLM relevance/abstain | (same as W1) | W1, **B7 (S-gate GO)** | ☐ |
 | W3 | WORKER | worker.md | **Image** safety (fail-closed) + SSRF fetch → WebP → store → sidecar | (same as W1) | W2 | ☐ |
-| F1 | FE-TYPES | frontend.md | Types + chat-api passthrough (`context_config`, `auto_illustrate`) | `frontend/src/lib/types/api.ts`, `frontend/src/lib/api/chat.ts` | — | ☐ |
+| F1 | FE-TYPES | frontend.md | Types + chat-api passthrough (`context_config`, `auto_illustrate`) | `frontend/src/lib/types/api.ts`, `frontend/src/lib/api/chat.ts` | — | ☑ (454d328 — done by orchestrator on HEAD; chat.ts passes full body, no change needed) |
 | F2 | FE-HOOK | frontend.md | `useNotebookChat`: per-session context resolution + quote-only seed + setter | `frontend/src/lib/hooks/useNotebookChat.ts` | F1 | ☐ |
 | F3 | FE-POLLER | frontend.md | Jobs poller: `'illustration'` kind → auto-register + session invalidate (silent, no toast) | `frontend/src/lib/stores/jobs-store.ts`, `frontend/src/lib/hooks/use-jobs-poller.ts` | F1 | ☐ |
-| F4 | FE-MERMAID | frontend.md | Mermaid renderer (strict + DOMPurify + parse-or-fallback) | `components/source/chat/Mermaid.tsx` (new), `components/source/chat/MarkdownCodeBlock.tsx`, `components/source/chat/ChatPanel.tsx` | — | ☐ |
+| F4 | FE-MERMAID | frontend.md | Mermaid renderer (strict + DOMPurify + parse-or-fallback) | `components/source/chat/Mermaid.tsx` (new), `components/source/chat/MarkdownCodeBlock.tsx`, `components/source/chat/ChatPanel.tsx` | — | ☑ (454d328 — branched inside MarkdownCodeBlock; components map now in MessageList.tsx post-3537d09, so ChatPanel/MessageList untouched; tsc+build clean) |
 | F5 | FE-POPOVER | frontend.md | Side-chat Context popover + i18n (`chat.context*`) | `components/notebooks/chat/PoppedChatPanel.tsx`, `components/notebooks/chat/SideChatContextPopover.tsx` (new), `components/notebooks/workspace/DeepDiveWorkspace.tsx`, `locales/*` | F1, F2 | ☐ |
 | F6 | FE-TOGGLE | frontend.md | Per-notebook auto-illustrate toggle + i18n (`chat.autoIllustrate*`) | `components/notebooks/chat/SideChatDefaultMenu.tsx`, `components/notebooks/chat/ChatDock.tsx`, `components/notebooks/workspace/NotebookWorkspaceProvider.tsx`, `locales/*` | F1 | ☐ |
 
@@ -223,6 +223,22 @@ point also remove the two superseded source dirs (`.claude/plans/auto-illustrate
 `.claude/plans/per-chat-context`) and the loose `.claude/plans/shimmering-fluttering-candle.md` if present.
 
 ## Changelog (cross-track)
+- _(2026-07-04)_ **Wave 1 landed (454d328): B1 ☑, B3 ☑, F1 ☑, F4 ☑; B7 ◐ (spike running).**
+  Run via `/chunk-plan-execute` (cross-plan orchestration, Lane A #2). Migration 18 appended at the END
+  of both async_migrate lists (positional DB v21 — the "18" filename is a label; DB was at v20) and
+  applied live + schema-verified (`chat_message_media` insert/read OK, `context_config`/`auto_illustrate`
+  selectable). **Stale-base hazard hit again:** all 5 worktree agents seeded from `a6e0c3f` (3 commits
+  behind HEAD, pre-tool-loop `3537d09`). Integrated by selective file-copy for non-colliding files
+  (async_migrate, MarkdownCodeBlock, package.json/lock — identical since a6e0c3f) and **hand-applied B3**
+  onto the current 309-line `chat.py:284` (the plan's `:178` + the worktree's `:186` were both stale;
+  a decoy `model_copy` at :188 in the tool loop was avoided). **F1 was redone by the orchestrator on HEAD**
+  (its worktree agent no-op'd with 0 tool-uses; `api.ts` is a collision file). F4 discovered the
+  ReactMarkdown components map moved `ChatPanel.tsx`→`MessageList.tsx` (3537d09) and branched inside
+  `MarkdownCodeBlock` — kept the ChatPanel/MessageList files untouched. Verify: `test_domain` 32 pass, tsc
+  clean, mermaid@11.16 + dompurify@3.4.11 installed. **Lesson (re)confirmed:** every worktree agent must
+  `git merge --ff-only feature/multipanelchat` FIRST — baked into Wave 2+ dispatch prompts. Minor follow-up:
+  `chat_message_media.created` returned `None` on a raw SurrealQL insert (domain model sets it on save, so
+  non-blocking).
 - _(2026-07-02)_ **Design revision: illustration delivery v2** (frozen contracts #5/#6 rewritten; decisions
   P-5/P-6 added). The v1 contract predated the 202-async chat pivot and was unimplementable:
   `ExecuteChatResponse.illustration_job_id` can't be populated (the 202 ack returns before the worker
