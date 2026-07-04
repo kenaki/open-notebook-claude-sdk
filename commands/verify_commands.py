@@ -36,6 +36,7 @@ from surreal_commands import CommandInput, CommandOutput, command, submit_comman
 
 from open_notebook.ai.models import model_manager
 from open_notebook.ai.vision_utils import provision_vision_message
+from open_notebook.database.repository import repo_query
 from open_notebook.domain.notebook import Source, SourceSection
 from open_notebook.exceptions import ConfigurationError
 from open_notebook.utils import clean_thinking_content
@@ -186,6 +187,28 @@ def _flatten_section_ids(nodes: List[dict]) -> List[str]:
         children = node.get("children") or []
         ids.extend(_flatten_section_ids(children))
     return ids
+
+
+async def _chaptering_in_flight(source_id: str) -> bool:
+    """True while a ``build_sections`` job for this source is queued or running.
+
+    ``build_sections`` is delete-then-rebuild (idempotent), so any fan-out that
+    samples the section tree mid-build sees a PARTIAL tree, not an empty one —
+    observed live on the Hands-on-ML book: ``verify_clean_source`` ran 6s into
+    a 54s rebuild and fanned out over 117 of the eventual 472 sections. An
+    empty-tree check alone therefore cannot close the race; orchestrators must
+    also wait for chaptering to reach a terminal state. Command rows carry no
+    timestamps, so "any non-terminal build_sections row for this source" is the
+    whole predicate. Shared by ``verify_clean_source`` and
+    ``summarize_source`` (commands/summary_commands.py).
+    """
+    rows = await repo_query(
+        "SELECT count() AS n FROM command "
+        "WHERE name = 'build_sections' AND args.source_id = $sid "
+        "AND status IN ['new', 'running'] GROUP ALL",
+        {"sid": source_id},
+    )
+    return bool(rows and rows[0].get("n", 0) > 0)
 
 
 async def _run_render(
@@ -368,13 +391,16 @@ async def verify_clean_section(
     app="open_notebook",
     # Retries cover the eventual-consistency race with build_sections: when the
     # ingest graph fires this immediately after submit_sections the section tree
-    # may not exist yet, so we raise-to-retry until it does. Permanent errors
-    # (bad id) stop immediately.
+    # may be empty OR (worse) mid-rebuild and partial — we raise-to-retry until
+    # the build_sections job for this source reaches a terminal state AND the
+    # tree is non-empty. Window sized for multi-minute chaptering on real books
+    # (observed: 54s for a 472-section textbook). Permanent errors (bad id)
+    # stop immediately.
     retry={
-        "max_attempts": 5,
+        "max_attempts": 8,
         "wait_strategy": "exponential_jitter",
-        "wait_min": 5,
-        "wait_max": 60,
+        "wait_min": 10,
+        "wait_max": 120,
         "stop_on": [ValueError, ConfigurationError],
     },
 )
@@ -394,6 +420,15 @@ async def verify_clean_source(
     if not source:
         raise ValueError(f"Source '{input_data.source_id}' not found")
 
+    if await _chaptering_in_flight(input_data.source_id):
+        # build_sections deletes + rebuilds the tree; sampling it now would fan
+        # out over a partial tree (observed: 117/472). Raise so surreal_commands
+        # retries with backoff until chaptering reaches a terminal state.
+        raise RuntimeError(
+            f"Chaptering (build_sections) still in flight for source "
+            f"{input_data.source_id} — section tree incomplete; will retry"
+        )
+
     tree = await source.get_sections()
     section_ids = _flatten_section_ids(tree)
 
@@ -403,6 +438,34 @@ async def verify_clean_source(
         raise RuntimeError(
             f"No sections yet for source {input_data.source_id} — "
             f"chaptering may still be running; will retry"
+        )
+
+    # --- Pre-flight: is a vision model configured at all? ---
+    # Without this, N per-section jobs each "complete" as silent no-ops (the
+    # skip note lives only in each job's result payload) — observed live as
+    # 117 completed jobs, 0 cleaned_content, 0 insights, nothing visible in the
+    # UI. Skip the fan-out entirely and leave ONE visible verify_flag insight.
+    try:
+        vision_model = await model_manager.get_vision_model()
+    except ConfigurationError as exc:
+        vision_model = None
+        logger.warning(f"verify_clean_source: vision model misconfigured: {exc}")
+    if vision_model is None:
+        note = (
+            "Verify-clean skipped for this document: no default vision model "
+            "is configured (Settings -> Models -> Vision). Re-run verify-clean "
+            "after configuring one."
+        )
+        logger.warning(
+            f"verify_clean_source: source {input_data.source_id}: {note}"
+        )
+        await source.add_insight("verify_flag", note)
+        return VerifyCleanSourceOutput(
+            success=False,
+            source_id=input_data.source_id,
+            sections_found=len(section_ids),
+            jobs_submitted=0,
+            error_message=note,
         )
 
     jobs_submitted = 0

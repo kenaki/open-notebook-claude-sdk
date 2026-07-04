@@ -1,12 +1,16 @@
 """
 Per-section summaries + document abstract for Open Notebook (Track B, Chunk B3).
 
-Two commands, layered on top of A3's section tree and B2's verify-clean layer:
+Three commands, layered on top of A3's section tree and B2's verify-clean layer:
+  - ``summarize_source``         : fan-out orchestrator — waits (raise-to-retry)
+    for chaptering to reach a terminal state, then submits one
+    ``summarize_section`` job per section. Mirrors ``verify_clean_source``.
   - ``summarize_section``        : summarize one ``source_section`` concisely.
     Prefers ``cleaned_content`` (B2's vision-verified layer) but falls back to
     the raw parsed ``content`` when verify-clean hasn't landed yet (or was
     skipped) — verify and summarize are independent fire-and-forget triggers
-    with no ordering guarantee.
+    with no ordering guarantee. The job that writes the LAST missing summary
+    submits ``generate_source_abstract`` (event-driven trigger).
   - ``generate_source_abstract`` : roll up every section summary into one
     document-level abstract, stored as a ``SourceInsight`` (idempotent —
     replaces any prior ``abstract`` insight rather than duplicating).
@@ -15,25 +19,33 @@ Design notes:
   - Coordinator Decision #4 (derived layers) / #7 (tiered chat context): these
     are the "chapter-summary outline" + "doc abstract" layers the chat agent
     and TOC sidebar consume instead of the raw ``full_text`` blob.
-  - ``generate_source_abstract`` is submitted immediately after fanning out
-    the per-section jobs (``Source.summarize_sections()``), so most of the
-    time it will run *before* those jobs finish. It raises to retry (with
-    backoff) until every section that actually has text has a summary —
-    mirroring the eventual-consistency pattern ``verify_clean_source`` uses
-    for ``build_sections`` (see ``commands/verify_commands.py``). It reads
+  - On the ingest path, ``generate_source_abstract`` is submitted by the
+    event-driven trigger in ``summarize_section`` (last missing summary), so
+    its readiness gate passes on the first or second attempt. On the manual
+    re-run path (``Source.summarize_sections()``) it is still submitted
+    upfront, where existing summaries let the gate pass immediately. Either
+    way it raises to retry (with backoff) until every section that actually
+    has text has a summary — mirroring the eventual-consistency pattern
+    ``verify_clean_source`` uses for ``build_sections``
+    (see ``commands/verify_commands.py``). It reads
     ``Source.get_sections()`` (not the lighter ``get_outline()``) so it can
     tell text-bearing sections apart from structural/heading-only nodes
     (e.g. a "Part I" divider immediately followed by a subheading) — those
     never get a summary by design (``summarize_section`` skips empty text),
     so requiring 100% of *outline* nodes to have a summary would deadlock.
 """
+import time
 from typing import Dict, List, Optional
 
 from langchain_core.messages import HumanMessage
 from loguru import logger
-from surreal_commands import CommandInput, CommandOutput, command
+from surreal_commands import CommandInput, CommandOutput, command, submit_command
 
+# Shared race-guard + tree-flatten helpers live with the B2 orchestrator; both
+# fan-outs must gate on the same "chaptering reached a terminal state" predicate.
+from commands.verify_commands import _chaptering_in_flight, _flatten_section_ids
 from open_notebook.ai.provision import provision_langchain_model
+from open_notebook.database.repository import ensure_record_id, repo_query
 from open_notebook.domain.notebook import Source, SourceSection
 from open_notebook.exceptions import ConfigurationError
 from open_notebook.utils import clean_thinking_content
@@ -50,6 +62,18 @@ class SummarizeSectionInput(CommandInput):
 
 class SummarizeSectionOutput(CommandOutput):
     summary: Optional[str] = None
+
+
+class SummarizeSourceInput(CommandInput):
+    source_id: str
+
+
+class SummarizeSourceOutput(CommandOutput):
+    success: bool
+    source_id: str
+    sections_found: int = 0
+    jobs_submitted: int = 0
+    error_message: Optional[str] = None
 
 
 class GenerateSourceAbstractInput(CommandInput):
@@ -89,6 +113,30 @@ def _flatten_sections_for_abstract(nodes: List[Dict]) -> List[Dict]:
         )
         flat.extend(_flatten_sections_for_abstract(node.get("children") or []))
     return flat
+
+
+async def _remaining_unsummarized(source_id: str) -> int:
+    """Count text-bearing sections of a source that still lack a summary.
+
+    Mirrors ``generate_source_abstract``'s readiness gate (``has_text`` =
+    non-blank ``cleaned_content`` or ``content``; heading-only nodes never get
+    a summary and never count). Used by the event-driven abstract trigger in
+    ``summarize_section``.
+    """
+    rows = await repo_query(
+        """
+        SELECT count() AS n FROM source_section
+        WHERE source = $src
+          AND (
+              string::len(string::trim(cleaned_content ?? '')) > 0
+              OR string::len(string::trim(content ?? '')) > 0
+          )
+          AND string::len(string::trim(summary ?? '')) == 0
+        GROUP ALL
+        """,
+        {"src": ensure_record_id(source_id)},
+    )
+    return int(rows[0].get("n", 0)) if rows else 0
 
 
 # ---------------------------------------------------------------------------
@@ -146,6 +194,7 @@ async def summarize_section(
         )
         return SummarizeSectionOutput(summary=None)
 
+    had_summary = bool(section.summary and section.summary.strip())
     section.summary = summary
     await section.save()
     logger.info(
@@ -153,7 +202,122 @@ async def summarize_section(
         f"{section.id}"
     )
 
+    # --- Event-driven abstract trigger ---
+    # The job that fills the LAST missing summary submits the doc abstract.
+    # Submitting the abstract at fan-out time (the old design) gave it a
+    # ~10-minute retry window to outlast N sequential local-LLM summaries —
+    # hours on a real book — so it always exhausted its retries and failed
+    # (observed live: 8 attempts / 4m43s, then "472/472 not yet summarized").
+    # ``had_summary`` guards manual re-runs: overwriting existing summaries
+    # never re-triggers per-section (regeneration paths submit the abstract
+    # themselves, and its readiness gate passes instantly there). A concurrent
+    # double-fire is harmless — the abstract is idempotent by design.
+    if not had_summary and section.source:
+        try:
+            remaining = await _remaining_unsummarized(str(section.source))
+            if remaining == 0:
+                cmd_id = submit_command(
+                    "open_notebook",
+                    "generate_source_abstract",
+                    {"source_id": str(section.source)},
+                )
+                logger.info(
+                    f"summarize_section: last pending summary written — "
+                    f"submitted generate_source_abstract for {section.source}: "
+                    f"{cmd_id}"
+                )
+        except Exception as exc:
+            # Never fail (or retry) a successful summary over the trigger.
+            logger.warning(
+                f"summarize_section: abstract auto-trigger failed for "
+                f"{section.source}: {exc}"
+            )
+
     return SummarizeSectionOutput(summary=summary)
+
+
+@command(
+    "summarize_source",
+    app="open_notebook",
+    # Same eventual-consistency posture as verify_clean_source: raise-to-retry
+    # until the build_sections job for this source reaches a terminal state AND
+    # the tree is non-empty. The old design (Source.summarize_sections() called
+    # inline from the ingest graph) sampled the tree at submit time — observed
+    # live as an EMPTY tree 0.05s after build_sections was submitted, so zero
+    # summarize_section jobs were ever created for a 472-section book.
+    retry={
+        "max_attempts": 8,
+        "wait_strategy": "exponential_jitter",
+        "wait_min": 10,
+        "wait_max": 120,
+        "stop_on": [ValueError, ConfigurationError],
+    },
+)
+async def summarize_source(
+    input_data: SummarizeSourceInput,
+) -> SummarizeSourceOutput:
+    """Fan out one ``summarize_section`` job per section of a source.
+
+    Orchestrator counterpart to ``verify_clean_source``: waits (via
+    raise-to-retry) for chaptering to finish, then submits per-section summary
+    jobs. The document abstract is NOT submitted here — the summarize_section
+    job that writes the last missing summary triggers it (event-driven), so the
+    abstract can't lose a retry-window race against hours of local-LLM
+    summarization. Per-section submit is wrapped so one failure can't poison
+    the rest.
+    """
+    start_time = time.time()
+
+    source = await Source.get(input_data.source_id)
+    if not source:
+        raise ValueError(f"Source '{input_data.source_id}' not found")
+
+    if await _chaptering_in_flight(input_data.source_id):
+        raise RuntimeError(
+            f"Chaptering (build_sections) still in flight for source "
+            f"{input_data.source_id} — section tree incomplete; will retry"
+        )
+
+    tree = await source.get_sections()
+    section_ids = _flatten_section_ids(tree)
+
+    if not section_ids:
+        raise RuntimeError(
+            f"No sections yet for source {input_data.source_id} — "
+            f"chaptering may still be running; will retry"
+        )
+
+    jobs_submitted = 0
+    for section_id in section_ids:
+        try:
+            cmd_id = submit_command(
+                "open_notebook",
+                "summarize_section",
+                {"source_section_id": section_id},
+            )
+            logger.debug(
+                f"summarize_source: submitted summarize_section for "
+                f"{section_id}: {cmd_id}"
+            )
+            jobs_submitted += 1
+        except Exception as exc:
+            logger.warning(
+                f"summarize_source: failed to submit summarize_section for "
+                f"{section_id}: {exc}"
+            )
+
+    processing_time = time.time() - start_time
+    logger.info(
+        f"summarize_source: {len(section_ids)} sections, "
+        f"{jobs_submitted} jobs submitted for {input_data.source_id} "
+        f"in {processing_time:.2f}s"
+    )
+    return SummarizeSourceOutput(
+        success=True,
+        source_id=input_data.source_id,
+        sections_found=len(section_ids),
+        jobs_submitted=jobs_submitted,
+    )
 
 
 @command(
