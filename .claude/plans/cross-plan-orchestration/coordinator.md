@@ -252,12 +252,15 @@ Then continue: chatF W2 ‖ df `B3`/`C4`; chatF W3; chatF worker W1→W2(needs B
 ---
 
 ## Human gates (orchestrator must pause)
-- **chat-foundation B7 — S-gate** (Wave 6): qwen3.6 VLM vision + relevance spike → GO / GO-WITH-ADJUSTMENTS / NO-GO. Gates worker W2/W3 (image path). Diagram path (worker W1) proceeds regardless. 🟣
+- **chat-foundation B7 — S-gate** — ☑ **RESOLVED (2026-07-04): user blessed GO-WITH-ADJUSTMENTS**
+  (τ=0.6, top-K=3, PageImages-first + early-exit, heavy-lane mandatory). W2/W3 unblocked. 🟣
   > ⚠ **Relevant prior evidence:** df B1 (Wave 4, below) already piloted `qwen3.6:35b`'s vision quality on
   > real dense-page images — GO-WITH-CAVEATS, with a documented `max_tokens` gotcha and two minor
   > transcription-fidelity caveats. B7's own spike is a different use case (relevance judgment, not
   > transcription) but should read df B1's pilot writeup first rather than starting cold.
-- **chat-foundation W1–W3** — SSRF / fail-closed image safety review. 🟣
+- **chat-foundation W1–W3** — SSRF / fail-closed image safety review. **Mode chosen by user 2026-07-04:**
+  agents implement the frozen fail-closed spec; orchestrator runs an adversarial security review of the
+  landed W1–W3 diff and fixes findings; the user's final sign-off is parked on the end punch-list. 🟣
 - **document-foundation B1** — ☑ **RESOLVED (Wave 4, 2026-07-02).** GO-WITH-CAVEATS human-blessed;
   Q-vision-gate-bypass fixed (shared credential now routes through `:11435`). df B2 unblocked.
 - **ds4-deepseek** (orthogonal, not scheduled) — needs your A/B/C design decision + nvcc/memory check before any chunking.
@@ -301,7 +304,9 @@ Legend: ☐ todo · ◐ in-flight · ☑ done. Update the per-plan coordinator's
 | 5e | X-page | document-foundation | 🔵 | ☑ (mig 21 8009995 — ungroup vector_search per-passage page fidelity; applied + verified live 2026-07-03) |
 | 6+ | chat-foundation W1–W6 (Lane A #2 — RUNNING) | — | mixed | ◐ W1 ☑ (454d328: B1/B3/F1/F4) · W2 ☑ (8cc887e: B2/F2/F3/F6) · B7 spike ☑ → **S-gate GO-WITH-ADJUSTMENTS awaits user**. Next: W3 = B4/B5/B6/F5 · then W1(diagram) · W2/W3(image, gated on B7) |
 | last | T3-d | codebase-cleanup-audit | 🟣 | ☐ |
-| last | Phase4 (deferred) | document-foundation | 🔵 | ☐ |
+| last | Phase4 | document-foundation | 🔵 | ☐ (user opted IN 2026-07-04 — mig 22 + source_annotation CRUD + highlight plugin; runs in the finish-run's Wave 2) |
+| fix | to-fix/001 silent-failed-chat-jobs | (bugfix, user-approved 2026-07-04) | 🔵 | ☐ |
+| fix | to-fix/b2-b3 pipeline-empty-output | (bugfix, user-approved 2026-07-04 — gates df archival) | 🔵 | ☐ |
 
 ---
 

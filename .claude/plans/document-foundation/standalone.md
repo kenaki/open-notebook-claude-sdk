@@ -275,7 +275,7 @@ null (never guess). One-time operation; run manually.
 |-------|-------|--------|-------|
 | Phase1 | PDFViewer.tsx inline viewer (FE-only) | ☑ | commit 1608053; @react-pdf-viewer/core+default-layout+pdfjs-dist, PDFViewer.tsx, Original PDF tab in SourceDetailContent, next.config worker alias, 14 locales. ⚠ browser render spot-check still pending (manual) |
 | Phase3 | page_number/bbox + vector_search + #p=N citations (mig 20) | ◐ | commit b525c88 (wave5 2026-07-02); code landed + static-verified. **Live spot-checks parked** (migration-apply + fn::vector_search redefine, re-embed→page_number, chat #p=N emission, citation→PDF click, npm build). Citation-click final wiring → C4 (parser forwards `page`) |
-| Phase4 | Annotations (source_annotation, mig 21, highlight plugin) | ⊘ | DEFERRED |
+| Phase4 | Annotations (source_annotation, mig **22**, highlight plugin) | ☐ | **UN-DEFERRED 2026-07-04** (user opted in during the cross-plan finish run; Phase1+Phase3 code ☑). Migration is **22** per coordinator Decision #11 (21 was repurposed for X-page-accuracy). |
 
 Legend: ☐ todo · ◐ in progress · ☑ done · ⊘ deferred
 

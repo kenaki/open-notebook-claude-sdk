@@ -97,7 +97,7 @@ Chunk ids are stable. **Owns (files)** is the conflict key; **Depends-on** drive
 | B4 | CTX-CRUD | backend.md | `context_config` on session schemas + create/update/get | `api/routers/chat/schemas.py` + `api/routers/chat/sessions.py` | B2 | ☐ |
 | B5 | HYDRATE | backend.md | Hydrate-merge sidecar into session reads (per-message lookup in `_build_chat_message`) | `api/routers/chat/citations.py` | B2, B3 | ☐ |
 | B6 | NB-API | backend.md | `auto_illustrate` passthrough on notebook-update | `api/routers/notebooks.py`, `api/models.py` | B2 | ☐ |
-| B7 | SPIKES | worker.md | R3 vision + R4 relevance spikes → **S-gate** | scratch scripts only | — | ☑ spike done (ad9d70a — report.json). **S-gate → recommend GO-WITH-ADJUSTMENTS; awaiting user bless.** τ=0.6, top-K=3, PageImages-first, latency ~1–2min/illustration. Gates W2/W3 only. |
+| B7 | SPIKES | worker.md | R3 vision + R4 relevance spikes → **S-gate** | scratch scripts only | — | ☑ (ad9d70a — report.json). **S-gate BLESSED GO-WITH-ADJUSTMENTS by user 2026-07-04**: τ=0.6, top-K=3, PageImages-first + early-exit, heavy-lane mandatory (P-6). W2/W3 UNBLOCKED. SSRF/safety review mode (user-chosen): orchestrator adversarial review of the landed W1–W3 diff + user final sign-off on the end punch-list. |
 | W1 | WORKER | worker.md | Enrichment command: trigger (in `chat_completion`) → gate → route → **diagram** → sidecar | `commands/illustrate_commands.py`, `open_notebook/graphs/illustrate.py`, `prompts/illustrate/`, `commands/chat_commands.py` (trigger) | B2, B3, B5 | ☐ |
 | W2 | WORKER | worker.md | **Image** pipeline: expand → search → VLM relevance/abstain | (same as W1) | W1, **B7 (S-gate GO)** | ☐ |
 | W3 | WORKER | worker.md | **Image** safety (fail-closed) + SSRF fetch → WebP → store → sidecar | (same as W1) | W2 | ☐ |
@@ -276,8 +276,9 @@ point also remove the two superseded source dirs (`.claude/plans/auto-illustrate
 - _(2026-06-26)_ Re-anchored all plan docs to post-refactor codebase: chat router split `api/routers/chat.py` → `api/routers/chat/` package; components reorganized into `chat/` + `workspace/` subfolders; hook line numbers updated for `useNotebookChat`/`useNotebookChatSessions`/`useBuildNotebookContext` split. Baked two background-jobs async compat fixes: B5 illustration trigger moved to worker `chat-completion` command (Track C2), not `execute_chat`; F3 must reuse `use-jobs-poller.ts` (Track B1) instead of a second poll loop. [P2 ☑]
 
 ## Open Questions (defaults chosen; surface if they bite)
-- **S-gate (B7, needs-user)** — image build (W2/W3) proceeds only on GO / GO-WITH-ADJUSTMENTS. If NO-GO,
-  mark W2/W3 ⊘ deferred; diagram mode still ships.
+- ~~**S-gate (B7, needs-user)**~~ — **RESOLVED 2026-07-04: user blessed GO-WITH-ADJUSTMENTS** (τ=0.6,
+  top-K=3, PageImages-first + early-exit). W2/W3 proceed. SSRF/safety human gate satisfied via
+  orchestrator adversarial review + user sign-off parked on the end punch-list.
 - **Q-R5 (perf)** — end-to-end job latency + GPU contention on the single qwen3.6. *Default: cap candidates
   top-K≈3; measure in W; reconsider deferred pre-filters only if it hurts.*
 - **Q-mediaauth** — `GET /api/chat/media/{file}` has no auth. *Default: accept for local single-user; flag
