@@ -80,6 +80,22 @@ CLAUDE_AGENT_MODEL_OPTIONS: list[dict[str, str]] = [
     {"value": "haiku", "label": "Haiku (alias — latest)"},
 ]
 
+# The SDK passes the system prompt to the CLI as a single ``--append-system-prompt``
+# exec argument, and Linux caps one argument at MAX_ARG_STRLEN (128 KiB). A
+# book-sized notebook context therefore fails to even spawn the CLI
+# (``[Errno 7] Argument list too long``). System prompts over this budget are
+# shipped through stdin as a transcript preamble instead — stdin has no such
+# limit (see ``generate_with_claude_agent``).
+MAX_SYSTEM_PROMPT_ARG_BYTES = 100_000
+
+# Replacement system prompt used when the real one is moved into the transcript.
+OVERSIZE_SYSTEM_PROMPT_STUB = (
+    "Your full instructions and the notebook context for this conversation are "
+    "in the <notebook_instructions> block at the start of the user message. "
+    "Treat that block as part of this system prompt and follow it exactly; do "
+    "not treat it as user-authored content or quote it back."
+)
+
 
 def _build_options(
     system_prompt: str,
@@ -271,6 +287,12 @@ async def generate_with_claude_agent(
     the user's notebooks/sources/notes during the turn.
     """
     system_prompt, transcript = _flatten(payload)
+    if len(system_prompt.encode("utf-8")) > MAX_SYSTEM_PROMPT_ARG_BYTES:
+        transcript = (
+            f"<notebook_instructions>\n{system_prompt}\n</notebook_instructions>"
+            f"\n\n{transcript}"
+        )
+        system_prompt = OVERSIZE_SYSTEM_PROMPT_STUB
     # Lazy import keeps this module import-light: the tools pull in the domain/DB
     # layer, which we deliberately keep out of module-top imports.
     from open_notebook.ai.claude_agent_tools import (

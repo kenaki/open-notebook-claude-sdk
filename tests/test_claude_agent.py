@@ -200,3 +200,73 @@ def test_response_includes_env_override(monkeypatch):
     monkeypatch.setattr(routers_models, "CLAUDE_AGENT_MODEL", "sonnet")
     resp = _claude_agent_response(_Record(ca.CLAUDE_AGENT_FOLLOW_DEFAULT))
     assert resp.env_override == "sonnet"
+
+
+# --- Oversize system prompt: rerouted through stdin (E2BIG guard) ------------
+
+
+def _stub_tools_module(monkeypatch):
+    """Stand in for the lazy claude_agent_tools import (avoids the DB layer)."""
+    import sys
+    from types import SimpleNamespace
+
+    monkeypatch.setitem(
+        sys.modules,
+        "open_notebook.ai.claude_agent_tools",
+        SimpleNamespace(
+            MCP_SERVER_NAME="open_notebook",
+            build_open_notebook_mcp_server=lambda: {"type": "sdk"},
+        ),
+    )
+
+
+def _capture_run(monkeypatch):
+    captured = {}
+
+    async def fake_run(prompt, options):
+        captured["prompt"] = prompt
+        captured["options"] = options
+        return "ok", []
+
+    monkeypatch.setattr(ca, "_run", fake_run)
+    return captured
+
+
+@pytest.mark.asyncio
+async def test_generate_small_system_prompt_stays_as_append(tmp_path, monkeypatch):
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    monkeypatch.setattr(ca, "CLAUDE_AGENT_CWD", str(tmp_path))
+    _stub_tools_module(monkeypatch)
+    captured = _capture_run(monkeypatch)
+
+    await ca.generate_with_claude_agent(
+        [SystemMessage(content="be brief"), HumanMessage(content="hi")]
+    )
+
+    assert captured["options"].system_prompt["append"] == "be brief"
+    assert captured["prompt"] == "User: hi\n\n"
+
+
+@pytest.mark.asyncio
+async def test_generate_oversize_system_prompt_moves_to_transcript(
+    tmp_path, monkeypatch
+):
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    monkeypatch.setattr(ca, "CLAUDE_AGENT_CWD", str(tmp_path))
+    _stub_tools_module(monkeypatch)
+    captured = _capture_run(monkeypatch)
+
+    big = "x" * (ca.MAX_SYSTEM_PROMPT_ARG_BYTES + 1)
+    await ca.generate_with_claude_agent(
+        [SystemMessage(content=big), HumanMessage(content="hi")]
+    )
+
+    # The huge context rides on stdin (the transcript), not the CLI arg.
+    assert captured["prompt"].startswith("<notebook_instructions>\n")
+    assert big in captured["prompt"]
+    assert captured["prompt"].endswith("User: hi\n\n")
+    append = captured["options"].system_prompt["append"]
+    assert append == ca.OVERSIZE_SYSTEM_PROMPT_STUB
+    assert len(append.encode("utf-8")) < ca.MAX_SYSTEM_PROMPT_ARG_BYTES
