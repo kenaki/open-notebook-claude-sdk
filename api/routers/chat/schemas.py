@@ -18,6 +18,10 @@ class CreateSessionRequest(BaseModel):
     tags: Optional[List[str]] = Field(
         None, description="Grouping tags to assign to this session"
     )
+    context_config: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Per-chat source/note context selection; null = inherit notebook default",
+    )
 
 
 class UpdateSessionRequest(BaseModel):
@@ -33,6 +37,10 @@ class UpdateSessionRequest(BaseModel):
     )
     tags: Optional[List[str]] = Field(
         None, description="Grouping tags for this session (replaces existing)"
+    )
+    context_config: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Per-chat source/note context selection; null = inherit notebook default",
     )
 
 
@@ -113,6 +121,10 @@ class ChatSessionResponse(BaseModel):
     )
     tags: List[str] = Field(
         default_factory=list, description="Grouping tags assigned to this session"
+    )
+    context_config: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Per-chat source/note context selection; null = inherit notebook default",
     )
 
 

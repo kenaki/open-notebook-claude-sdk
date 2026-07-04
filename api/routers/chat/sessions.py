@@ -43,7 +43,8 @@ async def get_sessions(notebook_id: str = Query(..., description="Notebook ID"))
                         notebook_id=notebook_id,
                         message_count=msg_count,
                         default_title="Untitled Session",
-                    )
+                    ),
+                    context_config=getattr(session, "context_config", None),
                 )
             )
 
@@ -68,6 +69,7 @@ async def create_session(request: CreateSessionRequest):
             parent_session_id=request.parent_session_id,
             quote=request.quote,
             tags=request.tags or [],
+            context_config=request.context_config,
         )
         await session.save()
 
@@ -79,7 +81,8 @@ async def create_session(request: CreateSessionRequest):
                 notebook_id=request.notebook_id,
                 message_count=0,
                 default_title="",
-            )
+            ),
+            context_config=session.context_config,
         )
     except Exception as e:
         logger.error(f"Error creating chat session: {str(e)}")
@@ -122,6 +125,7 @@ async def get_session(session_id: str):
                 message_count=len(messages),
                 default_title="Untitled Session",
             ),
+            context_config=getattr(session, "context_config", None),
             messages=messages,
         )
     except Exception as e:
@@ -153,6 +157,9 @@ async def update_session(session_id: str, request: UpdateSessionRequest):
         if "tags" in update_data:
             session.tags = update_data["tags"] or []
 
+        if "context_config" in update_data:
+            session.context_config = update_data["context_config"]
+
         await session.save()
 
         notebook_id = await session.get_notebook_id()
@@ -165,7 +172,8 @@ async def update_session(session_id: str, request: UpdateSessionRequest):
                 notebook_id=notebook_id,
                 message_count=msg_count,
                 default_title="",
-            )
+            ),
+            context_config=getattr(session, "context_config", None),
         )
     except Exception as e:
         logger.error(f"Error updating session: {str(e)}")
