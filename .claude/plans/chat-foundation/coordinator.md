@@ -93,14 +93,14 @@ Chunk ids are stable. **Owns (files)** is the conflict key; **Depends-on** drive
 | P2 | PRE | — | Re-anchor plan docs + async compat fixes (post-refactor paths + B5/F3 compat bakes) | `coordinator.md`, `backend.md`, `frontend.md`, `worker.md` | — | ☑ |
 | B1 | MIG | backend.md | Migration 18 (all 3 schema changes) + register | `migrations/18.surrealql`, `18_down.surrealql`, `database/async_migrate.py` | — | ☑ (454d328 — appended at END, positional v21; applied live + schema verified) |
 | B2 | MODELS | backend.md | Domain models: `ChatMessageMedia` + `Notebook.auto_illustrate` + `ChatSession.context_config` | `open_notebook/domain/notebook.py` | B1 | ☑ (8cc887e — live save/read round-trip OK; test_domain 32 pass. Anchors stale: Notebook :70, ChatSession :970) |
-| B3 | MSGID | backend.md | Stable AIMessage `.id` (checkpoint-persistent) | `open_notebook/graphs/chat.py` | — | ☑ (454d328 — hand-applied onto post-tool-loop chat.py:284; plan's :178 anchor was stale) |
+| B3 | MSGID | backend.md | Stable AIMessage `.id` (checkpoint-persistent) | `open_notebook/graphs/chat.py` | — | ☑ (454d328 + **repair e2755a3**: the `or` fallback never fired — providers supply ids (lc_run--*/UUIDs), so no real message ever got the `ai-` prefix (DG-W1-A, found by W1). Now forces `ai-` unless already prefixed; live-verified `ai-f9b712e5…`) |
 | B4 | CTX-CRUD | backend.md | `context_config` on session schemas + create/update/get | `api/routers/chat/schemas.py` + `api/routers/chat/sessions.py` | B2 | ☑ (fddc233 — live round-trip verified: create/GET/PUT-populated/PUT-null-clears) |
 | B5 | HYDRATE | backend.md | Hydrate-merge sidecar into session reads (per-message lookup in `_build_chat_message`) | `api/routers/chat/citations.py` | B2, B3 | ☑ (6fa41b0 — merge logic mock-verified all modes + degrade; sidecar persistence verified live post mig-18 repair 633eeea; fence-in-session e2e rides W1 verify) |
 | B6 | NB-API | backend.md | `auto_illustrate` passthrough on notebook-update | `api/routers/notebooks.py`, `api/models.py` | B2 | ☑ (5328ed5 — live verified: PUT false persists, reads back, reset true) |
 | B7 | SPIKES | worker.md | R3 vision + R4 relevance spikes → **S-gate** | scratch scripts only | — | ☑ (ad9d70a — report.json). **S-gate BLESSED GO-WITH-ADJUSTMENTS by user 2026-07-04**: τ=0.6, top-K=3, PageImages-first + early-exit, heavy-lane mandatory (P-6). W2/W3 UNBLOCKED. SSRF/safety review mode (user-chosen): orchestrator adversarial review of the landed W1–W3 diff + user final sign-off on the end punch-list. |
-| W1 | WORKER | worker.md | Enrichment command: trigger (in `chat_completion`) → gate → route → **diagram** → sidecar | `commands/illustrate_commands.py`, `open_notebook/graphs/illustrate.py`, `prompts/illustrate/`, `commands/chat_commands.py` (trigger) | B2, B3, B5 | ☐ |
-| W2 | WORKER | worker.md | **Image** pipeline: expand → search → VLM relevance/abstain | (same as W1) | W1, **B7 (S-gate GO)** | ☐ |
-| W3 | WORKER | worker.md | **Image** safety (fail-closed) + SSRF fetch → WebP → store → sidecar | (same as W1) | W2 | ☐ |
+| W1 | WORKER | worker.md | Enrichment command: trigger (in `chat_completion`) → gate → route → **diagram** → sidecar | `commands/illustrate_commands.py`, `open_notebook/graphs/illustrate.py`, `prompts/illustrate/`, `commands/chat_commands.py` (trigger) | B2, B3, B5 | ☑ (01633fc + orchestrator repair e2755a3 for DG-W1-A. **Live e2e PASS**: real chat turn → trigger → gate ON → GPU sequenceDiagram → sidecar → mermaid fence hydrated in session @106s; toggle-OFF turn submits no illustrate job) |
+| W2 | WORKER | worker.md | **Image** pipeline: expand → search → VLM relevance/abstain | (same as W1) | W1, **B7 (S-gate GO)** | ☑ (11d8898 — in-process verify: Rosetta Stone → PageImages EARLY-EXIT, conf 1.00 chosen; abstract subject → deliberate ABSTAIN; τ=0.6/top-K=3 honored; +gate-503 backoff retry shared with W1 path. W3 seam stub declines → mode='none' until W3) |
+| W3 | WORKER | worker.md | **Image** safety (fail-closed) + SSRF fetch → WebP → store → sidecar | (same as W1) | W2 | ☑ code (5edf9f1 — 21/21 offline cases + live image e2e PASS: real chat turn → search → safety-judged → SSRF-fetched → WebP stored → served 200/image-webp 329KB → hydrated). **⚠ Security review found 2 real findings (HIGH SSRF in judge fetch + MED-HIGH bait-and-switch) → `to-fix/002` — MUST fix before W2/W3 sign-off.** Storage fetch itself verified clean. |
 | F1 | FE-TYPES | frontend.md | Types + chat-api passthrough (`context_config`, `auto_illustrate`) | `frontend/src/lib/types/api.ts`, `frontend/src/lib/api/chat.ts` | — | ☑ (454d328 — done by orchestrator on HEAD; chat.ts passes full body, no change needed) |
 | F2 | FE-HOOK | frontend.md | `useNotebookChat`: per-session context resolution + quote-only seed + setter | `frontend/src/lib/hooks/useNotebookChat.ts` (+ `useBuildNotebookContext.ts` buildContextFor extraction, `useNotebookChatSessions.ts` seed+setter — authorized cross-file, disjoint from wave) | F1 | ☑ (8cc887e — tsc clean; setSessionContextConfig exported for F5) |
 | F3 | FE-POLLER | frontend.md | Jobs poller: `'illustration'` kind → auto-register + session invalidate (silent, no toast) | `frontend/src/lib/stores/jobs-store.ts`, `frontend/src/lib/hooks/use-jobs-poller.ts` (+ `components/jobs/JobTrayItem.tsx` Wand2 icon — type-forced ripple, disjoint) | F1 | ☑ (8cc887e — tsc clean; silent on completion+failure; invalidates session query) |
@@ -223,6 +223,34 @@ point also remove the two superseded source dirs (`.claude/plans/auto-illustrate
 `.claude/plans/per-chat-context`) and the loose `.claude/plans/shimmering-fluttering-candle.md` if present.
 
 ## Changelog (cross-track)
+- _(2026-07-04)_ **W3 landed (5edf9f1) — image path code-complete + LIVE image e2e PASS.** Real chat turn
+  ("Tell me about the Rosetta Stone") → gate routed IMAGE → PageImages → qwen3.6-VL safety judge SAFE
+  (46.8s) → SSRF-guarded pinned fetch → WebP re-encode (329KB) → stored + served `GET /api/chat/media/
+  <sha256>.webp` 200/image-webp → hydrated into `.media` of the AI message. W3 offline verify 21/21
+  (SSRF negatives, byte-cap, non-image, redirect-to-private, fail-closed safety, dedupe). **Orchestrator
+  adversarial security review verdict = SIGN-OFF-WITH-NOTES → effectively BLOCK on 2 real findings
+  (`to-fix/002`):** (1) HIGH — the *judge/relevance* fetch `_fetch_image_data_uri` has NONE of the SSRF
+  guard the storage fetch has (no validation on relevance candidates, follows redirects unrevalidated, no
+  IP pin) → blind SSRF to localhost/metadata; (2) MED-HIGH — safety judges one fetch but storage does a
+  *separate* fetch, stored bytes never re-judged (bait-and-switch). **Both fixed by one change:** route
+  every image fetch through the guarded pinned fetcher, judge-and-store the SAME bytes once. **Until
+  `to-fix/002` lands, W2/W3 are NOT security-signed-off** (diagram path W1 unaffected). The *storage*
+  fetch, path-traversal, fail-closed direction, EXIF-strip all verified clean. **This is the #1 remaining
+  code item** — everything else left is human punch-list (visual smokes) or the un-blocking b2/b3 book re-run.
+- _(2026-07-04)_ **Waves 4–5 landed: W1 ☑ (01633fc + e2755a3), W2 ☑ (11d8898); T3-d (cross-plan tail) also in (bc44fbe).**
+  **W1 live e2e PASS on the running stack:** real chat turn → 202 → worker → stable `ai-` id → trigger →
+  gate ON → qwen3.6 sequenceDiagram (~2min heavy-lane) → sidecar `mode='diagram'` → B5 hydrate shows the
+  ```mermaid fence in `GET /chat/sessions/{id}` at 106s; toggle-OFF turn submits NO illustrate job.
+  **DG-W1-A (HIGH, found by W1's agent, fixed by orchestrator e2755a3):** B3's `ai_message.id or …` never
+  assigned the `ai-` prefix on real providers — the whole illustration/hydrate chain keyed on it and would
+  never have fired; now forced per contract #5. **W1 decisions:** gate max_tokens 2048 (qwen ignores
+  /no_think — 1024 was all-<think> → empty), commands/__init__.py registration edit, lazy heavy-lane import
+  (broke a real import cycle), `mode='none'` sidecar on definitive declines. **W2:** promotes the B7
+  pipeline with S-gate adjustments — PageImages-first + early-exit (fired on "Rosetta Stone", conf 1.00),
+  Commons+Openverse fallback, VLM rank+threshold with deliberate abstain verified on an abstract subject;
+  adds bounded gate-503 backoff (ds4↔Ollama slot transitions) shared with the diagram path. Image path
+  still resolves `mode='none'` until W3 fills the `_fetch_and_store_image` seam. Next: W3 (safety+SSRF) →
+  orchestrator adversarial security review → live image e2e.
 - _(2026-07-04)_ **Wave 3 landed: B4 ☑ (fddc233), B5 ☑ (6fa41b0), B6 ☑ (5328ed5), F5 ☑ (429dfea).** Run via
   `/chunk-plan-execute` (cross-plan finish run), 4 parallel worktree agents, all clean ff from 520627c —
   the baked-in stale-base guard held. Merged-tree verify green: backend 66+12 pass, imports clean, tsc

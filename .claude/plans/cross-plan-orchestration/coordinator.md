@@ -302,9 +302,9 @@ Legend: ☐ todo · ◐ in-flight · ☑ done. Update the per-plan coordinator's
 | 5d | B4 | document-foundation | 🔵 | ☑ (c6f6004 + fix 8c0b606 — Decision #21 RESOLVED; live-verified 281,733→3,378 chars, no balloon) |
 | 5d | B5 | document-foundation | 🔵 | ☑ (1effece — live-verified 2026-07-03: agent called get_source_outline+get_section) |
 | 5e | X-page | document-foundation | 🔵 | ☑ (mig 21 8009995 — ungroup vector_search per-passage page fidelity; applied + verified live 2026-07-03) |
-| 6+ | chat-foundation W1–W6 (Lane A #2 — RUNNING) | — | mixed | ◐ W1 ☑ (454d328: B1/B3/F1/F4) · W2 ☑ (8cc887e: B2/F2/F3/F6) · **B7 S-gate BLESSED 2026-07-04** · **W3 ☑ (fddc233/6fa41b0/5328ed5/429dfea: B4/B5/B6/F5 + mig-18 comment-swallow repair 633eeea)**. Next: worker W1(diagram) → W2→W3(image) |
-| last | T3-d | codebase-cleanup-audit | 🟣 | ☐ |
-| last | Phase4 | document-foundation | 🔵 | ☐ (user opted IN 2026-07-04 — mig 22 + source_annotation CRUD + highlight plugin; runs in the finish-run's Wave 2) |
+| 6+ | chat-foundation W1–W6 (Lane A #2 — RUNNING) | — | mixed | ◐ ALL 16 chunks code-complete: worker W1 ☑ (LIVE diagram e2e), W2 ☑, **W3 ☑ (5edf9f1 — LIVE image e2e PASS: served .webp 329KB hydrated)**. **⚠ security review → `to-fix/002`: 2 real findings (HIGH SSRF judge fetch + MED-HIGH bait-and-switch) MUST fix before W2/W3 sign-off — #1 remaining code item.** Then punch-list smokes → archive. |
+| last | T3-d | codebase-cleanup-audit | 🟣 | ☑ (bc44fbe — 3 bridges → run_async_in_node factory helper; both branches proven + real chat e2e 9.6s no-deadlock; 44 tests pass) |
+| last | Phase4 | document-foundation | 🔵 | ☑ (83ecb9a — mig 22 applied live v22; annotation CRUD round-trip PASS; highlight plugin + sidebar + chat-about-highlight; visual smoke on punch-list) |
 | fix | to-fix/001 silent-failed-chat-jobs | (bugfix, user-approved 2026-07-04) | 🔵 | ☑ (no-op — already fixed by 3537d09's `resolveDisappearedJob`; verified line-by-line; live repro on punch-list) |
 | fix | to-fix/b2-b3 pipeline-empty-output | (bugfix, user-approved 2026-07-04 — gates df archival) | 🔵 | ☑ code (7c51ea5 — root cause: fan-out raced build_sections + unset default_vision_model silently swallowed; both repros write real output. Full 472-section book re-run queued post-waves) |
 

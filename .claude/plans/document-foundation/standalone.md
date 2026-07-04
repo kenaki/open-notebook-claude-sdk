@@ -275,7 +275,7 @@ null (never guess). One-time operation; run manually.
 |-------|-------|--------|-------|
 | Phase1 | PDFViewer.tsx inline viewer (FE-only) | ☑ | commit 1608053; @react-pdf-viewer/core+default-layout+pdfjs-dist, PDFViewer.tsx, Original PDF tab in SourceDetailContent, next.config worker alias, 14 locales. ⚠ browser render spot-check still pending (manual) |
 | Phase3 | page_number/bbox + vector_search + #p=N citations (mig 20) | ◐ | commit b525c88 (wave5 2026-07-02); code landed + static-verified. **Live spot-checks parked** (migration-apply + fn::vector_search redefine, re-embed→page_number, chat #p=N emission, citation→PDF click, npm build). Citation-click final wiring → C4 (parser forwards `page`) |
-| Phase4 | Annotations (source_annotation, mig **22**, highlight plugin) | ☐ | **UN-DEFERRED 2026-07-04** (user opted in during the cross-plan finish run; Phase1+Phase3 code ☑). Migration is **22** per coordinator Decision #11 (21 was repurposed for X-page-accuracy). |
+| Phase4 | Annotations (source_annotation, mig **22**, highlight plugin) | ☑ | commit 83ecb9a (2026-07-04 finish run). Mig 22 applied live (DB positional v22, no comment-swallow); live CRUD round-trip PASS (POST 201→GET→PATCH→DELETE); `@react-pdf-viewer/highlight@3.12`, rect = HighlightArea[] percentages verbatim; sidebar + popover + chat-about-highlight (full source page only, mirrors existing modal pattern). ⚠ visual browser smoke on punch-list. |
 
 Legend: ☐ todo · ◐ in progress · ☑ done · ⊘ deferred
 
