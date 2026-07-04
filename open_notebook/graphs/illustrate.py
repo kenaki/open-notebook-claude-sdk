@@ -20,23 +20,32 @@ Design contracts (see ``.claude/plans/chat-foundation/coordinator.md``):
 - qwen3.6 is a THINKING model — strip ``<think>`` via ``clean_thinking_content``
   and set ``max_tokens`` explicitly (unset → truncated/garbled JSON, B7 lesson).
 
-W2 (this chunk) builds the candidate→judge HALF of the image pipeline: query
-expansion → search (Wikipedia PageImages first, with early-exit; else Wikimedia
-Commons + Openverse) → qwen3.6 VLM relevance judge with **abstain** (rank +
-threshold at τ, top-K candidates). It hands the chosen external URL to the W3
-seam ``_fetch_and_store_image`` — which in W2 is a STUB that logs and returns
-``None``, so the image path still resolves to ``mode='none'`` (no bytes fetched
-for storage, no ``mode='image'`` sidecar). W3 replaces the stub body with the
-safety judge (fail-closed) + SSRF-guarded fetch → WebP → store → ``mode='image'``
-sidecar; the branch already writes ``mode='image'`` the moment the stub returns a
-``MediaItem`` dict.
+W2 builds the candidate→judge HALF of the image pipeline: query expansion →
+search (Wikipedia PageImages first, with early-exit; else Wikimedia Commons +
+Openverse) → qwen3.6 VLM relevance judge with **abstain** (rank + threshold at τ,
+top-K candidates). It hands the chosen external URL to ``_fetch_and_store_image``.
+
+W3 (this chunk) fills ``_fetch_and_store_image``: the chosen URL is turned into a
+stored, SAME-ORIGIN ``MediaItem`` via, in order, (1) an SSRF pre-check of the URL,
+(2) a **fail-closed** qwen3.6-VL safety judge (unsafe / error → abstain), (3) an
+SSRF-guarded, byte-capped, redirect-revalidating storage fetch that PINS the
+validated IP (defeats DNS-rebinding), (4) a Pillow decode → WebP re-encode that
+strips EXIF/metadata, and (5) a content-addressed atomic store under
+``CHAT_MEDIA_FOLDER``. Returning the ``MediaItem`` dict makes ``_finish_image``
+write the ``mode='image'`` sidecar; any failure anywhere → ``None`` → ``mode='none'``.
 """
 
 import asyncio
 import base64
+import hashlib
+import ipaddress
 import json
+import os
 import re
+import socket
+import tempfile
 from typing import Optional
+from urllib.parse import urljoin, urlparse, urlunparse
 
 import httpx
 from ai_prompter import Prompter
@@ -46,6 +55,7 @@ from loguru import logger
 
 from open_notebook.ai.models import DefaultModels
 from open_notebook.ai.provision import provision_langchain_model
+from open_notebook.config import CHAT_MEDIA_FOLDER
 from open_notebook.database.repository import repo_query
 from open_notebook.domain.notebook import ChatMessageMedia
 from open_notebook.graphs.chat import graph as chat_graph
@@ -125,6 +135,135 @@ _GATE_RETRY_SIGNATURES = (
     "503",
     "loading",
 )
+
+# ---- Image safety + SSRF-guarded storage fetch (W3) -----------------------
+# The safety judge (D3, fail-closed) reuses ``_invoke_vlm``; qwen3.6 is a
+# thinking model, so leave room for the <think> block before the tiny JSON.
+_SAFETY_MAX_TOKENS = 3072
+
+# STORAGE fetch (distinct from the judge-only fetch above): the bytes we persist
+# and later serve from ``/api/chat/media/{file}``. Because the URL originates
+# from an external search API, it is treated as attacker-influenceable and gets
+# the full SSRF posture: DNS resolved + every address range-checked, the
+# validated IP pinned for the actual TCP connection (defeats DNS rebinding),
+# redirects followed MANUALLY with a full re-validation per hop (defeats
+# rebind-via-redirect), and a HARD byte cap enforced on bytes actually received
+# (Content-Length is never trusted).
+_STORE_FETCH_TIMEOUT = 25.0
+_STORE_FETCH_MAX_BYTES = 15_000_000  # 15 MB hard cap on received bytes.
+_MAX_REDIRECTS = 3
+_REDIRECT_STATUSES = (301, 302, 303, 307, 308)
+
+# WebP re-encode quality (lossy). Re-encoding strips ALL source metadata (EXIF,
+# GPS, ICC, XMP) as a side effect — a deliberate privacy/safety property.
+_WEBP_QUALITY = 85
+
+
+class _SSRFError(Exception):
+    """A candidate URL failed SSRF validation (bad scheme / DNS / IP range).
+
+    Carries a human-readable reason for the abstain log. Kept local so nothing
+    external ever has to catch it — every caller degrades to ``None``.
+    """
+
+
+def _ip_is_blocked(ip_str: str) -> bool:
+    """True if ``ip_str`` falls in a non-public range we must never fetch from.
+
+    Fail-closed: an unparseable address, or ANY of private / loopback /
+    link-local / reserved / multicast / unspecified, is blocked — checked for
+    both the address itself AND, for IPv4-mapped IPv6 (``::ffff:a.b.c.d``), the
+    embedded IPv4 (which would otherwise slip past the v6 flag checks).
+    """
+    try:
+        ip = ipaddress.ip_address(ip_str)
+    except ValueError:
+        return True  # not a valid IP → refuse.
+    candidates = [ip]
+    mapped = getattr(ip, "ipv4_mapped", None)
+    if mapped is not None:
+        candidates.append(mapped)
+    for c in candidates:
+        if (
+            c.is_private
+            or c.is_loopback
+            or c.is_link_local
+            or c.is_reserved
+            or c.is_multicast
+            or c.is_unspecified
+        ):
+            return True
+    return False
+
+
+def _validate_public_url(url: str) -> tuple:
+    """Validate one URL for the storage fetch and return the connection pin.
+
+    Blocking (DNS): call via ``asyncio.to_thread``. Enforces the scheme
+    allowlist, resolves the host itself, and range-checks EVERY resolved address
+    (v4 AND v6) — if ANY resolved address is non-public the whole URL is rejected
+    (a resolver returning ``[public, 127.0.0.1]`` must not sneak through).
+
+    Returns ``(scheme, hostname, port, pinned_ip, family)`` for the FIRST
+    (validated) address, which the caller pins for the TCP connection. Raises
+    ``_SSRFError`` with a reason on any failure.
+    """
+    parsed = urlparse(url)
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in ("http", "https"):
+        raise _SSRFError(f"scheme {scheme!r} not in http/https allowlist")
+    host = parsed.hostname
+    if not host:
+        raise _SSRFError("no hostname in URL")
+    port = parsed.port or (443 if scheme == "https" else 80)
+
+    try:
+        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+    except socket.gaierror as e:
+        raise _SSRFError(f"DNS resolution failed for {host!r}: {e}")
+    except Exception as e:  # noqa: BLE001 - any resolver failure → refuse
+        raise _SSRFError(f"DNS error for {host!r}: {type(e).__name__}")
+
+    resolved: list[tuple[int, str]] = []
+    for family, _, _, _, sockaddr in infos:
+        ip = str(sockaddr[0]).split("%")[0]  # drop any IPv6 zone id.
+        if _ip_is_blocked(ip):
+            raise _SSRFError(
+                f"{host!r} resolves to non-public address {ip!r} — blocked"
+            )
+        resolved.append((family, ip))
+    if not resolved:
+        raise _SSRFError(f"no addresses resolved for {host!r}")
+
+    family, pinned_ip = resolved[0]
+    return (scheme, host, port, pinned_ip, family)
+
+
+def _build_pinned_request(validated: tuple, current_url: str) -> tuple:
+    """Turn a validated tuple + the (hostname) URL into the pinned request
+    parts: ``(pinned_url, host_header, extensions)``.
+
+    The connection targets the pinned IP, but the HTTP ``Host`` header and TLS
+    SNI/cert-verification host both stay the ORIGINAL hostname (httpx verifies
+    the certificate against the ``sni_hostname`` extension — empirically confirmed
+    against httpx 0.28.1). This is what makes IP-pinning safe over TLS.
+    """
+    scheme, host, port, pinned_ip, family = validated
+    parsed = urlparse(current_url)
+    if family == socket.AF_INET6:
+        netloc = f"[{pinned_ip}]:{port}"
+    else:
+        netloc = f"{pinned_ip}:{port}"
+    pinned_url = urlunparse(
+        (scheme, netloc, parsed.path or "/", parsed.params, parsed.query, "")
+    )
+    is_default_port = (scheme == "https" and port == 443) or (
+        scheme == "http" and port == 80
+    )
+    host_disp = f"[{host}]" if ":" in host else host
+    host_header = host_disp if is_default_port else f"{host_disp}:{port}"
+    extensions = {"sni_hostname": host} if scheme == "https" else {}
+    return pinned_url, host_header, extensions
 
 
 def _prefixed(value: str, table: str) -> str:
@@ -637,6 +776,175 @@ async def _judge_pool(
     return judged
 
 
+async def _safety_ok(data_uri: str, model_id: Optional[str]) -> bool:
+    """qwen3.6-VL zero-shot safety judge (D3, FAIL-CLOSED).
+
+    Returns ``True`` ONLY on an explicit ``{"safe": true}`` verdict. Any other
+    verdict, an unparseable response, or any raised error → ``False`` (unsafe).
+    Errors are NOT swallowed here so the caller's outer guard also degrades to
+    abstain; either way the image never gets fetched-for-storage or stored.
+    """
+    prompt = Prompter(prompt_template="illustrate/safety").render(data={})
+    raw = await _invoke_vlm(model_id, prompt, data_uri, _SAFETY_MAX_TOKENS)
+    verdict = _extract_json_object(raw)
+    if not isinstance(verdict, dict):
+        logger.info("illustrate safety: no parseable verdict → UNSAFE (fail-closed)")
+        return False
+    safe = verdict.get("safe") is True
+    if not safe:
+        logger.info(
+            f"illustrate safety: UNSAFE verdict → reject "
+            f"({str(verdict.get('reason') or '')[:60]!r})"
+        )
+    return safe
+
+
+async def _ssrf_guarded_fetch(url: str) -> Optional[bytes]:
+    """Fetch ``url`` for STORAGE with the full SSRF posture. Never raises.
+
+    Per hop (max ``_MAX_REDIRECTS``): re-validate scheme + DNS + IP ranges, pin
+    the validated IP for the TCP connection (Host header + TLS SNI stay the
+    hostname), and DON'T auto-follow redirects — resolve ``Location`` against the
+    current URL and re-run the FULL validation on the next hop (defeats
+    DNS-rebinding, incl. rebind-via-redirect). Streams the body with a HARD byte
+    cap enforced on bytes actually received (``Content-Length`` is never trusted).
+    Returns the raw bytes, or ``None`` on any rejection / error.
+    """
+    current = url
+    try:
+        async with httpx.AsyncClient(
+            follow_redirects=False,
+            timeout=_STORE_FETCH_TIMEOUT,
+            headers={"User-Agent": _USER_AGENT},
+        ) as client:
+            for hop in range(_MAX_REDIRECTS + 1):
+                validated = await asyncio.to_thread(_validate_public_url, current)
+                pinned_url, host_header, extensions = _build_pinned_request(
+                    validated, current
+                )
+                async with client.stream(
+                    "GET",
+                    pinned_url,
+                    headers={"Host": host_header, "User-Agent": _USER_AGENT},
+                    extensions=extensions,
+                ) as resp:
+                    if resp.status_code in _REDIRECT_STATUSES:
+                        location = resp.headers.get("location")
+                        if not location:
+                            logger.info(
+                                "illustrate store-fetch: redirect without Location → reject"
+                            )
+                            return None
+                        if hop >= _MAX_REDIRECTS:
+                            logger.info(
+                                f"illustrate store-fetch: exceeded {_MAX_REDIRECTS} "
+                                f"redirects → reject"
+                            )
+                            return None
+                        current = urljoin(current, location)
+                        logger.info(
+                            f"illustrate store-fetch: redirect hop {hop + 1} → "
+                            f"re-validating {current[:80]!r}"
+                        )
+                        continue
+                    resp.raise_for_status()
+                    buf = bytearray()
+                    async for chunk in resp.aiter_bytes():
+                        buf.extend(chunk)
+                        if len(buf) > _STORE_FETCH_MAX_BYTES:
+                            logger.info(
+                                f"illustrate store-fetch: exceeded "
+                                f"{_STORE_FETCH_MAX_BYTES}-byte cap → reject"
+                            )
+                            return None
+                    return bytes(buf)
+        return None
+    except _SSRFError as e:
+        logger.info(f"illustrate store-fetch: SSRF reject → {e}")
+        return None
+    except Exception as e:  # noqa: BLE001 - any transport error → abstain
+        logger.info(
+            f"illustrate store-fetch failed for {url[:60]!r}: {type(e).__name__}: {e}"
+        )
+        return None
+
+
+def _decode_reencode_webp(data: bytes) -> Optional[bytes]:
+    """Decode ``data`` as a real raster image via Pillow, then re-encode to WebP.
+
+    Runs in a worker thread (Pillow is blocking). Keeps Pillow's DEFAULT
+    decompression-bomb limit (does not raise it) and promotes the bomb WARNING to
+    an error so an oversized-pixel image fails closed. The WebP re-encode strips
+    all source metadata (EXIF/GPS/ICC/XMP). Returns WebP bytes, or ``None`` if the
+    bytes are not a decodable raster image.
+    """
+    import warnings
+    from io import BytesIO
+
+    from PIL import Image
+
+    try:
+        with warnings.catch_warnings():
+            # Fail closed on a decompression-bomb WARNING (default limit kept).
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(BytesIO(data)) as im:
+                im.load()  # force full decode (raises on truncated/bomb payloads).
+                if im.mode in ("RGBA", "LA") or (
+                    im.mode == "P" and "transparency" in im.info
+                ):
+                    im = im.convert("RGBA")
+                else:
+                    im = im.convert("RGB")
+                out = BytesIO()
+                im.save(out, format="WEBP", quality=_WEBP_QUALITY, method=6)
+                return out.getvalue()
+    except Exception as e:  # noqa: BLE001 - not a usable raster image.
+        logger.info(f"illustrate normalize: not a decodable image ({type(e).__name__})")
+        return None
+
+
+def _resolve_media_path(filename: str) -> str:
+    """Resolve ``filename`` under ``CHAT_MEDIA_FOLDER`` with a path-traversal
+    guard (mirrors ``api.upload_utils.resolve_within`` to avoid an
+    ``open_notebook`` → ``api`` import). Raises ``ValueError`` on escape."""
+    safe_name = os.path.basename(filename)
+    if not safe_name:
+        raise ValueError("Invalid filename")
+    safe_root = os.path.realpath(CHAT_MEDIA_FOLDER)
+    resolved = os.path.realpath(os.path.join(safe_root, safe_name))
+    if resolved != safe_root and not resolved.startswith(safe_root + os.sep):
+        raise ValueError("Invalid filename: path traversal detected")
+    return resolved
+
+
+def _store_webp(webp: bytes) -> Optional[str]:
+    """Content-address ``webp`` as ``<sha256>.webp`` and write it atomically under
+    ``CHAT_MEDIA_FOLDER``. The hash filename gives natural dedupe (identical bytes
+    → same name → skip the rewrite). Returns the filename, or ``None`` on failure.
+    Blocking (disk I/O): call via ``asyncio.to_thread``.
+    """
+    try:
+        digest = hashlib.sha256(webp).hexdigest()
+        filename = f"{digest}.webp"
+        dest = _resolve_media_path(filename)  # defense-in-depth containment check.
+        if os.path.exists(dest):
+            return filename  # dedupe: already stored.
+        os.makedirs(CHAT_MEDIA_FOLDER, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=CHAT_MEDIA_FOLDER, suffix=".webp.tmp")
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(webp)
+            os.replace(tmp, dest)  # atomic within the same directory.
+        except Exception:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+            raise
+        return filename
+    except Exception as e:  # noqa: BLE001 - storage failure → abstain.
+        logger.warning(f"illustrate store: failed to write WebP: {type(e).__name__}: {e}")
+        return None
+
+
 async def _fetch_and_store_image(
     candidate: dict,
     subject: str,
@@ -644,33 +952,93 @@ async def _fetch_and_store_image(
     session_id: str,
     model_id: Optional[str],
 ) -> Optional[dict]:
-    """W3 SEAM — turn the chosen candidate into a stored, safe ``MediaItem`` dict.
+    """W3 — turn the chosen candidate into a stored, safe ``MediaItem`` dict.
 
-    **W2 stub:** logs the chosen URL and returns ``None`` (→ the image path
-    abstains, writes ``mode='none'``). No bytes are fetched for storage and no
-    ``mode='image'`` sidecar is written in W2.
+    Order (fail-closed at every step; NOTHING raises out of this function):
+    1. **SSRF pre-check** of ``candidate['url']`` (scheme + DNS + IP ranges).
+       Rejecting here means neither the safety-judge fetch nor the storage fetch
+       ever touches a non-public host — an attacker-influenced candidate URL
+       (e.g. from a poisoned search response) cannot SSRF via the judge fetch.
+    2. **Safety judge FIRST** (D3): fetch a capped throwaway copy of the bytes
+       (reusing the W2 judge-fetch) and send them to qwen3.6-VL. Unsafe verdict /
+       parse failure / any error → abstain. The STORAGE fetch below never runs
+       until the verdict is safe.
+    3. **SSRF-guarded storage fetch** (re-validates + pins + manual redirect
+       re-validation + hard byte cap).
+    4. **Normalize**: Pillow decode (default bomb limit) → re-encode to WebP
+       (strips EXIF) in a worker thread.
+    5. **Store**: ``sha256(webp)`` filename, atomic write under
+       ``CHAT_MEDIA_FOLDER`` (traversal-guarded), natural dedupe.
+    6. Return ``{"type": "image", "url": "/api/chat/media/<hash>.webp",
+       "label": candidate.get("title") or subject}`` — the truthy return makes the
+       caller (``_finish_image``) write the ``mode='image'`` sidecar.
 
-    **W3 fills this in** with, in order: qwen3.6-VL safety judge (fail-closed —
-    unsafe / error / timeout → return ``None``); SSRF-guarded, byte-capped,
-    redirect-revalidating fetch of ``candidate['url']``; Pillow decode →
-    re-encode to WebP (strips EXIF); hash-dedupe store under ``CHAT_MEDIA_FOLDER``;
-    then RETURN the ``MediaItem`` dict
-    ``{"type": "image", "url": "/api/chat/media/<hash>.webp",
-       "label": candidate.get("title") or subject}``.
-    Returning that dict makes the caller write the ``mode='image'`` sidecar.
-
-    Params it will need are all here: the chosen ``candidate`` (``url``/``title``/
-    ``source``/``confidence``), the ``subject`` (MediaItem label fallback),
-    ``message_id``/``session_id`` (sidecar keys), and ``model_id`` (the resolved
-    qwen3.6 for the safety judge — pass to ``_invoke_vlm``).
+    Any failure anywhere → log + ``return None`` (→ ``mode='none'`` abstain).
     """
-    logger.info(
-        f"illustrate: chosen image for {message_id} → "
-        f"url={candidate.get('url')!r} source={candidate.get('source')!r} "
-        f"conf={candidate.get('confidence')} title={candidate.get('title', '')[:60]!r}; "
-        f"W3 safety+fetch+store not built → abstaining (mode='none')"
-    )
-    return None
+    url = (candidate or {}).get("url")
+    if not url or not isinstance(url, str):
+        logger.info(f"illustrate: chosen candidate for {message_id} has no url → none")
+        return None
+
+    try:
+        # 1. SSRF pre-check — refuse non-public targets BEFORE any fetch (incl.
+        #    the safety-judge fetch), so the throwaway judge fetch can't SSRF.
+        try:
+            await asyncio.to_thread(_validate_public_url, url)
+        except _SSRFError as e:
+            logger.info(f"illustrate: candidate url rejected pre-fetch → {e}")
+            return None
+
+        # 2. SAFETY FIRST (fail-closed). Reuse the W2 judge-only fetch (10 MB cap)
+        #    to obtain the bytes the VLM judges — NO storage fetch happens yet.
+        judge_uri = await _fetch_image_data_uri(url)
+        if not judge_uri:
+            logger.info(f"illustrate: could not fetch bytes for safety judge → none")
+            return None
+        try:
+            safe = await _safety_ok(judge_uri, model_id)
+        except Exception as e:  # noqa: BLE001 - fail-closed on judge error.
+            try:
+                _, msg = classify_error(e)
+            except Exception:
+                msg = str(e)
+            logger.info(f"illustrate safety judge errored → UNSAFE (fail-closed): {msg}")
+            return None
+        if not safe:
+            return None
+
+        # 3. Storage fetch — SSRF-guarded, byte-capped, redirect-revalidating.
+        raw = await _ssrf_guarded_fetch(url)
+        if not raw:
+            return None
+
+        # 4. Normalize to WebP (strips metadata) off the event loop.
+        webp = await asyncio.to_thread(_decode_reencode_webp, raw)
+        if not webp:
+            return None
+
+        # 5. Content-addressed atomic store + natural dedupe.
+        filename = await asyncio.to_thread(_store_webp, webp)
+        if not filename:
+            return None
+
+        media = {
+            "type": "image",
+            "url": f"/api/chat/media/{filename}",
+            "label": (candidate.get("title") or subject or "").strip() or "Illustration",
+        }
+        logger.info(
+            f"illustrate: stored safe image for {message_id} → "
+            f"{media['url']} (source={candidate.get('source')!r} "
+            f"conf={candidate.get('confidence')})"
+        )
+        return media
+    except Exception as e:  # noqa: BLE001 - top-level safety net; never raise.
+        logger.warning(
+            f"illustrate: fetch/store failed for {message_id} → none: "
+            f"{type(e).__name__}: {e}"
+        )
+        return None
 
 
 async def _finish_image(
