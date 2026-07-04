@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
 
-from open_notebook.domain.notebook import Note, Source, SourceInsight
+from open_notebook.domain.notebook import ChatMessageMedia, Note, Source, SourceInsight
 
 from api.routers.chat.schemas import ChatMessage, Citation, MediaItem, ToolUseDisclosure
 
@@ -106,6 +106,7 @@ async def _build_chat_message(msg: Any, fallback_index: int) -> ChatMessage:
     """Convert a LangChain message into a ChatMessage, resolving AI citations."""
     mtype = msg.type if hasattr(msg, "type") else "unknown"
     mcontent = msg.content if hasattr(msg, "content") else str(msg)
+    msg_id = getattr(msg, "id", f"msg_{fallback_index}")
 
     if mtype == "ai" and isinstance(mcontent, str):
         clean, citations, followups = await _resolve_citations(mcontent)
@@ -124,8 +125,24 @@ async def _build_chat_message(msg: Any, fallback_index: int) -> ChatMessage:
     raw_media = extra.get("media") if isinstance(extra, dict) else None
     media = [MediaItem(**m) for m in raw_media] if raw_media else []
 
+    # Hydrate a late-arriving illustration (auto-illustrate-chat, B5): merge the
+    # chat_message_media sidecar row for this AI message, if one exists. Only
+    # stable AI message ids (the "ai-" prefix assigned in graphs/chat.py) can
+    # have a sidecar row. Never let a lookup/merge failure fail the session
+    # read — degrade to the un-hydrated message.
+    if mtype == "ai" and isinstance(msg_id, str) and msg_id.startswith("ai-"):
+        try:
+            sidecar = await ChatMessageMedia.get_for_message(msg_id)
+            if sidecar is not None:
+                if sidecar.mode == "image" and sidecar.media:
+                    media.append(MediaItem(**sidecar.media))
+                elif sidecar.mode == "diagram" and sidecar.diagram:
+                    clean = f"{clean}\n\n```mermaid\n{sidecar.diagram}\n```"
+        except Exception as e:
+            logger.warning(f"Could not hydrate media for message {msg_id}: {str(e)}")
+
     return ChatMessage(
-        id=getattr(msg, "id", f"msg_{fallback_index}"),
+        id=msg_id,
         type=mtype,
         content=clean,
         timestamp=None,
