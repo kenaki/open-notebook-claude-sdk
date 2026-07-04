@@ -18,6 +18,9 @@ class NotebookUpdate(BaseModel):
     chat_tag_colors: Optional[Dict[str, str]] = Field(
         None, description="Tag → color-key map for the chat gallery (replaces existing)"
     )
+    auto_illustrate: Optional[bool] = Field(
+        None, description="Per-notebook auto-illustrate toggle for chat messages"
+    )
 
 
 class NotebookResponse(BaseModel):
@@ -31,6 +34,10 @@ class NotebookResponse(BaseModel):
     note_count: int
     chat_tag_colors: Dict[str, str] = Field(
         default_factory=dict, description="Tag → color-key map for the chat gallery"
+    )
+    auto_illustrate: bool = Field(
+        True,
+        description="Per-notebook auto-illustrate toggle for chat messages (default True)",
     )
 
 

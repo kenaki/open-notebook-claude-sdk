@@ -76,6 +76,7 @@ async def get_notebooks(
                 source_count=nb.get("source_count", 0),
                 note_count=nb.get("note_count", 0),
                 chat_tag_colors=nb.get("chat_tag_colors", {}) or {},
+                auto_illustrate=nb.get("auto_illustrate", True),
             )
             for nb in result
         ]
@@ -108,6 +109,11 @@ async def create_notebook(notebook: NotebookCreate):
             source_count=0,  # New notebook has no sources
             note_count=0,  # New notebook has no notes
             chat_tag_colors=new_notebook.chat_tag_colors or {},
+            auto_illustrate=(
+                new_notebook.auto_illustrate
+                if new_notebook.auto_illustrate is not None
+                else True
+            ),
         )
     except InvalidInputError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -172,6 +178,7 @@ async def get_notebook(notebook_id: str):
             source_count=nb.get("source_count", 0),
             note_count=nb.get("note_count", 0),
             chat_tag_colors=nb.get("chat_tag_colors", {}) or {},
+            auto_illustrate=nb.get("auto_illustrate", True),
         )
     except HTTPException:
         raise
@@ -197,6 +204,8 @@ async def update_notebook(notebook_id: str, notebook_update: NotebookUpdate):
             notebook.archived = notebook_update.archived
         if notebook_update.chat_tag_colors is not None:
             notebook.chat_tag_colors = notebook_update.chat_tag_colors
+        if notebook_update.auto_illustrate is not None:
+            notebook.auto_illustrate = notebook_update.auto_illustrate
 
         await notebook.save()
 
@@ -221,6 +230,7 @@ async def update_notebook(notebook_id: str, notebook_update: NotebookUpdate):
                 source_count=nb.get("source_count", 0),
                 note_count=nb.get("note_count", 0),
                 chat_tag_colors=nb.get("chat_tag_colors", {}) or {},
+                auto_illustrate=nb.get("auto_illustrate", True),
             )
 
         # Fallback if query fails
@@ -234,6 +244,9 @@ async def update_notebook(notebook_id: str, notebook_update: NotebookUpdate):
             source_count=0,
             note_count=0,
             chat_tag_colors=notebook.chat_tag_colors or {},
+            auto_illustrate=(
+                notebook.auto_illustrate if notebook.auto_illustrate is not None else True
+            ),
         )
     except HTTPException:
         raise
