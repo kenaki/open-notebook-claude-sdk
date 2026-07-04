@@ -14,6 +14,14 @@
 
 ## SESSION HANDOFF (read first)
 
+> **Update (2026-07-04, cross-plan finish run):** the `to-fix/b2-b3` bug is **FIXED in code**
+> (`7c51ea5` — B3's zero output was a fan-out race against `build_sections`' 54s delete-then-rebuild;
+> B2's was 117 silent skips on an unset `default_vision_model`, NOT the deleted-PDF/`<think>` theories;
+> full root-cause in the to-fix file). **The B2 "data-blocked" premise is dead: the ML-book PDF is still
+> on disk.** A full 472-section verify-clean + summarize + abstract re-run on
+> `source:jnunvbxml03utb8x6kww` is queued for after the chat-foundation GPU waves (hours of local GPU).
+> Phase4 was un-deferred by the user and is being built (mig 22) in the same run.
+
 **State (2026-07-02, wave5d — ALL CODE LANDED):** Track A ☑. **Track C ☑ (C1–C4).** Phase1 ☑.
 Track B: B1 ☑; **B3 ☑ + B4 ☑ (live-verified 2026-07-02)**; B2, B5 ◐. **Phase3 ◐** (migration ✅ applied; page_number BLOCKED by Docling OCR on the Spark — see Q-docling-install).
 Every build-now chunk's CODE is written, integrated on `feature/multipanelchat`, and static-verified

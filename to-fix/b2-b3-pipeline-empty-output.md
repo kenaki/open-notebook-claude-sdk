@@ -1,6 +1,18 @@
 # B2 (verify-clean) + B3 (summaries/abstract) produce nothing on real books
 
-**Status:** Open · **Found:** 2026-07-03 · **Area:** `commands/verify_commands.py`, `commands/summary_commands.py`, `open_notebook/graphs/source.py`
+**Status:** FIXED in code (commit `7c51ea5`, 2026-07-04) — full-book re-run pending (queued after the
+cross-plan finish run's GPU-heavy waves). **Confirmed root cause was NOT the report's hypotheses:**
+(1) B3=0: `submit_sections` fanned out summaries ~0.05s after submitting `build_sections`, whose
+delete-then-rebuild took 54.6s → zero summarize jobs ever submitted; the abstract's 8-retry window then
+structurally could never outlast hours of sequential local summaries. (2) B2=0: `verify_clean_source`
+ran 6s into the rebuild over a partial tree (117 jobs), and ALL 117 skipped silently because
+`default_vision_model` was genuinely unset in the DB at run time (it is set now). PDF still on disk —
+`auto_delete_files` disproven; no `<think>`-exhaustion ever observed. Fixes: `_chaptering_in_flight()`
+gate (raise-to-retry while a build_sections job is non-terminal), new `summarize_source` orchestrator
+command, event-driven abstract trigger from the LAST completed section summary, vision-unconfigured now
+short-circuits visibly (`success=False` + one verify_flag insight), `ask.py` max_tokens 2000→8000.
+Repros: one summary (582 chars, 41s) + one cleaned_content (2062 chars, 145s) written live.
+· **Found:** 2026-07-03 · **Area:** `commands/verify_commands.py`, `commands/summary_commands.py`, `open_notebook/graphs/source.py`
 **Severity:** High — the layered doc model (cleaned content, per-section summaries, doc abstract) is empty for real multi-chapter PDFs. Also the visible cause of raw `<!-- image -->` placeholders showing in the Content tab (B2 never writes `cleaned_content`).
 
 ## Symptoms (observed)

@@ -302,11 +302,11 @@ Legend: ☐ todo · ◐ in-flight · ☑ done. Update the per-plan coordinator's
 | 5d | B4 | document-foundation | 🔵 | ☑ (c6f6004 + fix 8c0b606 — Decision #21 RESOLVED; live-verified 281,733→3,378 chars, no balloon) |
 | 5d | B5 | document-foundation | 🔵 | ☑ (1effece — live-verified 2026-07-03: agent called get_source_outline+get_section) |
 | 5e | X-page | document-foundation | 🔵 | ☑ (mig 21 8009995 — ungroup vector_search per-passage page fidelity; applied + verified live 2026-07-03) |
-| 6+ | chat-foundation W1–W6 (Lane A #2 — RUNNING) | — | mixed | ◐ W1 ☑ (454d328: B1/B3/F1/F4) · W2 ☑ (8cc887e: B2/F2/F3/F6) · B7 spike ☑ → **S-gate GO-WITH-ADJUSTMENTS awaits user**. Next: W3 = B4/B5/B6/F5 · then W1(diagram) · W2/W3(image, gated on B7) |
+| 6+ | chat-foundation W1–W6 (Lane A #2 — RUNNING) | — | mixed | ◐ W1 ☑ (454d328: B1/B3/F1/F4) · W2 ☑ (8cc887e: B2/F2/F3/F6) · **B7 S-gate BLESSED 2026-07-04** · **W3 ☑ (fddc233/6fa41b0/5328ed5/429dfea: B4/B5/B6/F5 + mig-18 comment-swallow repair 633eeea)**. Next: worker W1(diagram) → W2→W3(image) |
 | last | T3-d | codebase-cleanup-audit | 🟣 | ☐ |
 | last | Phase4 | document-foundation | 🔵 | ☐ (user opted IN 2026-07-04 — mig 22 + source_annotation CRUD + highlight plugin; runs in the finish-run's Wave 2) |
-| fix | to-fix/001 silent-failed-chat-jobs | (bugfix, user-approved 2026-07-04) | 🔵 | ☐ |
-| fix | to-fix/b2-b3 pipeline-empty-output | (bugfix, user-approved 2026-07-04 — gates df archival) | 🔵 | ☐ |
+| fix | to-fix/001 silent-failed-chat-jobs | (bugfix, user-approved 2026-07-04) | 🔵 | ☑ (no-op — already fixed by 3537d09's `resolveDisappearedJob`; verified line-by-line; live repro on punch-list) |
+| fix | to-fix/b2-b3 pipeline-empty-output | (bugfix, user-approved 2026-07-04 — gates df archival) | 🔵 | ☑ code (7c51ea5 — root cause: fan-out raced build_sections + unset default_vision_model silently swallowed; both repros write real output. Full 472-section book re-run queued post-waves) |
 
 ---
 
