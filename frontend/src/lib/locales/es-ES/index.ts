@@ -466,6 +466,8 @@ export const esES = {
     chatSettings: "Chat settings",
     sideChatDefault: "Side-chat default model",
     sideChatDefaultHelper: "New side chats spawned from a passage start on this model.",
+    autoIllustrate: "Auto-illustrate messages",
+    autoIllustrateHelper: "Automatically add a relevant diagram or image to AI answers when it helps explain the topic.",
     sidebarTitle: "Chats",
     searchChats: "Search chats…",
     hideChat: "Hide",

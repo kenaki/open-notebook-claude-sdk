@@ -13,6 +13,7 @@ import type {
   NotebookChatSessionWithMessages,
   UpdateNotebookChatSessionRequest,
 } from '@/lib/types/api'
+import type { ContextSelections } from '@/lib/types/notebook-context'
 
 // Create-session payload plus an internal optimistic marker. `_tempId`, when
 // present, drives the optimistic temp-card insert/reconcile; it is stripped
@@ -173,6 +174,9 @@ export function useNotebookChatSessions({
           parent_session_id: parentId,
           quote: trimmed,
           model_override: sideModel ?? undefined,
+          // Quote-only default (ctx-3): explicit empty selection rather than
+          // `null`/absent (which would inherit the notebook's global drawer).
+          context_config: { sources: {}, notes: {} },
         })
         queryClient.invalidateQueries({ queryKey: QUERY_KEYS.notebookChatSessions(notebookId) })
         return newSession
@@ -193,6 +197,8 @@ export function useNotebookChatSessions({
           notebook_id: notebookId,
           title,
           model_override: sideModel ?? undefined,
+          // Quote-only default (ctx-3) — same rationale as createSubChat.
+          context_config: { sources: {}, notes: {} },
         })
         queryClient.invalidateQueries({ queryKey: QUERY_KEYS.notebookChatSessions(notebookId) })
         return newSession
@@ -270,6 +276,23 @@ export function useNotebookChatSessions({
     [notebookId, queryClient, t]
   )
 
+  // Silent per-session context-selection setter (chat-foundation F2/F5). `null`
+  // resets the chat to inherit the notebook's global drawer selection (ctx-5);
+  // an object sets this chat's own explicit selection (ctx-1/ctx-2). Mirrors
+  // setSessionModelOverride to skip the toast + active-session invalidation.
+  const setSessionContextConfig = useCallback(
+    async (sessionId: string, config: ContextSelections | null) => {
+      try {
+        await chatApi.updateSession(sessionId, { context_config: config })
+        queryClient.invalidateQueries({ queryKey: QUERY_KEYS.notebookChatSessions(notebookId) })
+        queryClient.invalidateQueries({ queryKey: QUERY_KEYS.notebookChatSession(sessionId) })
+      } catch (err: unknown) {
+        toastApiError(err, t, 'apiErrors.failedToUpdateSession')
+      }
+    },
+    [notebookId, queryClient, t]
+  )
+
   return {
     createSessionMutation,
     updateSessionMutation,
@@ -285,5 +308,6 @@ export function useNotebookChatSessions({
     promoteToMain,
     setModelOverride,
     setSessionModelOverride,
+    setSessionContextConfig,
   }
 }

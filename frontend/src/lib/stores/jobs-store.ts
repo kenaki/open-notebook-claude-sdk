@@ -15,6 +15,7 @@ export type JobKind =
   | 'summarize' // summarizing a chapter (summarize_section)
   | 'abstract' // writing the document abstract (generate_source_abstract)
   | 'insight' // running an insight / transformation (run_transformation, create_insight)
+  | 'illustration' // auto-illustrating an AI chat message (illustrate_message) — silent, tray-only
 export type JobStatus = 'new' | 'running' | 'completed' | 'failed'
 
 /**
@@ -33,6 +34,7 @@ export const KIND_LABEL_KEY: Record<JobKind, string> = {
   summarize: 'jobs.kind.summarize',
   abstract: 'jobs.kind.abstract',
   insight: 'jobs.kind.insight',
+  illustration: 'jobs.kind.illustration',
 }
 
 export interface BackgroundJob {

@@ -52,7 +52,7 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections,
   // Subscribe to all jobs so getIsSending re-derives on any status change.
   const storeJobs = useJobsStore((s) => s.jobs)
 
-  const { buildContext, tokenCount, charCount, contextData } = useBuildNotebookContext({
+  const { buildContext, buildContextFor, tokenCount, charCount, contextData } = useBuildNotebookContext({
     notebookId,
     sources,
     notes,
@@ -71,6 +71,7 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections,
     promoteToMain,
     setModelOverride,
     setSessionModelOverride,
+    setSessionContextConfig,
   } = useNotebookChatSessions({
     notebookId,
     t,
@@ -219,7 +220,14 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections,
       setSendingBySession((prev) => ({ ...prev, [sessionId!]: true }))
 
       try {
-        const context = await buildContext()
+        // Each session sends its OWN context if it has an explicit one
+        // (chat-foundation ctx-1/ctx-2); `null`/absent inherits the global
+        // drawer selection (the dock's `buildContext`, which also drives the
+        // token-count meter).
+        const sessionConfig = cachedSession?.context_config
+        const context = sessionConfig
+          ? (await buildContextFor(sessionConfig)).context
+          : await buildContext()
         // Submit to the background worker (202). The response carries the job_id;
         // the answer arrives later via the Track-B poller invalidating this session.
         const { job_id } = await chatApi.sendMessage({
@@ -263,7 +271,7 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections,
         setSendingBySession((prev) => ({ ...prev, [sessionId!]: false }))
       }
     },
-    [notebookId, pendingModelOverride, buildContext, patchSessionMessages, queryClient, t]
+    [notebookId, pendingModelOverride, buildContext, buildContextFor, patchSessionMessages, queryClient, t]
   )
 
   // Back-compat: send to the dock's active session (auto-creates if none).
@@ -320,6 +328,7 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections,
     sendMessage,
     setModelOverride,
     setSessionModelOverride,
+    setSessionContextConfig,
     refetchSessions,
   }
 }

@@ -12,6 +12,7 @@ import {
   ScanEye,
   ScrollText,
   Sparkles,
+  Wand2,
   Waypoints,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
@@ -34,6 +35,7 @@ const KIND_ICONS: Record<JobKind, LucideIcon> = {
   summarize: AlignLeft,
   abstract: ScrollText,
   insight: Sparkles,
+  illustration: Wand2,
 }
 
 interface JobTrayItemProps {

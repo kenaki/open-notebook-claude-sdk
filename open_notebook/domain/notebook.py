@@ -76,6 +76,9 @@ class Notebook(ObjectModel):
     # (e.g. {"grammar": "violet"}). Keys are lowercased tag names; values are
     # palette keys the frontend resolves to styles. Empty for old notebooks.
     chat_tag_colors: Dict[str, str] = Field(default_factory=dict)
+    # Per-notebook toggle for auto-illustrating AI chat messages with a
+    # Mermaid diagram or searched image (auto-illustrate-chat). Default ON.
+    auto_illustrate: Optional[bool] = True
 
     @field_validator("name")
     @classmethod
@@ -973,6 +976,7 @@ class ChatSession(ObjectModel):
         "model_override",
         "parent_session_id",
         "quote",
+        "context_config",
     }
     title: Optional[str] = None
     model_override: Optional[str] = None
@@ -981,6 +985,10 @@ class ChatSession(ObjectModel):
     # User-assigned grouping tags (many per chat). Drives the gallery's group
     # filter + search. Defaults to an empty list so old sessions read cleanly.
     tags: List[str] = Field(default_factory=list)
+    # Per-chat context selection (per-chat-context). None/absent = inherit the
+    # notebook's global drawer selection; an object = this chat's own explicit
+    # selection (opaque to the backend — the frontend interprets the shape).
+    context_config: Optional[dict] = None
 
     async def relate_to_notebook(self, notebook_id: str) -> Any:
         if not notebook_id:
@@ -1008,6 +1016,42 @@ class ChatSession(ObjectModel):
             {"source_id": ensure_record_id(source_id)},
         )
         return [r["in"] for r in results]
+
+
+class ChatMessageMedia(ObjectModel):
+    """Sidecar for late-arriving chat illustration (auto-illustrate-chat).
+
+    One row per illustrated AI message, keyed by the stable AI message id
+    (unique index in migration 18). ``message_id``/``session_id`` are plain
+    strings (not record links) since the AI message id lives in the LangGraph
+    checkpoint, not a SurrealDB table.
+    """
+
+    table_name: ClassVar[str] = "chat_message_media"
+    nullable_fields: ClassVar[set[str]] = {"media", "diagram"}
+    message_id: str
+    session_id: str
+    mode: str  # 'image' | 'diagram' | 'none'
+    media: Optional[dict] = None
+    diagram: Optional[str] = None
+
+    @classmethod
+    async def get_for_session(cls, session_id: str) -> List["ChatMessageMedia"]:
+        """Return all sidecar rows for a chat session."""
+        results = await repo_query(
+            "SELECT * FROM chat_message_media WHERE session_id = $session_id",
+            {"session_id": session_id},
+        )
+        return [cls(**row) for row in results] if results else []
+
+    @classmethod
+    async def get_for_message(cls, message_id: str) -> Optional["ChatMessageMedia"]:
+        """Return the sidecar row for a single AI message, or None."""
+        results = await repo_query(
+            "SELECT * FROM chat_message_media WHERE message_id = $message_id",
+            {"message_id": message_id},
+        )
+        return cls(**results[0]) if results else None
 
 
 async def text_search(

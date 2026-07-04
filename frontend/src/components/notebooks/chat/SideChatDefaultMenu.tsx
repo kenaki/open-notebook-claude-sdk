@@ -4,6 +4,7 @@ import { Settings2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
@@ -18,16 +19,25 @@ interface SideChatDefaultMenuProps {
   // Current side-chat default model_override (null = follow the global default).
   value: string | null
   onChange: (model: string | null) => void
+  // Per-notebook auto-illustrate toggle (chat-foundation F6), default ON.
+  autoIllustrate: boolean
+  onAutoIllustrateChange: (next: boolean) => void
 }
 
 /**
  * The dock header's settings cog: picks the per-notebook default model for side
- * chats (annotative sub-chats spawned from a passage). Implemented as a single
- * DropdownMenu radio group rather than a Popover-wrapped Select — nesting a
- * Radix Select inside a Popover makes selecting an item trip the Popover's
- * outside-click and unmount the control mid-pick, so the choice never lands.
+ * chats (annotative sub-chats spawned from a passage), and (F6) the per-notebook
+ * auto-illustrate toggle. Implemented as a single DropdownMenu rather than a
+ * Popover-wrapped Select — nesting a Radix Select inside a Popover makes
+ * selecting an item trip the Popover's outside-click and unmount the control
+ * mid-pick, so the choice never lands.
  */
-export function SideChatDefaultMenu({ value, onChange }: SideChatDefaultMenuProps) {
+export function SideChatDefaultMenu({
+  value,
+  onChange,
+  autoIllustrate,
+  onAutoIllustrateChange,
+}: SideChatDefaultMenuProps) {
   const { t } = useTranslation()
   const { followDefaultLabel, claudeSubmodels, localModels } = useChatModelOptions()
 
@@ -69,6 +79,18 @@ export function SideChatDefaultMenu({ value, onChange }: SideChatDefaultMenuProp
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel>{t('chat.autoIllustrate')}</DropdownMenuLabel>
+        <p className="px-2 pb-1.5 text-[11px] leading-snug text-muted-foreground">
+          {t('chat.autoIllustrateHelper')}
+        </p>
+        <DropdownMenuCheckboxItem
+          checked={autoIllustrate}
+          onCheckedChange={onAutoIllustrateChange}
+          onSelect={(e) => e.preventDefault()}
+        >
+          {t('chat.autoIllustrate')}
+        </DropdownMenuCheckboxItem>
       </DropdownMenuContent>
     </DropdownMenu>
   )

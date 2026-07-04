@@ -26,38 +26,52 @@ export function useBuildNotebookContext({
   // what's in the window on hover (the counts alone don't say what's inside).
   const [contextData, setContextData] = useState<BuildContextResponse['context'] | null>(null)
 
+  // Pure builder: maps an arbitrary selections object (the global drawer OR a
+  // specific session's own `context_config`) to the backend's context shape and
+  // POSTs it. Extracted so `sendMessageTo` (useNotebookChat) can build a
+  // per-session context without going through the global `contextSelections`
+  // this hook is otherwise scoped to.
+  const buildContextFor = useCallback(
+    async (selections: ContextSelections) => {
+      const context_config: { sources: Record<string, string>; notes: Record<string, string> } = {
+        sources: {},
+        notes: {},
+      }
+
+      sources.forEach((source) => {
+        const mode = selections.sources[source.id]
+        if (mode === 'insights') {
+          context_config.sources[source.id] = 'insights'
+        } else if (mode === 'full') {
+          context_config.sources[source.id] = 'full content'
+        } else {
+          context_config.sources[source.id] = 'not in'
+        }
+      })
+
+      notes.forEach((note) => {
+        const mode = selections.notes[note.id]
+        if (mode === 'full') {
+          context_config.notes[note.id] = 'full content'
+        } else {
+          context_config.notes[note.id] = 'not in'
+        }
+      })
+
+      return chatApi.buildContext({ notebook_id: notebookId, context_config })
+    },
+    [notebookId, sources, notes]
+  )
+
+  // Global-selection build (dock + token-count meter). Thin wrapper around
+  // `buildContextFor` that also refreshes the token/char/preview state below.
   const buildContext = useCallback(async () => {
-    const context_config: { sources: Record<string, string>; notes: Record<string, string> } = {
-      sources: {},
-      notes: {},
-    }
-
-    sources.forEach((source) => {
-      const mode = contextSelections.sources[source.id]
-      if (mode === 'insights') {
-        context_config.sources[source.id] = 'insights'
-      } else if (mode === 'full') {
-        context_config.sources[source.id] = 'full content'
-      } else {
-        context_config.sources[source.id] = 'not in'
-      }
-    })
-
-    notes.forEach((note) => {
-      const mode = contextSelections.notes[note.id]
-      if (mode === 'full') {
-        context_config.notes[note.id] = 'full content'
-      } else {
-        context_config.notes[note.id] = 'not in'
-      }
-    })
-
-    const response = await chatApi.buildContext({ notebook_id: notebookId, context_config })
+    const response = await buildContextFor(contextSelections)
     setTokenCount(response.token_count)
     setCharCount(response.char_count)
     setContextData(response.context)
     return response.context
-  }, [notebookId, sources, notes, contextSelections])
+  }, [buildContextFor, contextSelections])
 
   const contextDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const contextCountsPrimedRef = useRef(false)
@@ -88,5 +102,5 @@ export function useBuildNotebookContext({
     }
   }, [buildContext])
 
-  return { buildContext, tokenCount, charCount, contextData }
+  return { buildContext, buildContextFor, tokenCount, charCount, contextData }
 }

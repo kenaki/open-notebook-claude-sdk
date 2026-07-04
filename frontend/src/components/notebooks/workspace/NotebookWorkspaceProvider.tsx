@@ -84,6 +84,11 @@ interface NotebookWorkspaceValue {
   // Rename a tag everywhere: rewrite it on every main chat that carries it and
   // migrate its color-map entry. No-op on empty/unchanged names.
   renameTag: (oldTag: string, newName: string) => void
+
+  // Per-notebook auto-illustrate toggle (chat-foundation F6), default ON. Silent
+  // setter mirrors `setTagColor`: optimistic cache write + PUT + invalidate.
+  autoIllustrate: boolean
+  setAutoIllustrate: (next: boolean) => void
 }
 
 const NotebookWorkspaceContext = createContext<NotebookWorkspaceValue | null>(null)
@@ -270,6 +275,27 @@ export function NotebookWorkspaceProvider({
     [tagColors, persistTagColors]
   )
 
+  // Per-notebook auto-illustrate toggle, default ON when unset (matches the
+  // backend's `option<bool> DEFAULT true`).
+  const autoIllustrate = notebook?.auto_illustrate ?? true
+
+  // Persist the toggle (silent, no toast): paint optimistically, PUT it, then
+  // refresh the notebook caches — mirrors `persistTagColors` above.
+  const setAutoIllustrate = useCallback(
+    (next: boolean) => {
+      queryClient.setQueryData<NotebookResponse>(QUERY_KEYS.notebook(notebookId), (old) =>
+        old ? { ...old, auto_illustrate: next } : old
+      )
+      void notebooksApi
+        .update(notebookId, { auto_illustrate: next })
+        .then(() => {
+          queryClient.invalidateQueries({ queryKey: QUERY_KEYS.notebook(notebookId) })
+          queryClient.invalidateQueries({ queryKey: QUERY_KEYS.notebooks })
+        })
+    },
+    [notebookId, queryClient]
+  )
+
   // Rename a tag across the whole notebook: rewrite it on every main chat that
   // carries it (de-duping if the new name collides with an existing tag), then
   // migrate its color-map entry. `chat.setSessionTags` persists each session.
@@ -334,6 +360,8 @@ export function NotebookWorkspaceProvider({
       tagColors,
       setTagColor,
       renameTag,
+      autoIllustrate,
+      setAutoIllustrate,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
@@ -356,6 +384,8 @@ export function NotebookWorkspaceProvider({
       tagColors,
       setTagColor,
       renameTag,
+      autoIllustrate,
+      setAutoIllustrate,
     ]
   )
 

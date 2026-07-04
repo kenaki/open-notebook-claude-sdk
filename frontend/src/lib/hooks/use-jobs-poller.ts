@@ -73,6 +73,8 @@ function deriveKind(name: string, args: Record<string, unknown> | null | undefin
       return 'abstract'
     case 'process_source':
       return 'source'
+    case 'illustrate_message':
+      return 'illustration'
     default:
       // embed_source / embed_note / embed_insight / embed_chunk / vectorize_source
       // / rebuild_embeddings / backfill_page_numbers → indexing for search.
@@ -298,6 +300,10 @@ export function useJobsPoller() {
   /** Handle a job transitioning to completed or failed. */
   function handleTermination(jobId: string, job: BackgroundJob) {
     const isChatJob = job.kind === 'notebook_chat' || job.kind === 'source_chat'
+    // Illustration is progressive enhancement (auto-attach a diagram/image to an
+    // AI message) — always silent, tray display only. A failed/abstained job
+    // just leaves the message text-only, so it never toasts either way.
+    const isIllustrationJob = job.kind === 'illustration'
     const viewAction = {
       label: t('jobs.view'),
       onClick: () => router.push(jobOrigin(job)),
@@ -323,11 +329,20 @@ export function useJobsPoller() {
             })
           }
         }
+      } else if (isIllustrationJob && job.sessionId) {
+        // Illustration always targets a notebook chat session (v1 scope) — the
+        // merged sidecar (diagram fence / media) hydrates from the backend on
+        // the next session read, so a targeted invalidate is all that's needed.
+        queryClient.invalidateQueries({
+          queryKey: QUERY_KEYS.notebookChatSession(job.sessionId),
+        })
       }
 
       // Completion toasts: chat gets its tailored copy; other milestone kinds
       // (TOAST_ON_COMPLETE) get a generic "finished" toast. High-cardinality
       // fan-out jobs (embed/verify/summarize) complete silently in the tray.
+      // Illustration is never in TOAST_ON_COMPLETE, so it's silent by the same
+      // mechanism — no extra guard needed here.
       if (isChatJob) {
         toast.success(t('jobs.chatReady'), { action: viewAction })
       } else if (TOAST_ON_COMPLETE.has(job.kind)) {
@@ -336,11 +351,14 @@ export function useJobsPoller() {
         })
       }
     } else if (job.status === 'failed') {
-      // Every kind's failure is surfaced — failures are rare and worth knowing.
-      const message = isChatJob
-        ? getApiErrorMessage(job.error, t, 'jobs.chatFailed')
-        : t('jobs.failedToast').replace('{job}', jobTitle(job))
-      toast.error(message, { action: viewAction })
+      // Every kind's failure is surfaced — failures are rare and worth knowing —
+      // EXCEPT illustration, which is silent even on failure (see above).
+      if (!isIllustrationJob) {
+        const message = isChatJob
+          ? getApiErrorMessage(job.error, t, 'jobs.chatFailed')
+          : t('jobs.failedToast').replace('{job}', jobTitle(job))
+        toast.error(message, { action: viewAction })
+      }
     }
 
     // Schedule removal after grace period (allows tray + toast to show final state).

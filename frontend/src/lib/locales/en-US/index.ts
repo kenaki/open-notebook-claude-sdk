@@ -525,6 +525,8 @@ export const enUS = {
     chatSettings: "Chat settings",
     sideChatDefault: "Side-chat default model",
     sideChatDefaultHelper: "New side chats spawned from a passage start on this model.",
+    autoIllustrate: "Auto-illustrate messages",
+    autoIllustrateHelper: "Automatically add a relevant diagram or image to AI answers when it helps explain the topic.",
     createToStart: "Create a session to start.",
     unableToLoadChat: "Unable to load chat",
     noDescription: "No description",

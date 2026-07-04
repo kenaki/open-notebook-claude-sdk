@@ -8,6 +8,7 @@ import { SideChatDefaultMenu } from './SideChatDefaultMenu'
 import { SideChatsMenu } from './SideChatsMenu'
 import { useChatWorkspaceStore } from '@/lib/stores/chat-workspace-store'
 import { useChatDefaultsStore } from '@/lib/stores/chat-defaults-store'
+import { useNotebookWorkspaceStrict } from '@/components/notebooks/workspace/NotebookWorkspaceProvider'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { MediaItem } from '@/lib/types/api'
 import type { useNotebookChat } from '@/lib/hooks/useNotebookChat'
@@ -72,6 +73,11 @@ export function ChatDock({ notebookId, chat, contextStats }: ChatDockProps) {
   // the dock header's settings cog and applied at sub-chat creation time.
   const sideChatModel = useChatDefaultsStore((s) => s.sideChatModel[notebookId] ?? null)
   const setSideChatModel = useChatDefaultsStore((s) => s.setSideChatModel)
+
+  // Per-notebook auto-illustrate toggle (chat-foundation F6), persisted on the
+  // notebook itself (unlike the side-chat model default, which is a local-only
+  // preference) — see `NotebookWorkspaceProvider`'s `chat_tag_colors` pattern.
+  const { autoIllustrate, setAutoIllustrate } = useNotebookWorkspaceStrict()
 
   const { sessions, currentSessionId } = chat
   const newChatLabel = t('chat.newChat')
@@ -168,6 +174,8 @@ export function ChatDock({ notebookId, chat, contextStats }: ChatDockProps) {
       <SideChatDefaultMenu
         value={sideChatModel}
         onChange={(model) => setSideChatModel(notebookId, model)}
+        autoIllustrate={autoIllustrate}
+        onAutoIllustrateChange={setAutoIllustrate}
       />
     </>
   )
