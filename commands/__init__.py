@@ -8,6 +8,7 @@ from .embedding_commands import (
     rebuild_embeddings_command,
 )
 from .example_commands import analyze_data_command, process_text_command
+from .illustrate_commands import illustrate_message_command
 from .podcast_commands import generate_podcast_command
 from .section_commands import backfill_sections_command, build_sections_command
 from .source_commands import process_source_command
@@ -29,6 +30,8 @@ __all__ = [
     # Per-section summaries + doc abstract commands
     "summarize_section",
     "generate_source_abstract",
+    # Chat illustration enrichment command
+    "illustrate_message_command",
     # Other commands
     "chat_completion_command",
     "generate_podcast_command",

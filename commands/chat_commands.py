@@ -25,7 +25,7 @@ from typing import Optional
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
 from loguru import logger
-from surreal_commands import CommandInput, CommandOutput, command
+from surreal_commands import CommandInput, CommandOutput, command, submit_command
 
 from commands._heavy_lane import heavy_lane, is_heavy_model
 from open_notebook.domain.notebook import ChatSession, Notebook
@@ -70,6 +70,72 @@ async def _run_graph(graph, state_values: dict, thread_id: str, model_override):
             logger.debug(f"chat_completion acquired heavy lane (thread={thread_id})")
             return await asyncio.to_thread(graph.invoke, state_values, config=config)
     return await asyncio.to_thread(graph.invoke, state_values, config=config)
+
+
+def _new_ai_message_id(graph_result) -> Optional[str]:
+    """Return the stable ``.id`` of the AI message this turn produced.
+
+    Scans the final graph state's messages newest-first for an AI message whose
+    id carries the stable ``ai-`` prefix (assigned in ``graphs/chat.py``, B3).
+    Only such ids can carry a ``chat_message_media`` sidecar (B5 hydrates by that
+    prefix), so anything else is not illustratable. Returns ``None`` if absent.
+    """
+    if not isinstance(graph_result, dict):
+        return None
+    for msg in reversed(graph_result.get("messages") or []):
+        if getattr(msg, "type", None) == "ai":
+            mid = getattr(msg, "id", None)
+            if isinstance(mid, str) and mid.startswith("ai-"):
+                return mid
+    return None
+
+
+async def _maybe_trigger_illustration(
+    input_data: "ChatCompletionInput", graph_result, model_override
+) -> None:
+    """Fire-and-forget the ``illustrate_message`` enrichment job (contract #6 v2).
+
+    Only for notebook chats (``kind == "notebook"``) whose notebook has
+    ``auto_illustrate`` on (default true) and where the turn produced a stable AI
+    message id. Submits BEFORE the chat job returns so the active-jobs poller sees
+    the illustration job in the same window (no discovery gap). The whole thing is
+    wrapped by the caller in try/except — a trigger failure must NEVER fail the
+    chat job.
+    """
+    if input_data.kind != "notebook" or not input_data.notebook_id:
+        return
+    message_id = _new_ai_message_id(graph_result)
+    if not message_id:
+        logger.debug("auto-illustrate: no stable ai- message id produced; skipping")
+        return
+
+    notebook = await Notebook.get(input_data.notebook_id)
+    auto = getattr(notebook, "auto_illustrate", True) if notebook else True
+    if auto is None:
+        auto = True
+    if not auto:
+        logger.debug("auto-illustrate: notebook toggle OFF; skipping")
+        return
+
+    # Ensure the command is registered before submitting (submit_command validates
+    # against the local registry — mirror api/podcast_service.py).
+    import commands.illustrate_commands  # noqa: F401
+
+    job_id = submit_command(
+        "open_notebook",
+        "illustrate_message",
+        {
+            "session_id": input_data.session_id,
+            "message_id": message_id,
+            "notebook_id": input_data.notebook_id,
+            "model_id": model_override,
+            "label": input_data.label or "",
+        },
+    )
+    logger.info(
+        f"auto-illustrate: submitted illustrate_message job {job_id} "
+        f"for message {message_id}"
+    )
 
 
 @command("chat_completion", app="open_notebook", retry={"max_attempts": 1})
@@ -142,10 +208,20 @@ async def chat_completion_command(
                 )
             )
 
-        await _run_graph(graph, state_values, full_session_id, model_override)
+        graph_result = await _run_graph(
+            graph, state_values, full_session_id, model_override
+        )
 
         # Touch the session's updated timestamp (mirrors the old endpoint).
         await session.save()
+
+        # Auto-illustrate trigger (chat-foundation W1, frozen contract #6 v2):
+        # fire-and-forget the enrichment job BEFORE returning. Best-effort — any
+        # failure is logged and swallowed so it can never fail the chat job.
+        try:
+            await _maybe_trigger_illustration(input_data, graph_result, model_override)
+        except Exception as e:
+            logger.warning(f"auto-illustrate trigger skipped (swallowed): {e}")
 
         processing_time = time.time() - start_time
         logger.info(
