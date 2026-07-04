@@ -3,18 +3,30 @@ id: 002
 title: Auto-illustrate image fetches — SSRF in judge fetch + safety bait-and-switch
 type: security
 severity: high
-status: open
+status: fixed
 area: open_notebook/graphs/illustrate.py (W2/W3 image pipeline)
 created: 2026-07-04
+fixed: 2026-07-04
 ---
 
 # 002 · Auto-illustrate image pipeline — SSRF + safety-judge bait-and-switch
 
+> **✅ FIXED 2026-07-04.** Both findings closed by routing every external image byte-fetch through the
+> single guarded, IP-pinned, redirect-revalidating `_ssrf_guarded_fetch`, and by making
+> `_fetch_and_store_image` fetch **once** — the safety judge and the stored WebP now derive from the exact
+> same bytes. `_fetch_image_data_uri` (relevance + safety judge fetch) now delegates to the guarded fetcher
+> and Pillow-decode-gates the bytes before the VLM. Verified: offline SSRF matrix **32/32** against BOTH
+> the judge and storage paths (localhost, 169.254.169.254, `::1`, `::ffff:127.0.0.1`, decimal/octal/hex
+> IPs, private ranges, non-http scheme, redirect-to-private, redirect-public→public, IP-pin assertion,
+> byte caps, Pillow gate, single-fetch assertion, unsafe→abstain) + a **live image e2e** (real chat subject
+> → PageImages → guarded relevance judge → single guarded fetch → qwen3.6-VL safety SAFE → WebP 329KB →
+> served `200 image/webp`, identical to the pre-fix output — no regression). **W2/W3 are now
+> security-clean; only the user's final sign-off remains (end-of-run punch-list).**
+>
 > Found by the orchestrator's adversarial security review of the W1–W3 diff (chat-foundation),
 > 2026-07-04, at commit `5edf9f1`. This is the **W2/W3 security follow-up** the S-gate review was for.
-> The **storage fetch itself is clean** (verified) — the gaps are in the *other* fetch and the fetch split.
-> **Both findings collapse into one fix.** Until it lands, the image illustration path (W2/W3) is NOT
-> security-signed-off; the diagram path (W1) is unaffected.
+> The **storage fetch itself is clean** (verified) — the gaps were in the *other* fetch and the fetch split.
+> **Both findings collapsed into one fix.** The diagram path (W1) was unaffected throughout.
 
 ## Finding 1 — HIGH · SSRF not prevented for the judge / relevance / safety fetches
 `_fetch_image_data_uri` (illustrate.py:666) fetches bytes for BOTH the W2 relevance judge

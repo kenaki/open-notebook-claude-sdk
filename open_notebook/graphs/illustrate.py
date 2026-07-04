@@ -25,14 +25,17 @@ search (Wikipedia PageImages first, with early-exit; else Wikimedia Commons +
 Openverse) → qwen3.6 VLM relevance judge with **abstain** (rank + threshold at τ,
 top-K candidates). It hands the chosen external URL to ``_fetch_and_store_image``.
 
-W3 (this chunk) fills ``_fetch_and_store_image``: the chosen URL is turned into a
-stored, SAME-ORIGIN ``MediaItem`` via, in order, (1) an SSRF pre-check of the URL,
-(2) a **fail-closed** qwen3.6-VL safety judge (unsafe / error → abstain), (3) an
-SSRF-guarded, byte-capped, redirect-revalidating storage fetch that PINS the
-validated IP (defeats DNS-rebinding), (4) a Pillow decode → WebP re-encode that
-strips EXIF/metadata, and (5) a content-addressed atomic store under
-``CHAT_MEDIA_FOLDER``. Returning the ``MediaItem`` dict makes ``_finish_image``
-write the ``mode='image'`` sidecar; any failure anywhere → ``None`` → ``mode='none'``.
+W3 fills ``_fetch_and_store_image``: the chosen URL is turned into a stored,
+SAME-ORIGIN ``MediaItem`` via, in order (to-fix/002 single-fetch design), (1) ONE
+SSRF-guarded, byte-capped, redirect-revalidating fetch that PINS the validated IP
+(defeats DNS-rebinding), (2) a Pillow decode gate → WebP re-encode that strips
+EXIF/metadata, (3) a **fail-closed** qwen3.6-VL safety judge on the SAME bytes
+the WebP came from (unsafe / error → abstain; kills judge/store bait-and-switch),
+and (4) a content-addressed atomic store under ``CHAT_MEDIA_FOLDER``. Every
+external image byte-fetch in this module — relevance judge, safety judge,
+storage — goes through ``_ssrf_guarded_fetch``. Returning the ``MediaItem`` dict
+makes ``_finish_image`` write the ``mode='image'`` sidecar; any failure anywhere
+→ ``None`` → ``mode='none'``.
 """
 
 import asyncio
@@ -114,10 +117,10 @@ _OPENVERSE_API = "https://api.openverse.org/v1/images/"
 _SEARCH_TIMEOUT = 15.0
 
 # The relevance judge needs the raw image bytes as a data-URI (Ollama's vision
-# path does not fetch remote URLs itself). This is a THROWAWAY fetch of a
-# search-API-returned image host (Wikimedia/Openverse) purely to feed the VLM —
-# NOT the storage fetch (W3 owns the SSRF-guarded, byte-capped, re-encoded store
-# fetch). Hard-capped + timed out so it can never hang or blow up memory.
+# path does not fetch remote URLs itself). Search-API result URLs are
+# attacker-influenceable, so this fetch rides ``_ssrf_guarded_fetch`` with its
+# own (tighter) cap + timeout (to-fix/002 — it previously had an unguarded
+# ``follow_redirects=True`` path of its own).
 _JUDGE_FETCH_TIMEOUT = 20.0
 _JUDGE_FETCH_MAX_BYTES = 10_000_000  # 10 MB
 
@@ -197,7 +200,7 @@ def _ip_is_blocked(ip_str: str) -> bool:
 
 
 def _validate_public_url(url: str) -> tuple:
-    """Validate one URL for the storage fetch and return the connection pin.
+    """Validate one URL for a guarded fetch and return the connection pin.
 
     Blocking (DNS): call via ``asyncio.to_thread``. Enforces the scheme
     allowlist, resolves the host itself, and range-checks EVERY resolved address
@@ -664,38 +667,26 @@ async def _search_openverse(query: str, limit: int = 4) -> list[dict]:
 
 
 async def _fetch_image_data_uri(url: str) -> Optional[str]:
-    """Download an image (from a search-API host) as a base64 ``data:`` URI to
-    feed the VLM judge. Streamed with a HARD byte cap (never trusts
-    Content-Length) and a timeout. Returns ``None`` on any failure / oversize.
+    """Fetch an image for a VLM judge as a base64 ``data:`` URI. Never raises.
 
-    NOTE: this is the judge-only fetch. W3 owns the SSRF-guarded, re-encoded
-    STORAGE fetch; this fetch only ever targets the URLs the search APIs returned.
+    to-fix/002: delegates to ``_ssrf_guarded_fetch`` (same validate + IP-pin +
+    per-hop redirect re-validation posture as the storage fetch — search-API
+    result URLs are attacker-influenceable, so the judge fetch gets the full
+    guard too), then Pillow decode-gates the bytes (decompression-bomb defense)
+    before they ever reach the VLM. Returns ``None`` on any rejection / failure.
     """
-    try:
-        async with httpx.AsyncClient(
-            headers={"User-Agent": _USER_AGENT},
-            follow_redirects=True,
-            timeout=_JUDGE_FETCH_TIMEOUT,
-        ) as client:
-            async with client.stream("GET", url) as resp:
-                resp.raise_for_status()
-                buf = bytearray()
-                async for chunk in resp.aiter_bytes():
-                    buf.extend(chunk)
-                    if len(buf) > _JUDGE_FETCH_MAX_BYTES:
-                        logger.info(
-                            f"illustrate judge-fetch: {url[:60]} exceeds "
-                            f"{_JUDGE_FETCH_MAX_BYTES} byte cap → skip"
-                        )
-                        return None
-                mime = (resp.headers.get("content-type", "image/jpeg") or "").split(";")[0].strip()
-                if not mime.startswith("image/"):
-                    mime = "image/jpeg"
-        b64 = base64.b64encode(bytes(buf)).decode("ascii")
-        return f"data:{mime};base64,{b64}"
-    except Exception as e:
-        logger.info(f"illustrate judge-fetch failed for {url[:60]}: {type(e).__name__}")
+    raw = await _ssrf_guarded_fetch(
+        url, max_bytes=_JUDGE_FETCH_MAX_BYTES, timeout=_JUDGE_FETCH_TIMEOUT
+    )
+    if not raw:
         return None
+    normalized = await asyncio.to_thread(_decode_reencode_webp, raw)
+    if not normalized:
+        logger.info(f"illustrate judge-fetch: not a decodable image → skip {url[:60]!r}")
+        return None
+    _, mime = normalized
+    b64 = base64.b64encode(raw).decode("ascii")
+    return f"data:{mime};base64,{b64}"
 
 
 async def _judge_candidate(
@@ -799,8 +790,16 @@ async def _safety_ok(data_uri: str, model_id: Optional[str]) -> bool:
     return safe
 
 
-async def _ssrf_guarded_fetch(url: str) -> Optional[bytes]:
-    """Fetch ``url`` for STORAGE with the full SSRF posture. Never raises.
+async def _ssrf_guarded_fetch(
+    url: str,
+    max_bytes: int = _STORE_FETCH_MAX_BYTES,
+    timeout: float = _STORE_FETCH_TIMEOUT,
+) -> Optional[bytes]:
+    """Fetch ``url`` with the full SSRF posture. Never raises.
+
+    THE single byte-fetcher for every external image fetch in this module —
+    relevance judge, safety judge, and storage all come through here
+    (to-fix/002: the judge paths previously had their own unguarded fetch).
 
     Per hop (max ``_MAX_REDIRECTS``): re-validate scheme + DNS + IP ranges, pin
     the validated IP for the TCP connection (Host header + TLS SNI stay the
@@ -814,7 +813,7 @@ async def _ssrf_guarded_fetch(url: str) -> Optional[bytes]:
     try:
         async with httpx.AsyncClient(
             follow_redirects=False,
-            timeout=_STORE_FETCH_TIMEOUT,
+            timeout=timeout,
             headers={"User-Agent": _USER_AGENT},
         ) as client:
             for hop in range(_MAX_REDIRECTS + 1):
@@ -851,10 +850,10 @@ async def _ssrf_guarded_fetch(url: str) -> Optional[bytes]:
                     buf = bytearray()
                     async for chunk in resp.aiter_bytes():
                         buf.extend(chunk)
-                        if len(buf) > _STORE_FETCH_MAX_BYTES:
+                        if len(buf) > max_bytes:
                             logger.info(
                                 f"illustrate store-fetch: exceeded "
-                                f"{_STORE_FETCH_MAX_BYTES}-byte cap → reject"
+                                f"{max_bytes}-byte cap → reject"
                             )
                             return None
                     return bytes(buf)
@@ -869,14 +868,15 @@ async def _ssrf_guarded_fetch(url: str) -> Optional[bytes]:
         return None
 
 
-def _decode_reencode_webp(data: bytes) -> Optional[bytes]:
+def _decode_reencode_webp(data: bytes) -> Optional[tuple]:
     """Decode ``data`` as a real raster image via Pillow, then re-encode to WebP.
 
     Runs in a worker thread (Pillow is blocking). Keeps Pillow's DEFAULT
     decompression-bomb limit (does not raise it) and promotes the bomb WARNING to
     an error so an oversized-pixel image fails closed. The WebP re-encode strips
-    all source metadata (EXIF/GPS/ICC/XMP). Returns WebP bytes, or ``None`` if the
-    bytes are not a decodable raster image.
+    all source metadata (EXIF/GPS/ICC/XMP). Returns ``(webp_bytes, source_mime)``,
+    or ``None`` if the bytes are not a decodable raster image — doubling as the
+    decode gate for judge bytes (to-fix/002).
     """
     import warnings
     from io import BytesIO
@@ -889,6 +889,7 @@ def _decode_reencode_webp(data: bytes) -> Optional[bytes]:
             warnings.simplefilter("error", Image.DecompressionBombWarning)
             with Image.open(BytesIO(data)) as im:
                 im.load()  # force full decode (raises on truncated/bomb payloads).
+                mime = Image.MIME.get(im.format or "") or "image/jpeg"
                 if im.mode in ("RGBA", "LA") or (
                     im.mode == "P" and "transparency" in im.info
                 ):
@@ -897,7 +898,7 @@ def _decode_reencode_webp(data: bytes) -> Optional[bytes]:
                     im = im.convert("RGB")
                 out = BytesIO()
                 im.save(out, format="WEBP", quality=_WEBP_QUALITY, method=6)
-                return out.getvalue()
+                return out.getvalue(), mime
     except Exception as e:  # noqa: BLE001 - not a usable raster image.
         logger.info(f"illustrate normalize: not a decodable image ({type(e).__name__})")
         return None
@@ -954,22 +955,23 @@ async def _fetch_and_store_image(
 ) -> Optional[dict]:
     """W3 — turn the chosen candidate into a stored, safe ``MediaItem`` dict.
 
-    Order (fail-closed at every step; NOTHING raises out of this function):
-    1. **SSRF pre-check** of ``candidate['url']`` (scheme + DNS + IP ranges).
-       Rejecting here means neither the safety-judge fetch nor the storage fetch
-       ever touches a non-public host — an attacker-influenced candidate URL
-       (e.g. from a poisoned search response) cannot SSRF via the judge fetch.
-    2. **Safety judge FIRST** (D3): fetch a capped throwaway copy of the bytes
-       (reusing the W2 judge-fetch) and send them to qwen3.6-VL. Unsafe verdict /
-       parse failure / any error → abstain. The STORAGE fetch below never runs
-       until the verdict is safe.
-    3. **SSRF-guarded storage fetch** (re-validates + pins + manual redirect
-       re-validation + hard byte cap).
-    4. **Normalize**: Pillow decode (default bomb limit) → re-encode to WebP
-       (strips EXIF) in a worker thread.
-    5. **Store**: ``sha256(webp)`` filename, atomic write under
+    Order (fail-closed at every step; NOTHING raises out of this function).
+    to-fix/002: there is exactly ONE fetch — the safety judge and the stored
+    WebP both derive from the same ``raw`` bytes, so a stateful/redirecting
+    origin can no longer show the judge different content than what gets stored
+    (bait-and-switch), and every byte-fetch sits behind the SSRF guard:
+    1. **SSRF-guarded fetch** of ``candidate['url']`` (scheme + DNS + IP-range
+       validation, pinned IP, per-hop redirect re-validation, hard byte cap) —
+       the only network I/O in this function.
+    2. **Pillow decode gate + WebP normalize** (default bomb limit, fail-closed
+       on the bomb warning; strips EXIF/GPS/ICC/XMP) in a worker thread — BEFORE
+       any VLM call, so the judge never sees undecodable/bomb bytes.
+    3. **Safety judge** (D3, fail-closed): qwen3.6-VL judges the SAME ``raw``
+       bytes the WebP was encoded from. Unsafe verdict / parse failure / any
+       error → abstain. Nothing is stored until the verdict is safe.
+    4. **Store**: ``sha256(webp)`` filename, atomic write under
        ``CHAT_MEDIA_FOLDER`` (traversal-guarded), natural dedupe.
-    6. Return ``{"type": "image", "url": "/api/chat/media/<hash>.webp",
+    5. Return ``{"type": "image", "url": "/api/chat/media/<hash>.webp",
        "label": candidate.get("title") or subject}`` — the truthy return makes the
        caller (``_finish_image``) write the ``mode='image'`` sidecar.
 
@@ -981,20 +983,20 @@ async def _fetch_and_store_image(
         return None
 
     try:
-        # 1. SSRF pre-check — refuse non-public targets BEFORE any fetch (incl.
-        #    the safety-judge fetch), so the throwaway judge fetch can't SSRF.
-        try:
-            await asyncio.to_thread(_validate_public_url, url)
-        except _SSRFError as e:
-            logger.info(f"illustrate: candidate url rejected pre-fetch → {e}")
+        # 1. THE single fetch — SSRF-guarded, IP-pinned, redirect-revalidating,
+        #    byte-capped. Everything below operates on these exact bytes.
+        raw = await _ssrf_guarded_fetch(url)
+        if not raw:
             return None
 
-        # 2. SAFETY FIRST (fail-closed). Reuse the W2 judge-only fetch (10 MB cap)
-        #    to obtain the bytes the VLM judges — NO storage fetch happens yet.
-        judge_uri = await _fetch_image_data_uri(url)
-        if not judge_uri:
-            logger.info(f"illustrate: could not fetch bytes for safety judge → none")
+        # 2. Decode-gate + normalize to WebP (strips metadata) off the event loop.
+        normalized = await asyncio.to_thread(_decode_reencode_webp, raw)
+        if not normalized:
             return None
+        webp, src_mime = normalized
+
+        # 3. Safety judge (fail-closed) on the same bytes the WebP came from.
+        judge_uri = f"data:{src_mime};base64,{base64.b64encode(raw).decode('ascii')}"
         try:
             safe = await _safety_ok(judge_uri, model_id)
         except Exception as e:  # noqa: BLE001 - fail-closed on judge error.
@@ -1007,17 +1009,7 @@ async def _fetch_and_store_image(
         if not safe:
             return None
 
-        # 3. Storage fetch — SSRF-guarded, byte-capped, redirect-revalidating.
-        raw = await _ssrf_guarded_fetch(url)
-        if not raw:
-            return None
-
-        # 4. Normalize to WebP (strips metadata) off the event loop.
-        webp = await asyncio.to_thread(_decode_reencode_webp, raw)
-        if not webp:
-            return None
-
-        # 5. Content-addressed atomic store + natural dedupe.
+        # 4. Content-addressed atomic store + natural dedupe.
         filename = await asyncio.to_thread(_store_webp, webp)
         if not filename:
             return None
