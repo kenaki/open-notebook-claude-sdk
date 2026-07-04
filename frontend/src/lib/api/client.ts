@@ -89,6 +89,10 @@ export function put<T>(url: string, body?: unknown, cfg?: AxiosRequestConfig): P
   return apiClient.put<T>(url, body, cfg).then(r => r.data)
 }
 
+export function patch<T>(url: string, body?: unknown, cfg?: AxiosRequestConfig): Promise<T> {
+  return apiClient.patch<T>(url, body, cfg).then(r => r.data)
+}
+
 export function del<T = void>(url: string, cfg?: AxiosRequestConfig): Promise<T> {
   return apiClient.delete<T>(url, cfg).then(r => r.data)
 }

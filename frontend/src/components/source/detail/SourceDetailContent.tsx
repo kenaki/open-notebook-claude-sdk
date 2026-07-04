@@ -47,6 +47,12 @@ interface SourceDetailContentProps {
    * When set on a PDF source, the view jumps to the PDF tab opened at that page.
    */
   initialPage?: number
+  /**
+   * Phase4: forwarded to PDFViewer's "Chat about this" highlight action.
+   * Omit where no chat is wired to this view (e.g. the source modal) — the
+   * button hides itself when this is undefined.
+   */
+  onChatAboutHighlight?: (quote: string) => void
 }
 
 export function SourceDetailContent({
@@ -54,7 +60,8 @@ export function SourceDetailContent({
   showChatButton = false,
   onChatClick,
   onClose,
-  initialPage
+  initialPage,
+  onChatAboutHighlight
 }: SourceDetailContentProps) {
   const { t } = useTranslation()
   // Controlled tab so a page citation can programmatically open the PDF tab.
@@ -276,6 +283,7 @@ export function SourceDetailContent({
                   key={`pdf-${initialPage ?? 'first'}`}
                   sourceId={source.id}
                   initialPage={initialPage != null ? Math.max(0, initialPage - 1) : undefined}
+                  onChatAboutHighlight={onChatAboutHighlight}
                 />
               )}
             </TabsContent>

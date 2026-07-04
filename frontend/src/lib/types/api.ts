@@ -79,6 +79,42 @@ export interface SourceSectionResponse {
   sections: SourceSectionNode[]
 }
 
+// Document Foundation Phase4: PDF highlight annotation. `rect` mirrors the
+// backend's opaque `List[Dict]` — each entry is a `@react-pdf-viewer/highlight`
+// `HighlightArea` ({ pageIndex, left, top, width, height }, percentages 0-100).
+export interface AnnotationRect {
+  pageIndex: number
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
+export interface Annotation {
+  id: string
+  source_id: string
+  page: number
+  rect: AnnotationRect[]
+  color: string
+  note?: string | null
+  quote?: string | null
+  created: string
+  updated: string
+}
+
+export interface CreateAnnotationRequest {
+  page: number
+  rect: AnnotationRect[]
+  color?: string
+  note?: string | null
+  quote?: string | null
+}
+
+export interface UpdateAnnotationRequest {
+  note?: string | null
+  color?: string | null
+}
+
 export interface SourceStatusResponse {
   status?: string
   message: string

@@ -1,6 +1,6 @@
 import type { AxiosResponse } from 'axios'
 
-import apiClient, { get, post, put, del } from './client'
+import apiClient, { get, post, put, patch, del } from './client'
 import {
   SourceListResponse,
   SourceDetailResponse,
@@ -8,7 +8,10 @@ import {
   SourceSectionResponse,
   SourceStatusResponse,
   CreateSourceRequest,
-  UpdateSourceRequest
+  UpdateSourceRequest,
+  Annotation,
+  CreateAnnotationRequest,
+  UpdateAnnotationRequest
 } from '@/lib/types/api'
 
 export const sourcesApi = {
@@ -108,5 +111,26 @@ export const sourcesApi = {
     return apiClient.get(`/sources/${id}/download`, {
       responseType: 'blob',
     })
+  },
+}
+
+// Document Foundation Phase4: PDF highlight annotations. Note the last two
+// (update/delete) are NOT nested under /sources/{id} — they address the
+// annotation directly, mirroring the backend router's flat routes.
+export const annotationsApi = {
+  list: async (sourceId: string) => {
+    return get<Annotation[]>(`/sources/${sourceId}/annotations`)
+  },
+
+  create: async (sourceId: string, data: CreateAnnotationRequest) => {
+    return post<Annotation>(`/sources/${sourceId}/annotations`, data)
+  },
+
+  update: async (annotationId: string, data: UpdateAnnotationRequest) => {
+    return patch<Annotation>(`/annotations/${annotationId}`, data)
+  },
+
+  delete: async (annotationId: string) => {
+    await del(`/annotations/${annotationId}`)
   },
 }

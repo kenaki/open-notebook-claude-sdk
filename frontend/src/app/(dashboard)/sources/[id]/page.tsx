@@ -47,6 +47,9 @@ export default function SourceDetailPage() {
             sourceId={sourceId}
             showChatButton={false}
             onClose={handleBack}
+            onChatAboutHighlight={(quote) =>
+              chat.sendMessage(`Tell me about this highlighted passage: "${quote}"`)
+            }
           />
         </div>
 

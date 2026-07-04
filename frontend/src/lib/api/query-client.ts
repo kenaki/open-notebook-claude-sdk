@@ -45,4 +45,5 @@ export const QUERY_KEYS = {
   episodeProfiles: ['podcasts', 'episode-profiles'] as const,
   speakerProfiles: ['podcasts', 'speaker-profiles'] as const,
   languages: ['languages'] as const,
+  sourceAnnotations: (sourceId: string) => ['sources', sourceId, 'annotations'] as const,
 }

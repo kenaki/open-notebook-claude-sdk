@@ -914,6 +914,51 @@ class Source(ObjectModel):
         return await super().delete()
 
 
+class SourceAnnotation(ObjectModel):
+    """PDF highlight/annotation on a source (document-foundation Phase4).
+
+    ``rect`` is a list of highlight-plugin-shaped rect dicts
+    (``{pageIndex, left, top, width, height}``, percentages 0-100 of the page
+    box) — the native ``HighlightArea[]`` emitted by
+    ``@react-pdf-viewer/highlight``. One list entry per line-rect of the
+    selection (length 1 for a single-line highlight, >1 for a multi-line
+    selection); stored opaquely (FLEXIBLE) so the FE owns the exact keys.
+    ``page`` is the 1-indexed physical page of the first rect, stored
+    redundantly for cheap per-page filtering/sorting without decoding
+    ``rect``.
+    """
+
+    table_name: ClassVar[str] = "source_annotation"
+    nullable_fields: ClassVar[set[str]] = {"note", "quote"}
+    source: Optional[str] = None
+    page: int = 1
+    rect: List[Dict[str, Any]] = Field(default_factory=list)
+    color: str = "#fde047"
+    note: Optional[str] = None
+    quote: Optional[str] = None
+    created: Optional[datetime] = None
+    updated: Optional[datetime] = None
+
+    def _prepare_save_data(self) -> Dict[str, Any]:
+        # `source` is a strict record<source> link in the SCHEMAFULL
+        # source_annotation table; model_dump() emits it as a plain string,
+        # which SurrealDB rejects ("expected a record<source>"). Coerce to
+        # RecordID (mirrors SourceSection._prepare_save_data).
+        data = super()._prepare_save_data()
+        if data.get("source") is not None:
+            data["source"] = ensure_record_id(data["source"])
+        return data
+
+    @classmethod
+    async def get_for_source(cls, source_id: str) -> List["SourceAnnotation"]:
+        """Return all annotations for a source, oldest first."""
+        results = await repo_query(
+            "SELECT * FROM source_annotation WHERE source = $source_id ORDER BY created ASC",
+            {"source_id": ensure_record_id(source_id)},
+        )
+        return [cls(**row) for row in results] if results else []
+
+
 class Note(ObjectModel):
     table_name: ClassVar[str] = "note"
     title: Optional[str] = None

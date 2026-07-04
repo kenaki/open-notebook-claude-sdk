@@ -431,6 +431,49 @@ class SourceListResponse(BaseModel):
     processing_info: Optional[Dict[str, Any]] = None
 
 
+# PDF annotation models (document-foundation Phase4)
+class AnnotationRect(BaseModel):
+    """One line-rect of a highlight selection — the native `HighlightArea`
+    shape emitted by `@react-pdf-viewer/highlight`. `left`/`top`/`width`/
+    `height` are percentages (0-100) of the page box; `pageIndex` is 0-based.
+    A single highlight is a LIST of these (length 1 for a single-line
+    selection, >1 for a multi-line/paragraph selection).
+    """
+
+    pageIndex: int
+    left: float
+    top: float
+    width: float
+    height: float
+
+
+class AnnotationResponse(BaseModel):
+    id: str
+    source_id: str
+    page: int
+    rect: List[Dict[str, Any]]
+    color: str
+    note: Optional[str] = None
+    quote: Optional[str] = None
+    created: str
+    updated: str
+
+
+class CreateAnnotationRequest(BaseModel):
+    page: int = Field(..., description="1-indexed physical page of the first rect")
+    rect: List[AnnotationRect] = Field(
+        ..., min_length=1, description="One entry per line-rect of the selection"
+    )
+    color: str = Field(default="#fde047", description="Highlight color (hex)")
+    note: Optional[str] = Field(default=None, description="User comment on the highlight")
+    quote: Optional[str] = Field(default=None, description="The selected text")
+
+
+class UpdateAnnotationRequest(BaseModel):
+    note: Optional[str] = None
+    color: Optional[str] = None
+
+
 # Context API models
 class ContextConfig(BaseModel):
     sources: Dict[str, str] = Field(

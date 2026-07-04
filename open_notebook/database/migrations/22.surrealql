@@ -1,0 +1,26 @@
+-- Migration 22: document-foundation Phase4 — PDF annotations (source_annotation)
+--
+-- Un-deferred 2026-07-04 (coordinator Decision #11: 21 was repurposed for
+-- X-page-accuracy mid-run, so Phase4's table lands on 22 instead of its
+-- original 21 earmark).
+--
+-- rect shape: a REQUIRED ARRAY (not a single object) of {pageIndex, left,
+-- top, width, height} rect dicts — the native HighlightArea[] shape emitted
+-- by the frontend's @react-pdf-viewer/highlight plugin. left/top/width/
+-- height are percentages (0-100) of the page box; pageIndex is 0-based.
+-- One array element per line-rect of the selection: length 1 for a
+-- single-line highlight, >1 for a multi-line/paragraph selection. Stored
+-- FLEXIBLE (opaque) so the frontend owns the exact per-rect keys, same
+-- pattern as source.page_map / source_embedding.bbox in migration 20.
+
+DEFINE TABLE IF NOT EXISTS source_annotation SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS source  ON TABLE source_annotation TYPE record<source>;
+DEFINE FIELD IF NOT EXISTS page    ON TABLE source_annotation TYPE int;
+DEFINE FIELD IF NOT EXISTS rect    ON TABLE source_annotation FLEXIBLE TYPE array;
+DEFINE FIELD IF NOT EXISTS color   ON TABLE source_annotation TYPE string;
+DEFINE FIELD IF NOT EXISTS note    ON TABLE source_annotation TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS quote   ON TABLE source_annotation TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS created ON TABLE source_annotation TYPE datetime DEFAULT time::now();
+DEFINE FIELD IF NOT EXISTS updated ON TABLE source_annotation TYPE datetime DEFAULT time::now();
+
+DEFINE INDEX IF NOT EXISTS source_annotation_source ON TABLE source_annotation COLUMNS source;
