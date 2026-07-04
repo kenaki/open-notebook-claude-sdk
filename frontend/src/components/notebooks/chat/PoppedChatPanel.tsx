@@ -4,10 +4,12 @@ import { ArrowLeftToLine, ArrowUpToLine, X, Quote } from 'lucide-react'
 import { ChatPanel } from '@/components/source/chat'
 import { ChatModelPicker } from './ChatModelPicker'
 import { DeleteChatButton } from './DeleteChatButton'
+import { SideChatContextPopover } from './SideChatContextPopover'
 import { deriveChatTitle } from './ChatDock'
 import { useChatWorkspaceStore } from '@/lib/stores/chat-workspace-store'
 import { useTranslation } from '@/lib/hooks/use-translation'
-import type { BaseChatSession, MediaItem } from '@/lib/types/api'
+import type { BaseChatSession, MediaItem, SourceListResponse, NoteResponse } from '@/lib/types/api'
+import type { ContextSelections } from '@/lib/types/notebook-context'
 import type { useNotebookChat } from '@/lib/hooks/useNotebookChat'
 
 interface PoppedChatPanelProps {
@@ -16,6 +18,12 @@ interface PoppedChatPanelProps {
   // The single multiplexed chat hook (lifted to the page) — each popped panel
   // reads/sends to its own session id through it.
   chat: ReturnType<typeof useNotebookChat>
+  // Notebook sources/notes + the global drawer selection (chat-foundation F5),
+  // used by the per-chat Context popover: the row list and the "inherit"
+  // baseline shown when this session has no explicit `context_config`.
+  sources: SourceListResponse[]
+  notes: NoteResponse[]
+  notebookContextSelections: ContextSelections
   onDockBack: () => void
   // X (non-destructive HIDE): stop rendering the panel; the chat stays in the
   // DB, reachable again via the sidebar / side-chats control (Chunk 3).
@@ -41,6 +49,9 @@ export function PoppedChatPanel({
   notebookId,
   session,
   chat,
+  sources,
+  notes,
+  notebookContextSelections,
   onDockBack,
   onClose,
   onDelete,
@@ -82,6 +93,14 @@ export function PoppedChatPanel({
           {session.title || newChatLabel}
         </span>
         <div className="flex items-center gap-0.5 flex-shrink-0">
+          <SideChatContextPopover
+            sources={sources}
+            notes={notes}
+            notebookDefault={notebookContextSelections}
+            contextConfig={session.context_config}
+            onChange={(next) => chat.setSessionContextConfig(session.id, next)}
+            onReset={() => chat.setSessionContextConfig(session.id, null)}
+          />
           <button
             type="button"
             title={t('chat.dockBack')}

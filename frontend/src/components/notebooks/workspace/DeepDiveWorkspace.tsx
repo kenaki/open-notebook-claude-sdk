@@ -37,8 +37,18 @@ const DOCK = 'dock'
 export function DeepDiveWorkspace({ activeChatId }: { activeChatId: string }) {
   const { t } = useTranslation()
   const router = useRouter()
-  const { notebookId, notebook, chat, contextStats, dataError, sourcesLoading, notesLoading } =
-    useNotebookWorkspaceStrict()
+  const {
+    notebookId,
+    notebook,
+    chat,
+    contextStats,
+    dataError,
+    sourcesLoading,
+    notesLoading,
+    sources,
+    notes,
+    contextSelections,
+  } = useNotebookWorkspaceStrict()
 
   // Panel-track layout state (per-panel widths + maximize).
   const { widths, maximized, setWidth, toggleMaximized, setMaximized } = useNotebookColumnsStore()
@@ -220,6 +230,9 @@ export function DeepDiveWorkspace({ activeChatId }: { activeChatId: string }) {
           notebookId={notebookId}
           session={session}
           chat={chat}
+          sources={sources ?? []}
+          notes={notes ?? []}
+          notebookContextSelections={contextSelections}
           autoFocus={pendingFocusId === token}
           onDockBack={() => router.push(`/notebooks/${notebookId}/chat/${token}`)}
           onClose={() => closeChat(token)}
