@@ -3,12 +3,22 @@ id: 001
 title: Failed chat jobs are silently reported as "ready" with an empty reply
 type: bug
 severity: high
-status: open
+status: resolved (pre-existing fix — commit 3537d09 already implements the proposed direction; verified line-by-line 2026-07-04)
 area: chat jobs / background job polling (frontend/src/lib/hooks/use-jobs-poller.ts)
 created: 2026-07-03
 ---
 
 # 001 · Failed chat jobs are silently reported as "ready" with an empty reply
+
+> **RESOLVED 2026-07-04 (no new code needed).** The disappeared-job branch in
+> `use-jobs-poller.ts` was already rewritten by commit `3537d09` (the recovered WIP snapshot,
+> which landed BEFORE this report was committed but was never reconciled against it):
+> `resolveDisappearedJob` awaits `commandsApi.getJob()` for the real terminal status/error,
+> routes to the matching `handleTermination` path, leaves still-running jobs in-flight, falls
+> back to assume-completed only when the lookup itself fails, and guards double-termination
+> via a `resolvingIds` set. Verified line-by-line against this report's proposed direction
+> during the cross-plan finish run. Only a live repro (fast-failing provider → error toast)
+> remains, parked on that run's punch-list.
 
 ## Summary
 A side chat using the local "DeepSeek V4" model failed at the infra layer (ds4-activator refused to wake the backend — not enough free GPU memory) and the backend correctly caught, classified, logged, and marked the job `failed` with a real error message. None of that ever reaches the user: the frontend's job poller only polls the *active* jobs endpoint, so a job that fails between two polls simply disappears from that list — and the poller's disappearance handler assumes disappearance means success. The chat turn ends with a false "chat ready" toast and a permanently empty assistant message, with the real error never surfaced. This is not ds4-specific or side-chat-specific — it reproduces for any chat job (main or side, any provider) that fails fast enough to skip being observed in a non-terminal state.

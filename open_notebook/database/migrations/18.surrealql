@@ -8,7 +8,8 @@ DEFINE FIELD IF NOT EXISTS auto_illustrate ON TABLE notebook TYPE option<bool> D
 DEFINE TABLE IF NOT EXISTS chat_message_media SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS message_id ON TABLE chat_message_media TYPE string;
 DEFINE FIELD IF NOT EXISTS session_id ON TABLE chat_message_media TYPE string;
-DEFINE FIELD IF NOT EXISTS mode       ON TABLE chat_message_media TYPE string; -- 'image'|'diagram'|'none'
+-- mode is 'image'|'diagram'|'none' (from_file flattens to one line, so no trailing comments)
+DEFINE FIELD IF NOT EXISTS mode       ON TABLE chat_message_media TYPE string;
 DEFINE FIELD IF NOT EXISTS media      ON TABLE chat_message_media FLEXIBLE TYPE option<object>;
 DEFINE FIELD IF NOT EXISTS diagram    ON TABLE chat_message_media TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS created    ON chat_message_media DEFAULT time::now() VALUE $before OR time::now();
