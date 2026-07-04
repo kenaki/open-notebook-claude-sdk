@@ -1,3 +1,5 @@
+import type { ContextSelections } from '@/lib/types/notebook-context'
+
 export interface NotebookResponse {
   id: string
   name: string
@@ -9,6 +11,9 @@ export interface NotebookResponse {
   note_count: number
   // Notebook-wide chat-gallery tag → color-key map (lowercased tag → palette key).
   chat_tag_colors?: Record<string, string>
+  // Per-notebook auto-illustrate toggle (chat-foundation F6). Absent on old
+  // notebooks → treated as ON (backend default true).
+  auto_illustrate?: boolean
 }
 
 export interface NoteResponse {
@@ -100,6 +105,8 @@ export interface UpdateNotebookRequest {
   archived?: boolean
   // Replaces the notebook's chat-gallery tag → color-key map wholesale.
   chat_tag_colors?: Record<string, string>
+  // Per-notebook auto-illustrate toggle (chat-foundation F6/B6).
+  auto_illustrate?: boolean
 }
 
 export interface NotebookDeletePreview {
@@ -215,6 +222,9 @@ export interface BaseChatSession {
   // User-assigned grouping tags (many per chat). Drives the gallery's group
   // filter + search. Absent/empty on untagged or old sessions.
   tags?: string[]
+  // Per-chat context selection (chat-foundation F1/B4). `null`/absent = inherit
+  // the notebook's global drawer selection; an object = this chat's own selection.
+  context_config?: ContextSelections | null
 }
 
 export interface SourceChatSession extends BaseChatSession {
@@ -319,6 +329,9 @@ export interface CreateNotebookChatSessionRequest {
   parent_session_id?: string
   quote?: string
   tags?: string[]
+  // Per-chat context selection (chat-foundation F1/F2). Seed `{sources:{},notes:{}}`
+  // for a quote-only side chat; omit/null to inherit the notebook default.
+  context_config?: ContextSelections | null
 }
 
 export interface UpdateNotebookChatSessionRequest {
@@ -331,6 +344,9 @@ export interface UpdateNotebookChatSessionRequest {
   quote?: string | null
   // Replaces the session's grouping tags wholesale.
   tags?: string[]
+  // Per-chat context selection (chat-foundation F1/B4). PUT an object to set this
+  // chat's own selection; PUT `null` to reset to the notebook default (inherit).
+  context_config?: ContextSelections | null
 }
 
 export interface SendNotebookChatMessageRequest {

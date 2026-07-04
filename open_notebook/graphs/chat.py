@@ -4,6 +4,7 @@ import mimetypes
 import os
 import sqlite3
 from typing import Annotated, Optional
+from uuid import uuid4
 
 from ai_prompter import Prompter
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -281,7 +282,7 @@ def call_model_with_messages(state: ThreadState, config: RunnableConfig) -> dict
         # Clean thinking content from AI response (e.g., <think>...</think> tags)
         content = extract_text_content(ai_message.content)
         cleaned_content = clean_thinking_content(content)
-        cleaned_message = ai_message.model_copy(update={"content": cleaned_content})
+        cleaned_message = ai_message.model_copy(update={"content": cleaned_content, "id": ai_message.id or f"ai-{uuid4().hex}"})
 
         return {"messages": cleaned_message}
     except OpenNotebookError:

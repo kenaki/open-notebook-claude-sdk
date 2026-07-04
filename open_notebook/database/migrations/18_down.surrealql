@@ -1,0 +1,5 @@
+-- Rollback migration 18
+REMOVE INDEX IF EXISTS chat_message_media_message_id ON TABLE chat_message_media;
+REMOVE TABLE IF EXISTS chat_message_media;
+REMOVE FIELD IF EXISTS auto_illustrate ON TABLE notebook;
+REMOVE FIELD IF EXISTS context_config ON TABLE chat_session;

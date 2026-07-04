@@ -1,8 +1,17 @@
 'use client'
 
 import { useState, type ReactNode } from 'react'
+import dynamic from 'next/dynamic'
 import { Check, Copy } from 'lucide-react'
 import { useTranslation } from '@/lib/hooks/use-translation'
+
+// `mermaid` is browser-only (it reaches for `document` at render time), so load
+// it lazily and client-side only — never during SSR (Q-C-mermaid-ssr). Loading
+// it via next/dynamic also breaks the import cycle with ./Mermaid, which imports
+// `CodeBlockShell` from this module for its fallback-to-codeblock render.
+const Mermaid = dynamic(() => import('./Mermaid').then((m) => m.Mermaid), {
+  ssr: false,
+})
 
 // hast node shape we care about (react-markdown passes the original node).
 interface HastNode {
@@ -30,22 +39,26 @@ function extractLanguage(node?: HastNode): string | null {
   return lang ? lang.replace('language-', '') : null
 }
 
-// Fenced code block: a header bar (language label + copy button) over the
-// highlighted <pre>. `children` is the already-rendered (highlighted) <code>.
-export function MarkdownCodeBlock({
-  node,
+// The code-block chrome: a header bar (language label + copy button) over a
+// <pre>. Shared so the Mermaid renderer's fallback-to-codeblock looks identical
+// to a normal fenced block. `copyText` is the verbatim source the copy button
+// writes; `children` is the <pre> body (the highlighted <code> for a normal
+// block, or the raw source for the mermaid fallback).
+export function CodeBlockShell({
+  language,
+  copyText,
   children,
 }: {
-  node?: HastNode
+  language: string | null
+  copyText: string
   children?: ReactNode
 }) {
   const { t } = useTranslation()
   const [copied, setCopied] = useState(false)
-  const language = extractLanguage(node)
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(extractText(node))
+      await navigator.clipboard.writeText(copyText)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch {
@@ -69,5 +82,30 @@ export function MarkdownCodeBlock({
       </div>
       <pre>{children}</pre>
     </div>
+  )
+}
+
+// Fenced code block. A ```mermaid``` fence renders as a diagram (safely — with a
+// fallback to this same code-block UI on any parse/render error); every other
+// language renders as a normal highlighted code block. `children` is the
+// already-rendered (highlighted) <code>.
+export function MarkdownCodeBlock({
+  node,
+  children,
+}: {
+  node?: HastNode
+  children?: ReactNode
+}) {
+  const language = extractLanguage(node)
+  const source = extractText(node)
+
+  if (language === 'mermaid') {
+    return <Mermaid chart={source} />
+  }
+
+  return (
+    <CodeBlockShell language={language} copyText={source}>
+      {children}
+    </CodeBlockShell>
   )
 }

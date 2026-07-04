@@ -1,0 +1,15 @@
+-- Migration 18: chat foundation (per-chat-context + auto-illustrate).
+-- chat_session & notebook are SCHEMAFULL → undeclared fields are dropped on save.
+-- (a) Per-chat context selection (NONE = inherit notebook's global drawer selection).
+DEFINE FIELD IF NOT EXISTS context_config ON TABLE chat_session FLEXIBLE TYPE option<object> DEFAULT NONE;
+-- (b) Per-notebook auto-illustrate toggle (default ON).
+DEFINE FIELD IF NOT EXISTS auto_illustrate ON TABLE notebook TYPE option<bool> DEFAULT true;
+-- (c) Sidecar for late-arriving chat illustration, keyed by the stable AI message id.
+DEFINE TABLE IF NOT EXISTS chat_message_media SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS message_id ON TABLE chat_message_media TYPE string;
+DEFINE FIELD IF NOT EXISTS session_id ON TABLE chat_message_media TYPE string;
+DEFINE FIELD IF NOT EXISTS mode       ON TABLE chat_message_media TYPE string; -- 'image'|'diagram'|'none'
+DEFINE FIELD IF NOT EXISTS media      ON TABLE chat_message_media FLEXIBLE TYPE option<object>;
+DEFINE FIELD IF NOT EXISTS diagram    ON TABLE chat_message_media TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS created    ON chat_message_media DEFAULT time::now() VALUE $before OR time::now();
+DEFINE INDEX IF NOT EXISTS chat_message_media_message_id ON TABLE chat_message_media COLUMNS message_id UNIQUE;
