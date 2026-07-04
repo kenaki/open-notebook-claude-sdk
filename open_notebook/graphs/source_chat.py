@@ -1,4 +1,3 @@
-import asyncio
 import sqlite3
 from typing import Annotated, Dict, List, Optional
 
@@ -23,6 +22,7 @@ from open_notebook.exceptions import OpenNotebookError
 from open_notebook.utils import clean_thinking_content
 from open_notebook.utils.context_builder import ContextBuilder
 from open_notebook.utils.error_classifier import classify_error
+from open_notebook.utils.graph_utils import run_async_in_node
 from open_notebook.utils.text_utils import extract_text_content
 
 
@@ -95,36 +95,16 @@ def _call_model_with_source_context_inner(
     if not source_id:
         raise ValueError("source_id is required in state")
 
-    # Build source context using ContextBuilder (run async code in new loop)
-    def build_context():
-        """Build context in a new event loop"""
-        new_loop = asyncio.new_event_loop()
-        try:
-            asyncio.set_event_loop(new_loop)
-            context_builder = ContextBuilder(
-                source_id=source_id,
-                include_insights=True,
-                include_notes=False,  # Focus on source-specific content
-                max_tokens=50000,  # Reasonable limit for source context
-            )
-            return new_loop.run_until_complete(context_builder.build())
-        finally:
-            new_loop.close()
-            asyncio.set_event_loop(None)
-
-    # Get the built context
-    try:
-        # Try to get the current event loop
-        asyncio.get_running_loop()
-        # If we're in an event loop, run in a thread with a new loop
-        import concurrent.futures
-
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future = executor.submit(build_context)
-            context_data = future.result()
-    except RuntimeError:
-        # No event loop running, safe to create a new one
-        context_data = build_context()
+    # Build source context using ContextBuilder, bridged into this sync node
+    # (running-loop -> thread, no-loop -> asyncio.run; see run_async_in_node).
+    context_data = run_async_in_node(
+        lambda: ContextBuilder(
+            source_id=source_id,
+            include_insights=True,
+            include_notes=False,  # Focus on source-specific content
+            max_tokens=50000,  # Reasonable limit for source context
+        ).build()
+    )
 
     # Extract source and insights from context
     source = None
@@ -174,33 +154,11 @@ def _call_model_with_source_context_inner(
         "model_override"
     )
 
-    # Handle async generation from sync context (reused event-loop bridging)
-    def run_in_new_loop():
-        """Run the async generation in a new event loop"""
-        new_loop = asyncio.new_event_loop()
-        try:
-            asyncio.set_event_loop(new_loop)
-            return new_loop.run_until_complete(
-                _generate_source_chat_message(model_id, payload, config)
-            )
-        finally:
-            new_loop.close()
-            asyncio.set_event_loop(None)
-
-    try:
-        # Try to get the current event loop
-        asyncio.get_running_loop()
-        # If we're in an event loop, run in a thread with a new loop
-        import concurrent.futures
-
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future = executor.submit(run_in_new_loop)
-            ai_message = future.result()
-    except RuntimeError:
-        # No event loop running, safe to use asyncio.run()
-        ai_message = asyncio.run(
-            _generate_source_chat_message(model_id, payload, config)
-        )
+    # Bridge async generation into this sync LangGraph node (see
+    # run_async_in_node: running-loop -> thread, no-loop -> asyncio.run).
+    ai_message = run_async_in_node(
+        lambda: _generate_source_chat_message(model_id, payload, config)
+    )
 
     # Clean thinking content from AI response (e.g., <think>...</think> tags)
     content = extract_text_content(ai_message.content)

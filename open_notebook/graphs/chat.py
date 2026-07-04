@@ -1,4 +1,3 @@
-import asyncio
 import base64
 import mimetypes
 import os
@@ -27,6 +26,7 @@ from open_notebook.domain.notebook import Notebook
 from open_notebook.exceptions import OpenNotebookError
 from open_notebook.utils import clean_thinking_content
 from open_notebook.utils.error_classifier import classify_error
+from open_notebook.utils.graph_utils import run_async_in_node
 from open_notebook.utils.job_progress import report_job_progress
 from open_notebook.utils.text_utils import extract_text_content
 
@@ -251,33 +251,11 @@ def call_model_with_messages(state: ThreadState, config: RunnableConfig) -> dict
         )
         job_id = state.get("job_id")
 
-        # Handle async generation from sync context (reused event-loop bridging)
-        def run_in_new_loop():
-            """Run the async function in a new event loop"""
-            new_loop = asyncio.new_event_loop()
-            try:
-                asyncio.set_event_loop(new_loop)
-                return new_loop.run_until_complete(
-                    _generate_ai_message(model_id, payload, config, job_id=job_id)
-                )
-            finally:
-                new_loop.close()
-                asyncio.set_event_loop(None)
-
-        try:
-            # Try to get the current event loop
-            asyncio.get_running_loop()
-            # If we're in an event loop, run in a thread with a new loop
-            import concurrent.futures
-
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(run_in_new_loop)
-                ai_message = future.result()
-        except RuntimeError:
-            # No event loop running, safe to use asyncio.run()
-            ai_message = asyncio.run(
-                _generate_ai_message(model_id, payload, config, job_id=job_id)
-            )
+        # Bridge async generation into this sync LangGraph node (see
+        # run_async_in_node: running-loop -> thread, no-loop -> asyncio.run).
+        ai_message = run_async_in_node(
+            lambda: _generate_ai_message(model_id, payload, config, job_id=job_id)
+        )
 
         # Clean thinking content from AI response (e.g., <think>...</think> tags)
         content = extract_text_content(ai_message.content)
