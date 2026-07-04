@@ -92,21 +92,21 @@ Chunk ids are stable. **Owns (files)** is the conflict key; **Depends-on** drive
 | P1 | PRE | — | Background-jobs plan prerequisite (chat-foundation runs after background-jobs lands) | cross-plan gate only | — | ☐ |
 | P2 | PRE | — | Re-anchor plan docs + async compat fixes (post-refactor paths + B5/F3 compat bakes) | `coordinator.md`, `backend.md`, `frontend.md`, `worker.md` | — | ☑ |
 | B1 | MIG | backend.md | Migration 18 (all 3 schema changes) + register | `migrations/18.surrealql`, `18_down.surrealql`, `database/async_migrate.py` | — | ☑ (454d328 — appended at END, positional v21; applied live + schema verified) |
-| B2 | MODELS | backend.md | Domain models: `ChatMessageMedia` + `Notebook.auto_illustrate` + `ChatSession.context_config` | `open_notebook/domain/notebook.py` | B1 | ☐ |
+| B2 | MODELS | backend.md | Domain models: `ChatMessageMedia` + `Notebook.auto_illustrate` + `ChatSession.context_config` | `open_notebook/domain/notebook.py` | B1 | ☑ (8cc887e — live save/read round-trip OK; test_domain 32 pass. Anchors stale: Notebook :70, ChatSession :970) |
 | B3 | MSGID | backend.md | Stable AIMessage `.id` (checkpoint-persistent) | `open_notebook/graphs/chat.py` | — | ☑ (454d328 — hand-applied onto post-tool-loop chat.py:284; plan's :178 anchor was stale) |
 | B4 | CTX-CRUD | backend.md | `context_config` on session schemas + create/update/get | `api/routers/chat/schemas.py` + `api/routers/chat/sessions.py` | B2 | ☐ |
 | B5 | HYDRATE | backend.md | Hydrate-merge sidecar into session reads (per-message lookup in `_build_chat_message`) | `api/routers/chat/citations.py` | B2, B3 | ☐ |
 | B6 | NB-API | backend.md | `auto_illustrate` passthrough on notebook-update | `api/routers/notebooks.py`, `api/models.py` | B2 | ☐ |
-| B7 | SPIKES | worker.md | R3 vision + R4 relevance spikes → **S-gate** | scratch scripts only | — | ◐ (spike running; feeds human S-gate, gates W2/W3 only) |
+| B7 | SPIKES | worker.md | R3 vision + R4 relevance spikes → **S-gate** | scratch scripts only | — | ☑ spike done (ad9d70a — report.json). **S-gate → recommend GO-WITH-ADJUSTMENTS; awaiting user bless.** τ=0.6, top-K=3, PageImages-first, latency ~1–2min/illustration. Gates W2/W3 only. |
 | W1 | WORKER | worker.md | Enrichment command: trigger (in `chat_completion`) → gate → route → **diagram** → sidecar | `commands/illustrate_commands.py`, `open_notebook/graphs/illustrate.py`, `prompts/illustrate/`, `commands/chat_commands.py` (trigger) | B2, B3, B5 | ☐ |
 | W2 | WORKER | worker.md | **Image** pipeline: expand → search → VLM relevance/abstain | (same as W1) | W1, **B7 (S-gate GO)** | ☐ |
 | W3 | WORKER | worker.md | **Image** safety (fail-closed) + SSRF fetch → WebP → store → sidecar | (same as W1) | W2 | ☐ |
 | F1 | FE-TYPES | frontend.md | Types + chat-api passthrough (`context_config`, `auto_illustrate`) | `frontend/src/lib/types/api.ts`, `frontend/src/lib/api/chat.ts` | — | ☑ (454d328 — done by orchestrator on HEAD; chat.ts passes full body, no change needed) |
-| F2 | FE-HOOK | frontend.md | `useNotebookChat`: per-session context resolution + quote-only seed + setter | `frontend/src/lib/hooks/useNotebookChat.ts` | F1 | ☐ |
-| F3 | FE-POLLER | frontend.md | Jobs poller: `'illustration'` kind → auto-register + session invalidate (silent, no toast) | `frontend/src/lib/stores/jobs-store.ts`, `frontend/src/lib/hooks/use-jobs-poller.ts` | F1 | ☐ |
+| F2 | FE-HOOK | frontend.md | `useNotebookChat`: per-session context resolution + quote-only seed + setter | `frontend/src/lib/hooks/useNotebookChat.ts` (+ `useBuildNotebookContext.ts` buildContextFor extraction, `useNotebookChatSessions.ts` seed+setter — authorized cross-file, disjoint from wave) | F1 | ☑ (8cc887e — tsc clean; setSessionContextConfig exported for F5) |
+| F3 | FE-POLLER | frontend.md | Jobs poller: `'illustration'` kind → auto-register + session invalidate (silent, no toast) | `frontend/src/lib/stores/jobs-store.ts`, `frontend/src/lib/hooks/use-jobs-poller.ts` (+ `components/jobs/JobTrayItem.tsx` Wand2 icon — type-forced ripple, disjoint) | F1 | ☑ (8cc887e — tsc clean; silent on completion+failure; invalidates session query) |
 | F4 | FE-MERMAID | frontend.md | Mermaid renderer (strict + DOMPurify + parse-or-fallback) | `components/source/chat/Mermaid.tsx` (new), `components/source/chat/MarkdownCodeBlock.tsx`, `components/source/chat/ChatPanel.tsx` | — | ☑ (454d328 — branched inside MarkdownCodeBlock; components map now in MessageList.tsx post-3537d09, so ChatPanel/MessageList untouched; tsc+build clean) |
 | F5 | FE-POPOVER | frontend.md | Side-chat Context popover + i18n (`chat.context*`) | `components/notebooks/chat/PoppedChatPanel.tsx`, `components/notebooks/chat/SideChatContextPopover.tsx` (new), `components/notebooks/workspace/DeepDiveWorkspace.tsx`, `locales/*` | F1, F2 | ☐ |
-| F6 | FE-TOGGLE | frontend.md | Per-notebook auto-illustrate toggle + i18n (`chat.autoIllustrate*`) | `components/notebooks/chat/SideChatDefaultMenu.tsx`, `components/notebooks/chat/ChatDock.tsx`, `components/notebooks/workspace/NotebookWorkspaceProvider.tsx`, `locales/*` | F1 | ☐ |
+| F6 | FE-TOGGLE | frontend.md | Per-notebook auto-illustrate toggle + i18n (`chat.autoIllustrate*`) | `components/notebooks/chat/SideChatDefaultMenu.tsx`, `components/notebooks/chat/ChatDock.tsx`, `components/notebooks/workspace/NotebookWorkspaceProvider.tsx`, `locales/*` | F1 | ☑ (8cc887e — tsc+build clean; DropdownMenuCheckboxItem; 14 locales. Live-persist verify parked on B6/W1) |
 
 Legend: ☐ todo · ◐ in progress · ☑ done · ⏸ blocked · ⊘ deferred.
 
@@ -223,6 +223,29 @@ point also remove the two superseded source dirs (`.claude/plans/auto-illustrate
 `.claude/plans/per-chat-context`) and the loose `.claude/plans/shimmering-fluttering-candle.md` if present.
 
 ## Changelog (cross-track)
+- _(2026-07-04)_ **Wave 2 landed (8cc887e): B2 ☑, F2 ☑, F3 ☑, F6 ☑ + B7 spike ☑.** Run via `/chunk-plan-execute`
+  (5 parallel agents: 4 worktree chunks + the B7 GPU spike, no worktree). All 4 worktree agents hit the stale-base
+  trap (seeded at `a6e0c3f`, 3 behind HEAD) and self-corrected via `git merge --ff-only feature/multipanelchat` —
+  the baked-in first-step guard worked every time. Integrated by file-copy (fully disjoint: 1 backend + 23 frontend
+  files). Merged-tree verify green: `tsc --noEmit` clean, `test_domain` 32 pass, on-api/on-worker restart clean.
+  **B2**: `ChatMessageMedia` + `Notebook.auto_illustrate` + `ChatSession.context_config` (live save/read OK; plan
+  anchors were stale — Notebook :70, ChatSession :970). **F2**: `sendMessageTo` per-session context resolution +
+  `buildContextFor` extraction (in `useBuildNotebookContext.ts`) + quote-only seed + `setSessionContextConfig`
+  setter (in `useNotebookChatSessions.ts` — authorized cross-file, disjoint from wave; F5 consumes the setter).
+  **F3**: `JobKind 'illustration'` → `deriveKind` + silent session-invalidate (+ `JobTrayItem` Wand2 icon, type-forced
+  ripple). **F6**: dock-header auto-illustrate toggle (`DropdownMenuCheckboxItem`) + `chat.autoIllustrate*` in 14
+  locales. **B7 spike (ad9d70a → report.json): GO-WITH-ADJUSTMENTS.** qwen3.6:35b vision nailed all R3 probes
+  (TP/TN conf 1.0, safety judge works); R4 chose a relevant image for all 5 subjects (concrete + abstract),
+  correctly rejecting wrong candidates; all 3 sources (PageImages/Commons/Openverse) reachable. **Adjustments for
+  W2/W3:** PageImages-first + early-exit (won 4/5), τ=0.6, top-K=3; **headline caveat = latency** (~30–48s per VLM
+  call → 76–139s end-to-end per illustration on the single GPU → heavy-lane serialization P-6 is mandatory);
+  set `max_tokens` explicitly (one candidate parse-failed, degraded gracefully). **S-gate awaits user bless.**
+  **Two follow-ups filed:** (a) `jobs.kind.illustration` has no locale entry (repo locale-parity vitest already
+  failing pre-existing — non-EN locales miss the whole `jobs.kind.*` block; fallback key unreachable since
+  illustration jobs always carry a `label`); (b) `JobTrayItem`/`useBuildNotebookContext`/`useNotebookChatSessions`
+  cross-file edits landed outside their chunk's nominal Owns row (all type-forced or plan-authorized, all disjoint).
+  **Lesson:** under Next 16 **Turbopack**, a *symlinked* `node_modules` breaks `npm run build` ("points out of
+  filesystem root") — F6 worked around with `cp -al`; Wave-3 dispatch prompts switched to `cp -al` for build chunks.
 - _(2026-07-04)_ **Wave 1 landed (454d328): B1 ☑, B3 ☑, F1 ☑, F4 ☑; B7 ◐ (spike running).**
   Run via `/chunk-plan-execute` (cross-plan orchestration, Lane A #2). Migration 18 appended at the END
   of both async_migrate lists (positional DB v21 — the "18" filename is a label; DB was at v20) and

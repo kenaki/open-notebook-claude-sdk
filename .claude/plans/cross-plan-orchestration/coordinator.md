@@ -299,7 +299,7 @@ Legend: ☐ todo · ◐ in-flight · ☑ done. Update the per-plan coordinator's
 | 5d | B4 | document-foundation | 🔵 | ☑ (c6f6004 + fix 8c0b606 — Decision #21 RESOLVED; live-verified 281,733→3,378 chars, no balloon) |
 | 5d | B5 | document-foundation | 🔵 | ☑ (1effece — live-verified 2026-07-03: agent called get_source_outline+get_section) |
 | 5e | X-page | document-foundation | 🔵 | ☑ (mig 21 8009995 — ungroup vector_search per-passage page fidelity; applied + verified live 2026-07-03) |
-| 6+ | chat-foundation W1–W6 (Lane A #2 — DEFERRED to a separate gated run; 2 human gates) | — | mixed | ☐ |
+| 6+ | chat-foundation W1–W6 (Lane A #2 — RUNNING) | — | mixed | ◐ W1 ☑ (454d328: B1/B3/F1/F4) · W2 ☑ (8cc887e: B2/F2/F3/F6) · B7 spike ☑ → **S-gate GO-WITH-ADJUSTMENTS awaits user**. Next: W3 = B4/B5/B6/F5 · then W1(diagram) · W2/W3(image, gated on B7) |
 | last | T3-d | codebase-cleanup-audit | 🟣 | ☐ |
 | last | Phase4 (deferred) | document-foundation | 🔵 | ☐ |
 
@@ -329,6 +329,13 @@ does not duplicate chunk specs.
 - **ds4-deepseek-v4-flash** — research/decision-gated; orthogonal.
 
 ## Changelog
+- 2026-07-04 (chat-foundation Waves 1–2 — Lane A #2 execution begins) — Lane A's second plan is now RUNNING (the
+  STABILIZE pass had deferred it). **W1 ☑** (454d328: B1 mig18, B3 stable AI msg-id, F1 FE types, F4 Mermaid).
+  **W2 ☑** (8cc887e: B2 domain models, F2 per-chat context, F3 illustration poller kind, F6 auto-illustrate toggle)
+  via 4 parallel worktree agents + **B7 vision/relevance spike ☑** (ad9d70a). Merged-tree verify green (tsc clean,
+  test_domain 32, services restart clean). **B7 S-gate = GO-WITH-ADJUSTMENTS** (PageImages-first, τ=0.6, top-K=3;
+  latency ~1–2min/illustration → heavy-lane mandatory) — **awaiting user bless** (gates W2/W3 image path only; W1
+  diagram + everything else proceed). Next global wave = chatF W3 (B4/B5/B6/F5). See chat-foundation/coordinator.md.
 - 2026-07-03 (STABILIZE pass — chunk-plan-execute, user-scoped to "finish document-foundation first") — No new
   feature waves; repo hygiene + reconciliation. **(1) Cleared the dirty working tree** (it blocked all worktree
   isolation): committed an in-progress feature snapshot — live job-progress + tool-calling doc-nav for Esperanto/ds4
