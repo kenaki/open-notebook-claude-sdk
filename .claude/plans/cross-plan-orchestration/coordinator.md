@@ -13,6 +13,26 @@
 
 ## SESSION HANDOFF (read first)
 
+> ### ⚡ CURRENT STATE (2026-07-05 — read before anything else)
+> **The feature waves are done; two items remain, one is a live blocker + a fragile stack state.**
+> - **chat-foundation:** ✅ CODE-COMPLETE (all 16 chunks ☑). `to-fix/002` SSRF **FIXED** (`031099e`,
+>   verified offline 32/32 + live e2e). W2/W3 orchestrator-security-signed-off. Remaining before archive =
+>   human punch-list only (visual browser smokes + user's final SSRF sign-off).
+> - **document-foundation:** ⏸ **BLOCKED on `to-fix/003`** (NEW, 2026-07-05). The b2/b3 re-run was run and
+>   it exposed that `build_sections`/`_sections_from_toc` **mis-bounds section `content`** — title-matched
+>   slices balloon to ~the whole book (472 sections = 11.5× the book; "Preface" = 92%; 17 sections overflow
+>   the 100K summarizer → abstract wedges). The `7c51ea5` b2/b3 fan-out fix itself WORKS; this is a distinct
+>   deeper bug. Fix = bound content by the (correct) page ranges + filter admonition pseudo-headings +
+>   summarizer context cap; then re-chapter + re-run. Embeddings/search/citations are UNAFFECTED.
+> - **⚠ STACK STATE (must resolve before resuming worker):** `on-worker` is **STOPPED/`failed`** (I halted
+>   the wasteful re-run). **~940 stale per-section jobs remain queued** — they WILL resume on the broken
+>   data if the worker restarts, so clear them first. **SurrealDB is rejecting new WS signins** post-burst
+>   ("problem with authentication"); the app's pooled conn still serves 200s but ad-hoc scripts can't sign
+>   in — likely needs a controlled SurrealDB + worker restart to recover, THEN clear the jobs.
+> - **Decision pending (user):** fix chaptering (`to-fix/003`) first vs. recover the stack first vs. both.
+> - **T3-d** ☑ (bc44fbe) and **Phase4** ☑ (83ecb9a) already landed. Meta-plan archives only when all three
+>   feature plans archive — so it stays open until df clears `to-fix/003` + visual smokes.
+
 **State (2026-06-29, resumed orchestrator — reconciled):** Wave 0 ☑. **Wave 1 ☑.** **Wave 2 ☑ COMPLETE**
 (bg A4 484ef18, bg A5 831aede, df A2 7e13d72, df Phase1 1608053). **Wave 3 partial:** bg B1 ☑ (82257ae),
 bg C2 ☑ (5171514). Still ☐ in W3: **bg C3** (source-chat job-tracked), **df A3** (chaptering/section tree).
@@ -306,7 +326,8 @@ Legend: ☐ todo · ◐ in-flight · ☑ done. Update the per-plan coordinator's
 | last | T3-d | codebase-cleanup-audit | 🟣 | ☑ (bc44fbe — 3 bridges → run_async_in_node factory helper; both branches proven + real chat e2e 9.6s no-deadlock; 44 tests pass) |
 | last | Phase4 | document-foundation | 🔵 | ☑ (83ecb9a — mig 22 applied live v22; annotation CRUD round-trip PASS; highlight plugin + sidebar + chat-about-highlight; visual smoke on punch-list) |
 | fix | to-fix/001 silent-failed-chat-jobs | (bugfix, user-approved 2026-07-04) | 🔵 | ☑ (no-op — already fixed by 3537d09's `resolveDisappearedJob`; verified line-by-line; live repro on punch-list) |
-| fix | to-fix/b2-b3 pipeline-empty-output | (bugfix, user-approved 2026-07-04 — gates df archival) | 🔵 | ☑ code (7c51ea5 — root cause: fan-out raced build_sections + unset default_vision_model silently swallowed; both repros write real output. Full 472-section book re-run queued post-waves) |
+| fix | to-fix/b2-b3 pipeline-empty-output | (bugfix, user-approved 2026-07-04 — gates df archival) | 🔵 | ☑ code (7c51ea5 — fan-out race + unset vision model; fix VERIFIED works). **Re-run 2026-07-05 EXPOSED a deeper bug → `to-fix/003`** (see below) — re-run HALTED. |
+| fix | to-fix/003 chaptering-content-unbounded | (correctness, found 2026-07-05 — **gates df archival**) | 🔵 | ⏸ OPEN — `_sections_from_toc` mis-bounds section `content` (title-match → whole-book slices; 11.5× dup; 17 sections overflow summarizer → abstract wedges). Fix = bound by page ranges. **Decision + fix needed before df can archive.** Embeddings/search unaffected. |
 
 ---
 
@@ -344,8 +365,32 @@ does not duplicate chunk specs.
   e2e (real turn → guarded relevance judge → one guarded fetch → qwen3.6-VL SAFE → WebP 329KB → served
   200/image-webp, no regression). `to-fix/002` → `status: fixed`. **chat-foundation is now fully
   code-complete (all 16 chunks ☑); W2/W3 are orchestrator-security-signed-off.** Only the human punch-list
-  remains before its directory archives: the visual browser smokes + the user's final SSRF sign-off. The
-  b2/b3 full-book re-run (document-foundation) is kicking off in the background now that the GPU is free.
+  remains before its directory archives: the visual browser smokes + the user's final SSRF sign-off.
+- 2026-07-05 (b2/b3 re-run ATTEMPTED then HALTED → new chaptering bug `to-fix/003`) — Submitted the full
+  472-section verify-clean + summarize re-run on `source:jnunvbxml03utb8x6kww` and confirmed the `7c51ea5`
+  fan-out fix works (real per-section summaries writing). **But the user caught a token overflow: one
+  `summarize_section` prompt was 376,267 tokens — impossible for one section of a ~459K-token book.**
+  Investigated: `build_sections`' `_sections_from_toc` **mis-bounds section `content`** — a title-matched
+  markdown slice that (a) collapses repeated headings (e.g. "Exercises" ×19) to the first occurrence and
+  (b) falls back to `len(full_text)` when the next-boundary heading isn't matched → sections run to the end
+  of the document. **472 sections' content sums to 21.1M chars = 11.5× the whole book; "Preface" alone is
+  92% of it; 17 sections overflow the 100K summarizer → abstract wedges.** Filed **`to-fix/003`** (root
+  cause + page-range-bounding fix proposal). Embeddings/search/citations UNAFFECTED (they chunk full_text).
+  **Halted the re-run** (worker stopped) to save GPU. ⚠ OPERATIONAL STATE for the next session: worker is
+  STOPPED/`failed`, **~940 stale per-section jobs remain queued** (must be cleared before any worker
+  restart or they resume on broken data), and **SurrealDB is rejecting new WS signins** post-burst (app's
+  pooled conn still serves 200; ad-hoc scripts can't sign in) — likely needs a controlled DB/worker
+  restart. **b2/b3 + document-foundation archival now BLOCKED on `to-fix/003`, not just data/visual-smokes.**
+- 2026-07-04 (chat-foundation finish — `to-fix/002` security fix) — Closed the #1 remaining code item. The
+  orchestrator's adversarial review of the landed W1–W3 diff had found two real image-pipeline findings
+  (HIGH SSRF in the unguarded relevance/safety *judge* fetch; MED-HIGH bait-and-switch from judging one
+  fetch but storing a separate one). Both fixed by one change in `graphs/illustrate.py` (031099e): every
+  external image byte-fetch now routes through the single IP-pinned, redirect-revalidating
+  `_ssrf_guarded_fetch`, and `_fetch_and_store_image` fetches **once** so the safety judge and the stored
+  WebP derive from the same bytes. Verified offline (SSRF matrix 32/32 against BOTH paths) + a live image
+  e2e (real turn → guarded relevance judge → one guarded fetch → qwen3.6-VL SAFE → WebP 329KB → served
+  200/image-webp, no regression). `to-fix/002` → `status: fixed`. **chat-foundation is now fully
+  code-complete (all 16 chunks ☑); W2/W3 are orchestrator-security-signed-off.**
 - 2026-07-04 (chat-foundation Waves 1–2 — Lane A #2 execution begins) — Lane A's second plan is now RUNNING (the
   STABILIZE pass had deferred it). **W1 ☑** (454d328: B1 mig18, B3 stable AI msg-id, F1 FE types, F4 Mermaid).
   **W2 ☑** (8cc887e: B2 domain models, F2 per-chat context, F3 illustration poller kind, F6 auto-illustrate toggle)

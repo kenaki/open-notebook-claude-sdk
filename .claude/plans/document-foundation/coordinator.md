@@ -14,13 +14,26 @@
 
 ## SESSION HANDOFF (read first)
 
-> **Update (2026-07-04, cross-plan finish run):** the `to-fix/b2-b3` bug is **FIXED in code**
+> **⛔ Update (2026-07-05, b2/b3 re-run → NEW blocker `to-fix/003`):** The full 472-section re-run on
+> `source:jnunvbxml03utb8x6kww` was RUN and it **exposed a distinct, deeper chaptering bug**. The
+> `7c51ea5` fan-out fix itself WORKS (real per-section summaries wrote). But `build_sections`'
+> `_sections_from_toc` **mis-bounds section `content`**: it's a title-matched markdown slice that (a)
+> collapses repeated headings (e.g. "Exercises" ×19) to their first occurrence and (b) defaults `char_end`
+> to end-of-document when the next boundary heading isn't matched. Result on this book: **472 sections'
+> content = 21.1M chars ≈ 11.5× the whole book (1.84M chars); "Preface" alone = 92% of the book; 17
+> sections exceed the 100K summarizer context → they overflow, fail, and the event-driven abstract wedges
+> (never reaches `remaining==0`).** Filed **`to-fix/003`** with the page-range-bounding fix proposal.
+> **Blast radius:** section `content` → B3 summaries/abstract + the section viewer (C3); **B2 verify-clean
+> is mostly OK** (renders correct page ranges); **embeddings / search / citations are UNAFFECTED**
+> (chunked from `full_text`). **⇒ document-foundation archival is BLOCKED on `to-fix/003`** (fix chaptering
+> → re-chapter this source → re-run b2/b3), on top of the visual browser smokes.
+> **⚠ Stack state:** the re-run was HALTED — `on-worker` STOPPED/`failed`, **~940 stale jobs queued**
+> (clear before restarting the worker), SurrealDB rejecting new WS signins post-burst (app pooled conn OK).
+>
+> **Superseded — Update (2026-07-04, cross-plan finish run):** the `to-fix/b2-b3` bug is **FIXED in code**
 > (`7c51ea5` — B3's zero output was a fan-out race against `build_sections`' 54s delete-then-rebuild;
-> B2's was 117 silent skips on an unset `default_vision_model`, NOT the deleted-PDF/`<think>` theories;
-> full root-cause in the to-fix file). **The B2 "data-blocked" premise is dead: the ML-book PDF is still
-> on disk.** A full 472-section verify-clean + summarize + abstract re-run on
-> `source:jnunvbxml03utb8x6kww` is queued for after the chat-foundation GPU waves (hours of local GPU).
-> Phase4 was un-deferred by the user and is being built (mig 22) in the same run.
+> B2's was 117 silent skips on an unset `default_vision_model`). The re-run that this update queued has now
+> been RUN and superseded by the `to-fix/003` finding above. Phase4 ☑ (mig 22, `83ecb9a`).
 
 **State (2026-07-02, wave5d — ALL CODE LANDED):** Track A ☑. **Track C ☑ (C1–C4).** Phase1 ☑.
 Track B: B1 ☑; **B3 ☑ + B4 ☑ (live-verified 2026-07-02)**; B2, B5 ◐. **Phase3 ◐** (migration ✅ applied; page_number BLOCKED by Docling OCR on the Spark — see Q-docling-install).
