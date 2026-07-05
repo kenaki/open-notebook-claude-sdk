@@ -200,8 +200,12 @@ def _stringify_tool_result(content) -> Optional[str]:
     return str(content)
 
 
-async def _run(prompt: str, options: ClaudeAgentOptions) -> tuple[str, list[dict]]:
-    """Drive a single Claude Agent SDK query, returning (assistant text, tool_uses).
+async def _run(
+    prompt: str, options: ClaudeAgentOptions
+) -> tuple[str, list[dict], dict, Optional[str]]:
+    """Drive a single Claude Agent SDK query.
+
+    Returns ``(assistant text, tool_uses, usage, model)``.
 
     Collects ``TextBlock`` text from each ``AssistantMessage`` (skips thinking) and
     captures every ``ToolUseBlock`` (which MCP tool ran + its input). Tool *results*
@@ -213,10 +217,16 @@ async def _run(prompt: str, options: ClaudeAgentOptions) -> tuple[str, list[dict
     ``ToolUseDisclosure`` schema consumes:
     ``{id, tool_name, tool_input, tool_result, is_error}`` (raw MCP tool names;
     the UI maps them — see coordinator Q-toolnames).
+
+    ``usage`` is the turn-total token-count dict from the final ``ResultMessage``
+    (empty dict when the SDK reported none). ``model`` is the effective model id
+    from the last ``AssistantMessage`` seen (None if no assistant turn arrived).
     """
     texts: list[str] = []
     tool_uses: dict[str, dict] = {}
     result: Optional[str] = None
+    usage: dict = {}
+    model_id: Optional[str] = None
 
     def _raise_for_error(error: Optional[str], errors: Optional[list]) -> None:
         detail = "; ".join(errors) if errors else (error or "unknown error")
@@ -232,6 +242,10 @@ async def _run(prompt: str, options: ClaudeAgentOptions) -> tuple[str, list[dict
         if isinstance(message, AssistantMessage):
             if message.error:
                 _raise_for_error(message.error, None)
+            # The last AssistantMessage's model id wins (a turn with tool use
+            # yields several assistant messages, all on the effective model).
+            if message.model:
+                model_id = message.model
             for block in message.content:
                 # Collect plain text; ThinkingBlock is skipped. ToolUseBlock is
                 # recorded for disclosure, keyed by id so its result can match.
@@ -266,9 +280,42 @@ async def _run(prompt: str, options: ClaudeAgentOptions) -> tuple[str, list[dict
                 )
                 _raise_for_error(None, message.errors)
             result = message.result
+            usage = message.usage or {}
 
     text = result if result else "".join(texts)
-    return text, list(tool_uses.values())
+    return text, list(tool_uses.values()), usage, model_id
+
+
+# Token-count fields copied verbatim from the SDK's ResultMessage.usage dict
+# into the ChatMessage.usage contract (frozen contract #9). Anything else the
+# SDK reports (nested server_tool_use, service_tier, ...) is dropped.
+_USAGE_INT_FIELDS = (
+    "input_tokens",
+    "output_tokens",
+    "cache_read_input_tokens",
+    "cache_creation_input_tokens",
+)
+
+
+def _build_usage_kwargs(usage: Optional[dict], model: Optional[str]) -> Optional[dict]:
+    """Build the contract-#9 usage dict, or None when the SDK gave nothing.
+
+    Copies ONLY the known int token fields that actually exist in the SDK's
+    usage dict (defensive: field set may drift across SDK versions) and adds
+    the effective ``model`` id when known. Returns None — meaning "omit the
+    'usage' key entirely" — when the SDK reported no usage, so checkpoints
+    never carry an empty dict.
+    """
+    if not usage:
+        return None
+    info: dict = {}
+    for field in _USAGE_INT_FIELDS:
+        value = usage.get(field)
+        if isinstance(value, int) and not isinstance(value, bool):
+            info[field] = value
+    if model:
+        info["model"] = model
+    return info or None
 
 
 async def generate_with_claude_agent(
@@ -301,14 +348,19 @@ async def generate_with_claude_agent(
     )
 
     mcp_servers = {MCP_SERVER_NAME: build_open_notebook_mcp_server()}
-    text, tool_uses = await _run(
+    text, tool_uses, usage, effective_model = await _run(
         transcript,
         _build_options(system_prompt, mcp_servers=mcp_servers, model=model),
     )
-    # Carry the tool-use disclosures back through LangGraph on additional_kwargs
-    # (rides on the message object + survives the checkpoint). The API converts
-    # them into ToolUseDisclosure for the UI ("Searched your sources").
-    return AIMessage(content=text, additional_kwargs={"tool_uses": tool_uses})
+    # Carry the tool-use disclosures (and per-turn token usage) back through
+    # LangGraph on additional_kwargs (rides on the message object + survives the
+    # checkpoint). The API converts them into ToolUseDisclosure / UsageInfo for
+    # the UI ("Searched your sources" / the context-window meter).
+    additional_kwargs: dict = {"tool_uses": tool_uses}
+    usage_kwargs = _build_usage_kwargs(usage, effective_model)
+    if usage_kwargs is not None:
+        additional_kwargs["usage"] = usage_kwargs
+    return AIMessage(content=text, additional_kwargs=additional_kwargs)
 
 
 async def _resolve_claude_agent_record(model_id: Optional[str]) -> Optional[Model]:

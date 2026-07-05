@@ -73,6 +73,35 @@ class ToolUseDisclosure(BaseModel):
     )
 
 
+class UsageInfo(BaseModel):
+    """Per-turn token usage for an AI message (frozen contract #9).
+
+    Populated on the Claude Agent path; Esperanto messages carry no usage and
+    serialize as ``usage: null``. All fields optional — the frontend meter
+    renders whatever subset exists and hides when ``context_window`` is null.
+    """
+
+    input_tokens: Optional[int] = Field(
+        None, description="Prompt tokens sent for this turn"
+    )
+    output_tokens: Optional[int] = Field(
+        None, description="Completion tokens generated for this turn"
+    )
+    cache_read_input_tokens: Optional[int] = Field(
+        None, description="Prompt tokens served from the prompt cache"
+    )
+    cache_creation_input_tokens: Optional[int] = Field(
+        None, description="Prompt tokens written to the prompt cache"
+    )
+    model: Optional[str] = Field(
+        None, description="Effective model id that produced this turn"
+    )
+    context_window: Optional[int] = Field(
+        None,
+        description="Model context-window size in tokens (meter denominator); null = unknown",
+    )
+
+
 class MediaItem(BaseModel):
     type: Literal["image", "video"] = Field(..., description="Attachment kind")
     url: str = Field(..., description="Fetchable URL served by GET /chat/media/{file}")
@@ -98,6 +127,9 @@ class ChatMessage(BaseModel):
     )
     media: List[MediaItem] = Field(
         default_factory=list, description="Image/video attachments on this message"
+    )
+    usage: Optional[UsageInfo] = Field(
+        None, description="Per-turn token usage (Claude Agent path only)"
     )
 
 

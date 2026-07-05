@@ -3,9 +3,16 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
 
+from open_notebook.ai.context_windows import get_context_window
 from open_notebook.domain.notebook import ChatMessageMedia, Note, Source, SourceInsight
 
-from api.routers.chat.schemas import ChatMessage, Citation, MediaItem, ToolUseDisclosure
+from api.routers.chat.schemas import (
+    ChatMessage,
+    Citation,
+    MediaItem,
+    ToolUseDisclosure,
+    UsageInfo,
+)
 
 # Inline marker form: [source:id] / [note:id] / [source_insight:id], tolerating an
 # optional #p=<n> page anchor (see pdf-viewer-citations plan). The literal type
@@ -125,6 +132,24 @@ async def _build_chat_message(msg: Any, fallback_index: int) -> ChatMessage:
     raw_media = extra.get("media") if isinstance(extra, dict) else None
     media = [MediaItem(**m) for m in raw_media] if raw_media else []
 
+    # Per-turn token usage (Claude Agent path only; Esperanto messages carry no
+    # "usage" key → stays None → serializes as usage: null). The context window
+    # is resolved server-side from the effective model id. Malformed payloads
+    # must NEVER fail the session read — degrade to usage=None.
+    usage: Optional[UsageInfo] = None
+    raw_usage = extra.get("usage") if isinstance(extra, dict) else None
+    if isinstance(raw_usage, dict):
+        try:
+            usage = UsageInfo(
+                **raw_usage,
+                context_window=get_context_window(raw_usage.get("model")),
+            )
+        except Exception as e:
+            logger.debug(
+                f"Ignoring malformed usage on message {msg_id}: {str(e)}"
+            )
+            usage = None
+
     # Hydrate a late-arriving illustration (auto-illustrate-chat, B5): merge the
     # chat_message_media sidecar row for this AI message, if one exists. Only
     # stable AI message ids (the "ai-" prefix assigned in graphs/chat.py) can
@@ -150,4 +175,5 @@ async def _build_chat_message(msg: Any, fallback_index: int) -> ChatMessage:
         followups=followups,
         tool_uses=tool_uses,
         media=media,
+        usage=usage,
     )
