@@ -1,4 +1,4 @@
-# Chat Foundation — Frontend chunk specs (F1–F6)
+# Chat Foundation — Frontend chunk specs (F1–F6, N3)
 
 > Chunk detail for the frontend lanes. Read `coordinator.md` first (frozen contracts, decisions,
 > reference index, i18n key namespaces). Verify each with `cd frontend && npx tsc --noEmit` (and
@@ -158,9 +158,55 @@
   persists across reload. With it OFF, a chat turn submits no `illustrate_message` job (no illustration
   entry in the tray / `GET /commands/jobs` — once B6/W1 integrated). `npm run build` clean.
 
+---
+
+## N3 — USAGE-FE: chat context-usage meter *(added 2026-07-05)*
+- **Owns:** `frontend/src/lib/types/api.ts` (usage type only — F1's file, F1 is ☑ so no conflict),
+  `frontend/src/components/notebooks/chat/ContextUsageMeter.tsx` (NEW),
+  `frontend/src/components/notebooks/chat/ChatDock.tsx`,
+  `frontend/src/components/notebooks/chat/PoppedChatPanel.tsx`,
+  `frontend/src/lib/locales/*` (keys `chat.contextMeter*` only — frozen-contract #8 namespace).
+  **Deps:** N2 (contract #9 shape live on session reads).
+- **Goal:** Show how much of the model's context window a chat is using and how much is left.
+  Ground truth when available (claude-agent messages carry `usage` per contract #9); estimate
+  fallback otherwise (local/Esperanto models report nothing).
+- **Read first:** `lib/types/api.ts` (`NotebookChatMessage` — add `usage`); coordinator frozen
+  contract #9 (field names); `components/common/ContextIndicator.tsx` (`tokenCount` prop +
+  `formatCompactNumber`) and `components/notebooks/chat/ContextPreview.tsx` (the dock's existing
+  "N sources · M notes · k tokens" meter — the new meter sits beside/inside this affordance);
+  `useBuildNotebookContext.ts:58-85` (existing token-count effect — the estimate's context term);
+  `ChatDock.tsx` + `PoppedChatPanel.tsx` header rows.
+- **Spec:**
+  - `api.ts`: `UsageInfo` mirroring contract #9 (`input_tokens`, `output_tokens`,
+    `cache_read_input_tokens?`, `cache_creation_input_tokens?`, `model?`, `context_window?` — all
+    optional numbers/string) + `usage?: UsageInfo | null` on `NotebookChatMessage`.
+  - `ContextUsageMeter.tsx` (NEW, pure presentational + one small derivation hook):
+    - **Ground truth:** last AI message with `usage` → `used = input_tokens + output_tokens`;
+      if `context_window` present → percent + compact fraction ("82K / 200K") with a thin progress
+      bar (default tone <70%, warn 70–90%, destructive >90%).
+    - **Estimate fallback** (no usage on any message): `~used = context tokenCount (existing
+      token-count effect) + Σ(message content length)/4`, rendered as "~93K tokens in context"
+      with NO percent/bar (window unknown client-side — do not duplicate the backend map; meter
+      shows the tilde form only). Tooltip explains ground-truth vs estimate.
+  - Mount in the dock header next to the existing context meter (`ContextPreview` affordance) and in
+    `PoppedChatPanel`'s header row (side chats).
+  - i18n keys under `chat.contextMeter*` (e.g. `contextMeterUsed`, `contextMeterEstimate`,
+    `contextMeterTooltipExact`, `contextMeterTooltipEstimate`) across **all** locales (en-US
+    reference; keep the repo's locale-parity vitest green for the new keys).
+- **Reuse:** `formatCompactNumber`; the token-count effect; Shadcn `Progress`/`Tooltip`; do NOT add a
+  second token-count fetch loop.
+- **Verify:** `npx tsc --noEmit` + `npm run build` clean; locale-parity test passes for new keys.
+  Visual: after a claude-agent turn the dock meter shows an exact fraction with a bar; a qwen3.6
+  side chat shows the "~" estimate without a bar; a brand-new empty chat shows the estimate of just
+  the selected context.
+
 ## Open Questions (frontend)
 - **Q-quote-first-turn** — also prepend `quote` to the first user message? *Default: skip — the
   system-prompt seed already gives the model the quote each turn.*
+- **Q-N-meter-home** — dock header beside `ContextPreview` vs inside its hover panel; side-chat
+  header vs footer. *Default: beside ContextPreview in the dock; header row in PoppedChatPanel.*
+- **Q-N-estimate-divisor** — chars/4 token estimate for transcript text. *Default: accept the rough
+  estimate; the tilde + tooltip signal imprecision.*
 - **Q-popover-home** — popover trigger in the header row vs composer toolbar. *Default: header row.*
 - **Q-C-mermaid-ssr** — `mermaid` is browser-only. *Default: `'use client'` / dynamic import, no SSR.*
 - **Q-C-toggle-host** — extend `SideChatDefaultMenu` vs sibling control. *Default: whatever keeps the

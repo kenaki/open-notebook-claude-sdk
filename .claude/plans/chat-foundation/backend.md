@@ -1,4 +1,4 @@
-# Chat Foundation — Backend chunk specs (B1–B6)
+# Chat Foundation — Backend chunk specs (B1–B6, N1–N2, N4)
 
 > Chunk detail for the backend lanes. Read `coordinator.md` first (frozen contracts, decisions,
 > reference index, conventions). Each chunk is handed to one worktree subagent by the orchestrator.
@@ -142,7 +142,113 @@
   a chat turn submits NO `illustrate_message` job (check `GET /commands/jobs` after a turn — cross-check
   once W1 is integrated; the trigger reads this flag).
 
+---
+
+# N-lane: Claude-agent efficiency + context meter *(added 2026-07-05)*
+
+> Root cause context: a live chat with a book-sized context died with `[Errno 7] Argument list too
+> long` — the Agent SDK passes the system prompt as ONE `--append-system-prompt` exec argument and
+> Linux caps a single arg at 128 KiB. An **E2BIG hotfix** already landed directly in
+> `open_notebook/ai/claude_agent.py` (system prompts >100KB reroute through stdin as a
+> `<notebook_instructions>` transcript preamble; + 2 tests in `tests/test_claude_agent.py`).
+> **N0 commits that hotfix first** — worktree subagents branch from committed history and would
+> otherwise build against a claude_agent.py without it. All N-chunks build ON that change; never
+> remove the oversize guard (it stays as the safety net under the slim index).
+
+## N1 — AGENT-CTX: slim-index context for Claude-agent chats
+- **Owns:** `open_notebook/graphs/chat.py`, `open_notebook/graphs/source_chat.py`. **Deps:** N0.
+- **Goal:** When a chat routes to the Claude Agent SDK, stop pushing the full rendered context blob
+  into the system prompt. Send a compact **source/note index** (ids + titles + abstract when already
+  loaded) plus an explicit instruction to retrieve content on demand via the
+  `mcp__open_notebook__*` tools (`search`, `get_source`, `get_source_outline`, `get_section`,
+  `get_note`). The Esperanto/LangChain path is UNCHANGED (those providers may lack tools and need the
+  pushed blob).
+- **Why this is sound (decision N-1):** on the agent path the context selection was never an
+  information boundary — the MCP tools are unscoped (`list_notebooks`/`search` reach everything), so
+  replacing the blob with a whole-notebook index loses no access control, only redundant bytes.
+- **Read first:** `graphs/chat.py:200-238` (`_generate_ai_message`; agent branch :212-221),
+  `:241-258` (`call_model_with_messages` — renders `chat/system` :243, builds payload :248; holds
+  `state`); `prompts/chat/system.jinja` (`{% if context %}` block — no template edit needed, `context`
+  is just a string); `domain/notebook.py:90` (`get_sources(include_full_text=False)` — cheap listing);
+  `ai/claude_agent_tools.py:67-207` (exact tool names); `graphs/source_chat.py` (analogous
+  `generate_with_claude_agent` call :57 + its ContextBuilder). **Anchors have drifted before — re-verify
+  line numbers against HEAD first (plan lesson).**
+- **Spec:**
+  - Thread what the index needs from `call_model_with_messages` into `_generate_ai_message` (it
+    already receives `config`; add `state` or `notebook`). In the claude-agent branch, build
+    `slim_context`:
+    - header: "Notebook source index — full content is NOT inlined. Retrieve on demand with the
+      mcp__open_notebook__ tools (search / get_source_outline / get_section / get_source / get_note)
+      and cite ids exactly as listed."
+    - one line per source: `- source:<id> — "<title>"` (+ ` — <abstract>` only when an abstract is
+      already on the fetched record — do NOT add per-source insight round-trips beyond the one
+      `get_sources()` + `get_notes()` pair);
+    - one line per note: `- note:<id> — "<title>"`.
+  - Re-render `Prompter(prompt_template="chat/system")` with a state copy where `context` =
+    `slim_context`, and replace `payload[0]` (the SystemMessage) with the slim render — citation
+    rules/quote block/notebook header stay intact.
+  - **Degrade, never fail:** any error building the index → log a warning and keep the original
+    payload (blob + E2BIG stdin guard still protect the turn).
+  - Log one INFO line with before/after system-prompt byte sizes (observability; feeds the meter work).
+  - `source_chat.py`: same pattern on its agent branch — replace the built source-context blob with
+    `source:<id> — "<title>"` + a hint to use `get_source_outline`/`get_section` on that id.
+- **Verify:** pure-function test for the index builder (sources/notes list → expected text). Live:
+  claude-agent turn on the ML-book notebook → journalctl (`on-worker`) shows the size-drop log
+  (≳100KB → <5KB), reply uses tools (`tool_uses` non-empty in `GET /chat/sessions/{id}`) and cites
+  `[source:…]`. A turn on an Esperanto model (qwen3.6) routes with the blob unchanged (routing log
+  says Esperanto; no slim log line). `uv run pytest tests/`.
+
+## N2 — USAGE-BE: capture Agent-SDK token usage + context-window map
+- **Owns:** `open_notebook/ai/claude_agent.py`, `open_notebook/ai/context_windows.py` (NEW),
+  `api/routers/chat/schemas.py`, `api/routers/chat/citations.py`, `tests/test_claude_agent.py`.
+  **Deps:** N0. Implements **frozen contract #9** (coordinator).
+- **Goal:** Stop discarding the SDK's per-turn usage. `ResultMessage.usage` (dict: input/output/cache
+  token counts — claude_agent_sdk `types.py:1032`) rides `AIMessage.additional_kwargs["usage"]` to the
+  checkpoint, and surfaces on `ChatMessage.usage` at session read — the exact plumbing `tool_uses`
+  already uses. A per-model context-window lookup supplies the denominator.
+- **Read first:** `ai/claude_agent.py` — `_run` (ResultMessage handling; `AssistantMessage.model`
+  carries the effective model) and `generate_with_claude_agent` (`additional_kwargs={"tool_uses": …}`
+  precedent); `api/routers/chat/citations.py:118-123,151` (tool_uses read + attach);
+  `api/routers/chat/schemas.py:60,96` (`ToolUseDisclosure`, `ChatMessage.tool_uses`).
+- **Spec:**
+  - `_run`: also capture `usage = message.usage or {}` from the `ResultMessage` and the last
+    `AssistantMessage.model`; return them alongside `(text, tool_uses)`.
+  - `generate_with_claude_agent`: build contract-#9 dict defensively (copy only int fields that
+    exist: `input_tokens`, `output_tokens`, `cache_read_input_tokens`,
+    `cache_creation_input_tokens`; add `model`) → `additional_kwargs["usage"]`; omit the key
+    entirely when the SDK returned nothing.
+  - `context_windows.py` (NEW): `get_context_window(model: str | None) -> int | None` — longest-prefix
+    match over a small map: `claude-` → 200_000, aliases `opus`/`sonnet`/`haiku` → 200_000,
+    `qwen3.6` → 262_144; `None` for unknown (meter hides). Values are Q-N-windowmap.
+  - `schemas.py`: `class UsageInfo(BaseModel)` with the contract-#9 fields (all Optional) +
+    `context_window: Optional[int]`; add `usage: Optional[UsageInfo] = None` to `ChatMessage`.
+  - `citations.py` `_build_chat_message`: beside the tool_uses read, `raw = extra.get("usage")`; if a
+    dict → `UsageInfo(**raw, context_window=get_context_window(raw.get("model")))`; malformed →
+    `None` (log debug, never 500 a session read).
+- **Verify:** extend `tests/test_claude_agent.py` — fake `query` yielding a ResultMessage with a usage
+  dict → `additional_kwargs["usage"]` populated (model from AssistantMessage); no usage → key absent.
+  `uv run pytest tests/test_claude_agent.py`. Live: claude-agent turn → last AI message in
+  `GET /chat/sessions/{id}` has `usage.input_tokens > 0` and `usage.context_window == 200000`;
+  an Esperanto-model message has `usage: null` and the session read is otherwise unchanged.
+
+## N4 — RESUME: layered SDK session resume *(DEFERRED ⊘ — documented, not build-now)*
+- **Owns (when built):** `open_notebook/ai/claude_agent.py`, `open_notebook/domain/notebook.py`,
+  a NEW migration (next free number — check `migrations/` at build time), `commands/chat_commands.py`.
+- **Design (decision N-3):** the LangGraph checkpoint stays the single source of truth; resume is a
+  pure optimization layer. Store `sdk_session_id` + a history fingerprint (hash of message ids) on
+  `chat_session`. Each turn: if a session id exists AND the current history is exactly
+  last-fingerprint + append-only new turns → resume (send only the new user message); anything else
+  (side-chat promote, hide/trash, context_config change, missing/expired CLI session file, model
+  switch) → silently fall back to the stateless rebuild and store the fresh session id.
+- **Why deferred:** after N1 the re-sent prefix is small, so resume's remaining win is tool-use
+  memory across turns + latency — revisit with N2's usage numbers in hand. Do NOT build ahead of
+  measurements.
+
 ## Open Questions (backend)
 - **Q-A-downsyntax** — `18_down.surrealql` `REMOVE`/redefine style. *Default: match existing down files.*
 - ~~**Q-A-getsession**~~ — RESOLVED 2026-07-02: there is only one message read path post-202
   (`GET /chat/sessions/{id}` → `_build_chat_message`); the hydrate lives inside it (B5 v2).
+- **Q-N-windowmap** — exact context-window values (Claude 200K today; qwen3.6 262144 per Ollama
+  metadata). *Default: the N2 map; unknown models return None and the meter hides.*
+- **Q-N-abstract** — is an abstract cheaply available on the `get_sources()` listing without extra
+  queries? *Default: include abstract only if already on the fetched record; titles-only otherwise.*
