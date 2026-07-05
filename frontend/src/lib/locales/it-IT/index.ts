@@ -460,6 +460,7 @@ export const itIT = {
     untitledSection: "Untitled Section",
     summarize: "Summarize",
     quizMe: "Quiz me",
+    sectionSummary: "Riepilogo IA",
     sectionActions: "Section actions",
     annotations: {
       title: "Highlights",

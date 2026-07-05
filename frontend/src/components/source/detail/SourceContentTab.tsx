@@ -189,6 +189,16 @@ export const SourceContentTab = memo(function SourceContentTab({
                 {activeSectionRange && (
                   <p className="mt-1 text-sm text-muted-foreground">{activeSectionRange}</p>
                 )}
+                {activeSection?.summary?.trim() && (
+                  <div className="mt-3 rounded-lg border border-border bg-muted/50 px-3 py-2">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      {t('sources.sectionSummary')}
+                    </p>
+                    <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                      {activeSection.summary}
+                    </p>
+                  </div>
+                )}
               </div>
             )}
             {isLoadingActiveContent ? (

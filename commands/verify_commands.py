@@ -29,7 +29,7 @@ Design notes:
 import re
 import time
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from loguru import logger
 from surreal_commands import CommandInput, CommandOutput, command, submit_command
@@ -187,6 +187,22 @@ def _flatten_section_ids(nodes: List[dict]) -> List[str]:
         children = node.get("children") or []
         ids.extend(_flatten_section_ids(children))
     return ids
+
+
+def _flatten_section_titles(nodes: List[dict]) -> Dict[str, str]:
+    """Depth-first flatten of a ``get_sections()`` tree into id → title.
+
+    Used by the per-section fan-outs to stamp job args with the chapter title
+    (``label``) and the owning ``source_id``, so the frontend job tray can say
+    which chapter a job is about and link the row back to its source.
+    """
+    titles: Dict[str, str] = {}
+    for node in nodes:
+        nid = node.get("id")
+        if nid:
+            titles[str(nid)] = str(node.get("title") or "")
+        titles.update(_flatten_section_titles(node.get("children") or []))
+    return titles
 
 
 async def _chaptering_in_flight(source_id: str) -> bool:
@@ -469,12 +485,19 @@ async def verify_clean_source(
         )
 
     jobs_submitted = 0
+    section_titles = _flatten_section_titles(tree)
     for section_id in section_ids:
         try:
             cmd_id = submit_command(
                 "open_notebook",
                 "verify_clean_section",
-                {"source_section_id": section_id},
+                {
+                    "source_section_id": section_id,
+                    # Job-tray metadata (ignored by the Pydantic input model):
+                    # label → row title, source_id → click-to-origin route.
+                    "source_id": input_data.source_id,
+                    "label": section_titles.get(section_id, ""),
+                },
             )
             logger.info(
                 f"verify_clean_source: submitted verify_clean_section for "

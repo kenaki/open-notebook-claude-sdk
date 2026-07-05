@@ -47,9 +47,14 @@ export function JobTrayItem({ job }: JobTrayItemProps) {
   const { t } = useTranslation()
   const Icon = KIND_ICONS[job.kind]
 
-  // Custom label (chat sessions) wins; otherwise a human title from the kind.
-  const title = job.label && job.label.trim() ? job.label : t(KIND_LABEL_KEY[job.kind])
+  // Custom label (chat session name, chapter title) wins; otherwise a human
+  // title from the kind. When a custom label takes the title slot, the kind
+  // label moves to the subtitle (unless a live phase is already showing) so
+  // the row still says WHAT is happening, not just what it's happening to.
+  const hasCustomLabel = Boolean(job.label && job.label.trim())
+  const title = hasCustomLabel ? job.label : t(KIND_LABEL_KEY[job.kind])
   const phase = job.status === 'running' ? job.progress?.phase : undefined
+  const subtitle = phase ?? (hasCustomLabel ? t(KIND_LABEL_KEY[job.kind]) : undefined)
 
   return (
     <button
@@ -62,14 +67,14 @@ export function JobTrayItem({ job }: JobTrayItemProps) {
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-medium text-foreground">{title}</span>
-        {(job.command || phase) && (
+        {(job.command || subtitle) && (
           <span className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-muted-foreground">
             {job.command && (
               <code className="rounded bg-muted px-1 py-0 font-mono text-[11px] tracking-tight text-muted-foreground">
                 {job.command}
               </code>
             )}
-            {phase && <span className="truncate">{phase}</span>}
+            {subtitle && <span className="truncate">{subtitle}</span>}
           </span>
         )}
       </span>

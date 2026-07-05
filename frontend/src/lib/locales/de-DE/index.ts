@@ -463,6 +463,7 @@ export const deDE = {
     untitledSection: "Untitled Section",
     summarize: "Summarize",
     quizMe: "Quiz me",
+    sectionSummary: "KI-Zusammenfassung",
     sectionActions: "Section actions",
     annotations: {
       title: "Highlights",

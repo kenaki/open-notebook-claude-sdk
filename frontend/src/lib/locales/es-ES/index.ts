@@ -460,6 +460,7 @@ export const esES = {
     untitledSection: "Untitled Section",
     summarize: "Summarize",
     quizMe: "Quiz me",
+    sectionSummary: "Resumen de IA",
     sectionActions: "Section actions",
     annotations: {
       title: "Highlights",

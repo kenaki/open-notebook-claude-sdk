@@ -460,6 +460,7 @@ export const ruRU = {
     untitledSection: "Untitled Section",
     summarize: "Summarize",
     quizMe: "Quiz me",
+    sectionSummary: "Сводка ИИ",
     sectionActions: "Section actions",
     annotations: {
       title: "Highlights",

@@ -460,6 +460,7 @@ export const ptBR = {
     untitledSection: "Untitled Section",
     summarize: "Summarize",
     quizMe: "Quiz me",
+    sectionSummary: "Resumo de IA",
     sectionActions: "Section actions",
     annotations: {
       title: "Highlights",

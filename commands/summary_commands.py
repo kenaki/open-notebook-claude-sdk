@@ -43,7 +43,11 @@ from surreal_commands import CommandInput, CommandOutput, command, submit_comman
 
 # Shared race-guard + tree-flatten helpers live with the B2 orchestrator; both
 # fan-outs must gate on the same "chaptering reached a terminal state" predicate.
-from commands.verify_commands import _chaptering_in_flight, _flatten_section_ids
+from commands.verify_commands import (
+    _chaptering_in_flight,
+    _flatten_section_ids,
+    _flatten_section_titles,
+)
 from open_notebook.ai.provision import provision_langchain_model
 from open_notebook.database.repository import ensure_record_id, repo_query
 from open_notebook.domain.notebook import Source, SourceSection
@@ -302,12 +306,19 @@ async def summarize_source(
         )
 
     jobs_submitted = 0
+    section_titles = _flatten_section_titles(tree)
     for section_id in section_ids:
         try:
             cmd_id = submit_command(
                 "open_notebook",
                 "summarize_section",
-                {"source_section_id": section_id},
+                {
+                    "source_section_id": section_id,
+                    # Job-tray metadata (ignored by the Pydantic input model):
+                    # label → row title, source_id → click-to-origin route.
+                    "source_id": input_data.source_id,
+                    "label": section_titles.get(section_id, ""),
+                },
             )
             logger.debug(
                 f"summarize_source: submitted summarize_section for "

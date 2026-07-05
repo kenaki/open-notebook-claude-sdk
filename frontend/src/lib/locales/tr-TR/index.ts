@@ -460,6 +460,7 @@ export const trTR = {
     untitledSection: "Untitled Section",
     summarize: "Summarize",
     quizMe: "Quiz me",
+    sectionSummary: "Yapay zeka özeti",
     sectionActions: "Section actions",
     annotations: {
       title: "Highlights",

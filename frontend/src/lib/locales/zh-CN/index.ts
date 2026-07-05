@@ -460,6 +460,7 @@ export const zhCN = {
     untitledSection: "Untitled Section",
     summarize: "Summarize",
     quizMe: "Quiz me",
+    sectionSummary: "AI 摘要",
     sectionActions: "Section actions",
     annotations: {
       title: "Highlights",

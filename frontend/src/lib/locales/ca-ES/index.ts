@@ -460,6 +460,7 @@ export const caES = {
     untitledSection: "Untitled Section",
     summarize: "Summarize",
     quizMe: "Quiz me",
+    sectionSummary: "Resum d'IA",
     sectionActions: "Section actions",
     annotations: {
       title: "Highlights",

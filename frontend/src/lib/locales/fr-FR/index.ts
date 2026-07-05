@@ -460,6 +460,7 @@ export const frFR = {
     untitledSection: "Untitled Section",
     summarize: "Summarize",
     quizMe: "Quiz me",
+    sectionSummary: "Résumé IA",
     sectionActions: "Section actions",
     annotations: {
       title: "Highlights",

@@ -460,6 +460,7 @@ export const jaJP = {
     untitledSection: "Untitled Section",
     summarize: "Summarize",
     quizMe: "Quiz me",
+    sectionSummary: "AI要約",
     sectionActions: "Section actions",
     annotations: {
       title: "Highlights",

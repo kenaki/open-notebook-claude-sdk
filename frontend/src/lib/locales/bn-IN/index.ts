@@ -460,6 +460,7 @@ export const bnIN = {
     untitledSection: "Untitled Section",
     summarize: "Summarize",
     quizMe: "Quiz me",
+    sectionSummary: "এআই সারাংশ",
     sectionActions: "Section actions",
     annotations: {
       title: "Highlights",

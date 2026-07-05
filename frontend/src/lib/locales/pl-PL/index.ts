@@ -460,6 +460,7 @@ export const plPL = {
     untitledSection: "Untitled Section",
     summarize: "Summarize",
     quizMe: "Quiz me",
+    sectionSummary: "Podsumowanie AI",
     sectionActions: "Section actions",
     annotations: {
       title: "Highlights",

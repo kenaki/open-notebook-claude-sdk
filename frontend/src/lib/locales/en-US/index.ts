@@ -460,6 +460,7 @@ export const enUS = {
     untitledSection: "Untitled Section",
     summarize: "Summarize",
     quizMe: "Quiz me",
+    sectionSummary: "AI summary",
     sectionActions: "Section actions",
     annotations: {
       title: "Highlights",
