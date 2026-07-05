@@ -76,30 +76,85 @@ def _detect_page_offset(doc) -> Optional[int]:
         return None
 
 
+# to-fix/003: Docling emits admonition callouts as markdown pseudo-headings
+# (e.g. '# Tip' ×69 in one book). They are never real section titles, so they
+# are excluded from the heading-candidate set used for TOC title matching.
+_ADMONITION_MARKERS = frozenset({"tip", "note", "warning", "caution", "important"})
+
+# to-fix/003: a markdown slice whose length exceeds
+# max(_PAGE_BUDGET_SLACK × raw text length of its page span, _PAGE_BUDGET_FLOOR)
+# is mis-bounded → replaced with raw PyMuPDF page-range text. The floor keeps
+# markup-dense single pages (tables, code) from false-positiving.
+_PAGE_BUDGET_SLACK = 3
+_PAGE_BUDGET_FLOOR = 20_000
+
+# to-fix/003: a heading match must lie near the proportional markdown position
+# of its TOC start page (raw-text prefix ratio). Measured on a 1.8M-char book:
+# genuine matches drift ≤ ~14K chars (p99), while a spurious match (Docling
+# dropped the real heading; the same title exists elsewhere in the book) sat
+# 468K chars away — one such match would catapult the cursor and unmatch every
+# entry after it. Window = max(floor, full_len // fraction) ≈ 5% of the book.
+_MATCH_WINDOW_FLOOR = 40_000
+_MATCH_WINDOW_FRACTION = 20
+
+
 def _sections_from_toc(doc, toc: List, full_text: str) -> List[Dict]:
     """
     Build sections using PDF TOC for page ranges, markdown headings for content.
 
-    Strategy:
-    - For each TOC entry, try to find the matching '#' heading in full_text (Docling markdown).
-    - If found: content = markdown slice from that heading to the next same-or-higher heading.
-    - If not found: fall back to raw PyMuPDF text extraction for that page range.
+    Strategy (rewritten for to-fix/003 — mis-bounded section content):
+    - Collect ALL occurrence positions of each '#' heading in full_text
+      (Docling markdown), excluding admonition pseudo-headings.
+    - Walk TOC entries in document order with a char cursor: each entry gets
+      the first occurrence of its title at/after the cursor, so repeated
+      titles ("Exercises" ×19) map to distinct positions instead of all
+      collapsing onto the first. Matches must also fall inside a plausibility
+      window around the page-proportional position (see _MATCH_WINDOW_*) so a
+      far-only occurrence can't catapult the cursor.
+    - char_end = char_start of the next TOC entry at same-or-higher level
+      (parents aggregate their children, as before).
+    - Every markdown slice is validated against the raw PyMuPDF text length of
+      its page span (for parents: through the last descendant's pages); a
+      slice exceeding max(3× that, 20k chars) is mis-bounded and replaced by
+      the raw page-range text — the same fallback unmatched titles use.
+
+    Returned dicts carry ``char_start`` (matched heading position or None) and
+    ``content_from_pages`` (True when content is raw page text) purely for
+    diagnostics/tests; the DB save only reads the standard keys.
     """
     import re
+    from bisect import bisect_left
 
     heading_re = re.compile(r"^(#{1,6})\s+(.+)$", re.MULTILINE)
-    heading_matches = list(heading_re.finditer(full_text))
 
-    # Build case-insensitive title → char_start map (first occurrence wins)
-    title_to_char: Dict[str, int] = {}
-    for m in heading_matches:
+    # Case-insensitive title → ALL occurrence positions (document order)
+    title_positions: Dict[str, List[int]] = {}
+    for m in heading_re.finditer(full_text):
         key = m.group(2).strip().lower()
-        if key not in title_to_char:
-            title_to_char[key] = m.start()
+        if key in _ADMONITION_MARKERS:
+            continue
+        title_positions.setdefault(key, []).append(m.start())
 
     n_pages = len(doc)
-    sections = []
 
+    # Per-page raw text, cached once: budget validation + fallback content
+    page_texts = [doc[p].get_text("text") for p in range(n_pages)]
+    page_len_prefix = [0]
+    for t in page_texts:
+        page_len_prefix.append(page_len_prefix[-1] + len(t))
+
+    full_len = len(full_text)
+    raw_total = page_len_prefix[-1]
+    window = max(_MATCH_WINDOW_FLOOR, full_len // _MATCH_WINDOW_FRACTION)
+
+    def _est_md_pos(page0: int) -> int:
+        """Estimated markdown char position of a 0-based page boundary."""
+        page0 = max(0, min(page0, n_pages))
+        return (full_len * page_len_prefix[page0] // raw_total) if raw_total else 0
+
+    # --- Pass 1: page ranges + positional char_start assignment ---
+    entries: List[Dict] = []
+    cursor = 0
     for i, (level, title, page_1based) in enumerate(toc):
         page_start = max(0, page_1based - 1)  # 1-based → 0-based
         if i + 1 < len(toc):
@@ -109,33 +164,85 @@ def _sections_from_toc(doc, toc: List, full_text: str) -> List[Dict]:
             page_end = n_pages - 1
         page_end = min(page_end, n_pages - 1)
 
-        # Try markdown heading slice for content
-        char_start = title_to_char.get(title.strip().lower())
+        # First heading occurrence at/after both the cursor and the
+        # plausibility window's lower edge; a match beyond the upper edge is
+        # implausibly far → treated as unmatched. Unmatched titles never
+        # advance the cursor.
+        positions = title_positions.get(title.strip().lower(), [])
+        idx = bisect_left(positions, max(cursor, _est_md_pos(page_start) - window))
+        char_start: Optional[int] = positions[idx] if idx < len(positions) else None
+        if char_start is not None and char_start > _est_md_pos(page_start + 1) + window:
+            char_start = None
         if char_start is not None:
-            # Find char_end = start of next entry at same or higher level
+            cursor = char_start + 1
+
+        entries.append(
+            {
+                "level": level,
+                "title": title,
+                "page_start": page_start,
+                "page_end": page_end,
+                "char_start": char_start,
+            }
+        )
+
+    # --- Pass 2: bound each slice, validate against its page budget ---
+    sections = []
+    for i, e in enumerate(entries):
+        level = e["level"]
+
+        # Effective page span for budget/fallback: through the page before the
+        # next same-or-higher-level entry. For leaves this equals the stored
+        # page_end; for parents it covers all descendants (matching the
+        # parent-aggregates-children content semantics). Stored
+        # page_start/page_end are NOT changed (verify_commands consumes them).
+        span_end = n_pages - 1
+        for j in range(i + 1, len(entries)):
+            if entries[j]["level"] <= level:
+                span_end = entries[j]["page_start"] - 1
+                break
+        span_end = min(max(span_end, e["page_start"]), n_pages - 1)
+
+        char_start = e["char_start"]
+        content: Optional[str] = None
+        if char_start is not None:
+            # char_end = assigned char_start of next same-or-higher entry
+            # (skipping unmatched ones). No bounded end → slice to EOF, then
+            # let the page budget below catch a mis-bound.
             char_end = len(full_text)
-            for j in range(i + 1, len(toc)):
-                lv2, t2, _ = toc[j]
-                if lv2 <= level:
-                    c = title_to_char.get(t2.strip().lower())
-                    if c is not None and c > char_start:
-                        char_end = c
+            for j in range(i + 1, len(entries)):
+                if entries[j]["level"] <= level:
+                    c2 = entries[j]["char_start"]
+                    if c2 is not None and c2 > char_start:
+                        char_end = c2
                         break
             content = full_text[char_start:char_end].strip()
-        else:
-            # Fallback: raw text from PyMuPDF pages
-            content_parts = []
-            for p in range(page_start, page_end + 1):
-                content_parts.append(doc[p].get_text("text"))
-            content = "\n".join(content_parts).strip()
+
+            expected_chars = (
+                page_len_prefix[span_end + 1] - page_len_prefix[e["page_start"]]
+            )
+            budget = max(_PAGE_BUDGET_SLACK * expected_chars, _PAGE_BUDGET_FLOOR)
+            if len(content) > budget:
+                logger.debug(
+                    f"Section '{e['title']}': markdown slice {len(content)} chars "
+                    f"exceeds page budget {budget} — using page-range text"
+                )
+                content = None
+
+        from_pages = content is None
+        if from_pages:
+            # Fallback: raw text from PyMuPDF pages over the effective span
+            content = "\n".join(page_texts[e["page_start"] : span_end + 1]).strip()
 
         sections.append(
             {
                 "level": level,
-                "title": title,
+                "title": e["title"],
                 "content": content,
-                "page_start": page_start,
-                "page_end": page_end,
+                "page_start": e["page_start"],
+                "page_end": e["page_end"],
+                "char_start": char_start,
+                "content_from_pages": from_pages,
             }
         )
 
@@ -153,7 +260,13 @@ def _sections_from_markdown_headings(full_text: str) -> List[Dict]:
     import re
 
     heading_re = re.compile(r"^(#{1,6})\s+(.+)$", re.MULTILINE)
-    matches = list(heading_re.finditer(full_text))
+    # to-fix/003: skip admonition pseudo-headings ('# Tip' etc.) — they are
+    # callouts, not sections; their text stays inside the enclosing section.
+    matches = [
+        m
+        for m in heading_re.finditer(full_text)
+        if m.group(2).strip().lower() not in _ADMONITION_MARKERS
+    ]
     if not matches:
         return []
 

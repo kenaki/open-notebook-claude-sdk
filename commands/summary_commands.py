@@ -87,6 +87,12 @@ class GenerateSourceAbstractOutput(CommandOutput):
     error_message: Optional[str] = None
 
 
+# to-fix/003 defense-in-depth: hard cap on summarizer input. ~300K chars is
+# ≈75K tokens — comfortable headroom in a 100K-token context. After the
+# section-bounding fix in commands/section_commands.py nothing should hit it.
+_MAX_SUMMARY_INPUT_CHARS = 300_000
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -179,6 +185,14 @@ async def summarize_section(
             f"summarize_section: section {section.id} has no text; skipping"
         )
         return SummarizeSectionOutput(summary=None)
+
+    if len(text) > _MAX_SUMMARY_INPUT_CHARS:
+        logger.warning(
+            f"summarize_section: section {section.id} text ({len(text)} chars) "
+            f"exceeds the context budget — truncating to "
+            f"{_MAX_SUMMARY_INPUT_CHARS} chars"
+        )
+        text = text[:_MAX_SUMMARY_INPUT_CHARS] + "\n\n[…truncated for length]"
 
     model = await provision_langchain_model(
         text, None, "transformation", max_tokens=8192
