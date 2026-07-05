@@ -330,6 +330,18 @@ export interface NotebookChatSession extends BaseChatSession {
   notebook_id: string
 }
 
+// Token usage reported by the model for an AI turn (chat-foundation frozen
+// contract #9, N2/N3). Only the claude-agent path populates this; local /
+// Esperanto models report nothing (null/absent), so every field is optional.
+export interface UsageInfo {
+  input_tokens?: number
+  output_tokens?: number
+  cache_read_input_tokens?: number
+  cache_creation_input_tokens?: number
+  model?: string
+  context_window?: number
+}
+
 export interface NotebookChatMessage {
   id: string
   type: 'human' | 'ai'
@@ -342,6 +354,9 @@ export interface NotebookChatMessage {
   // Claude Agent tool-use disclosure (AI messages; null/absent on the Esperanto
   // path and old sessions). Plan D / Chunk 10.
   tool_uses?: ToolUseDisclosure[]
+  // Ground-truth token usage for this AI turn (chat-foundation N2, frozen
+  // contract #9). Null/absent on the Esperanto path and old sessions.
+  usage?: UsageInfo | null
   // Image/video attachments (Plan D / Chunk 12). On human turns these are what the
   // user attached; AI messages echo `[]`. Absent on old sessions.
   media?: MediaItem[]

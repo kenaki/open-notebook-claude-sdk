@@ -4,6 +4,7 @@ import { useEffect, useMemo } from 'react'
 import { ChatPanel } from '@/components/source/chat'
 import { ChatModelPicker } from './ChatModelPicker'
 import { ContextPreviewPopover } from './ContextPreview'
+import { ContextUsageMeter } from './ContextUsageMeter'
 import { SideChatDefaultMenu } from './SideChatDefaultMenu'
 import { SideChatsMenu } from './SideChatsMenu'
 import { useChatWorkspaceStore } from '@/lib/stores/chat-workspace-store'
@@ -168,6 +169,9 @@ export function ChatDock({ notebookId, chat, contextStats }: ChatDockProps) {
       >
         <span className="text-[11px] text-text-3 truncate">{meterText}</span>
       </ContextPreviewPopover>
+      {/* Context-window usage (chat-foundation N3): ground truth from the last
+          AI turn's `usage`, else an estimate seeded with the context tokenCount. */}
+      <ContextUsageMeter messages={chat.getMessages(activeMainId)} contextTokens={tokenCount} />
       {activeMainId && (
         <SideChatsMenu sideSessions={chat.sideSessionsOf(activeMainId)} onOpen={openChat} />
       )}
