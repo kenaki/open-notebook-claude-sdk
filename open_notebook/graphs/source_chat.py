@@ -19,6 +19,7 @@ from open_notebook.ai.provision import provision_langchain_model
 from open_notebook.config import LANGGRAPH_CHECKPOINT_FILE
 from open_notebook.domain.notebook import Source, SourceInsight
 from open_notebook.exceptions import OpenNotebookError
+from open_notebook.graphs.chat import format_index_line
 from open_notebook.utils import clean_thinking_content
 from open_notebook.utils.context_builder import ContextBuilder
 from open_notebook.utils.error_classifier import classify_error
@@ -36,8 +37,83 @@ class SourceChatState(TypedDict):
     context_indicators: Optional[Dict[str, List[str]]]
 
 
+# --- Claude-agent slim context (AGENT-CTX N1) --------------------------------
+# Mirrors chat.py: on the Claude Agent SDK path the ContextBuilder blob
+# (truncated full text + every insight) is redundant — the agent's
+# ``mcp__open_notebook__*`` tools can pull the outline / sections / raw text
+# for this source on demand. The agent branch swaps the blob for a one-line
+# source index plus a retrieval hint. The Esperanto path keeps the full blob
+# byte-identical.
+
+_SOURCE_AGENT_INDEX_HEADER = (
+    "Source index — full content is NOT inlined. Retrieve on demand with the "
+    "mcp__open_notebook__ tools and cite ids exactly as listed."
+)
+
+_SOURCE_AGENT_INDEX_HINT = (
+    "Call mcp__open_notebook__get_source_outline on this id to see its "
+    "chapters, then mcp__open_notebook__get_section for a specific section "
+    "(mcp__open_notebook__get_source returns the full raw text; "
+    "mcp__open_notebook__search finds passages across the workspace)."
+)
+
+
+def build_source_agent_context(source) -> str:
+    """Pure: one source record (model or dict) -> slim source-chat context.
+
+    Raises when the record has no id — without an id the agent cannot
+    retrieve or cite anything, so the caller degrades to the full blob.
+    """
+    line = format_index_line(source, "source")
+    if line is None:
+        raise ValueError("source record has no id; cannot build slim context")
+    return f"{_SOURCE_AGENT_INDEX_HEADER}\n\n{line}\n\n{_SOURCE_AGENT_INDEX_HINT}"
+
+
+def _slim_source_agent_payload(payload: list, prompt_data: Optional[dict]) -> list:
+    """Swap the ContextBuilder blob in ``payload[0]`` for the slim source index.
+
+    Claude-agent branch only. Re-renders the ``source_chat/system`` template
+    with ``context`` replaced, so the source header / citation rules stay
+    intact.
+
+    Degrade, never fail: on ANY problem this returns the original payload
+    untouched — the full blob plus the E2BIG stdin guard in
+    ``open_notebook.ai.claude_agent`` still protect the turn.
+    """
+    try:
+        source = (prompt_data or {}).get("source")
+        if (
+            not source
+            or not payload
+            or not isinstance(payload[0], SystemMessage)
+        ):
+            return payload
+        slim_data = dict(prompt_data)  # type: ignore[arg-type]
+        slim_data["context"] = build_source_agent_context(source)
+        slim_prompt = Prompter(prompt_template="source_chat/system").render(
+            data=slim_data
+        )
+        before = len(str(payload[0].content).encode("utf-8"))
+        after = len(slim_prompt.encode("utf-8"))
+        logger.info(
+            f"Claude-agent slim context (source chat): system prompt "
+            f"{before}B -> {after}B"
+        )
+        return [SystemMessage(content=slim_prompt)] + payload[1:]
+    except Exception as e:
+        logger.warning(
+            f"Claude-agent slim source context failed; keeping full context "
+            f"blob: {e}"
+        )
+        return payload
+
+
 async def _generate_source_chat_message(
-    model_id, payload, config: RunnableConfig
+    model_id,
+    payload,
+    config: RunnableConfig,
+    prompt_data: Optional[dict] = None,
 ) -> AIMessage:
     """Produce the source-chat AIMessage for the selected/default model.
 
@@ -46,6 +122,10 @@ async def _generate_source_chat_message(
     provisioning path. Mirrors ``chat.py._generate_ai_message`` so the
     ``claude_agent`` default (which Esperanto cannot provision) works in source
     chat too, instead of failing with "No model configured for default".
+
+    ``prompt_data`` feeds the agent-path slim-context swap only (see
+    ``_slim_source_agent_payload``); the Esperanto path never reads it,
+    keeping that path byte-identical.
     """
     if await is_claude_agent_selected(model_id):
         thread_id = config.get("configurable", {}).get("thread_id")
@@ -54,6 +134,7 @@ async def _generate_source_chat_message(
             f"Source chat model routing -> Claude Agent SDK | pinned_model="
             f"{agent_model or 'Claude Code default'} | override={model_id!r}"
         )
+        payload = _slim_source_agent_payload(payload, prompt_data)
         return await generate_with_claude_agent(
             payload, thread_id=thread_id, model=agent_model
         )
@@ -157,7 +238,9 @@ def _call_model_with_source_context_inner(
     # Bridge async generation into this sync LangGraph node (see
     # run_async_in_node: running-loop -> thread, no-loop -> asyncio.run).
     ai_message = run_async_in_node(
-        lambda: _generate_source_chat_message(model_id, payload, config)
+        lambda: _generate_source_chat_message(
+            model_id, payload, config, prompt_data=prompt_data
+        )
     )
 
     # Clean thinking content from AI response (e.g., <think>...</think> tags)
