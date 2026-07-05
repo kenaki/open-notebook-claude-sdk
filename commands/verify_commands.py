@@ -246,14 +246,18 @@ async def _run_render(
 @command(
     "verify_clean_section",
     app="open_notebook",
-    # Plan spec intent: max_retries=2 (=> 3 attempts incl. initial), delay=10s.
-    # Translated to the installed surreal_commands RetryConfig schema (which uses
-    # max_attempts / wait_strategy / wait_time — there is no max_retries /
-    # delay_seconds field). Permanent errors (bad id / bad config) don't retry.
+    # Retry hardened 2026-07-05: the original 3×10s-fixed budget structurally
+    # lost to heavy-slot model transitions — a chat→vision swap on the gate
+    # takes minutes, so every VC job that interleaved with a summary stream
+    # 503'd out (observed: 10/10 sample jobs failed this way when mixed;
+    # back-to-back VC against a warm model succeeded). Exponential up to 120s
+    # over 5 attempts (~4min total) outlasts a swap. Permanent errors (bad id /
+    # bad config) still don't retry.
     retry={
-        "max_attempts": 3,
-        "wait_strategy": "fixed",
-        "wait_time": 10,
+        "max_attempts": 5,
+        "wait_strategy": "exponential_jitter",
+        "wait_min": 10,
+        "wait_max": 120,
         "stop_on": [ValueError, ConfigurationError],
     },
 )
