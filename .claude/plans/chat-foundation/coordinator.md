@@ -81,8 +81,16 @@ without waiting on upstream lanes. Only *runtime verification* honors the depend
    merged illustration hydrates from the backend (single source of truth).
 8. **i18n key namespaces (collision-free locale edits):** FE-POPOVER owns `chat.context*`
    (`contextForThisChat`, `resetToNotebookDefault`, `inheritingNotebookDefault`, `contextIncludedCount`);
-   FE-TOGGLE owns `chat.autoIllustrate*` (`autoIllustrate`, `autoIllustrateHelper`). Disjoint keys →
-   clean worktree merge across `frontend/src/lib/locales/*`.
+   FE-TOGGLE owns `chat.autoIllustrate*` (`autoIllustrate`, `autoIllustrateHelper`); USAGE-FE (N3) owns
+   `chat.contextMeter*`. Disjoint keys → clean worktree merge across `frontend/src/lib/locales/*`.
+9. **Per-message usage (N2↔N3 interface, added 2026-07-05):**
+   `ChatMessage.usage = { input_tokens?, output_tokens?, cache_read_input_tokens?,
+   cache_creation_input_tokens?, model?, context_window? }` — all optional; ints except `model`
+   (string). Rides `AIMessage.additional_kwargs["usage"]` through the LangGraph checkpoint (the exact
+   plumbing `tool_uses` uses); the `usage` key is OMITTED at the checkpoint when the SDK reports
+   nothing, and `context_window` is resolved only at session-read time via
+   `open_notebook/ai/context_windows.py:get_context_window(model)` (claude-* → 200 000,
+   qwen3.6 → 262 144, unknown → None → meter hides). Esperanto messages serialize `usage: null`.
 
 ## Global status table (orchestrator owns this)
 Chunk ids are stable. **Owns (files)** is the conflict key; **Depends-on** drives wave computation.
@@ -107,6 +115,11 @@ Chunk ids are stable. **Owns (files)** is the conflict key; **Depends-on** drive
 | F4 | FE-MERMAID | frontend.md | Mermaid renderer (strict + DOMPurify + parse-or-fallback) | `components/source/chat/Mermaid.tsx` (new), `components/source/chat/MarkdownCodeBlock.tsx`, `components/source/chat/ChatPanel.tsx` | — | ☑ (454d328 — branched inside MarkdownCodeBlock; components map now in MessageList.tsx post-3537d09, so ChatPanel/MessageList untouched; tsc+build clean) |
 | F5 | FE-POPOVER | frontend.md | Side-chat Context popover + i18n (`chat.context*`) | `components/notebooks/chat/PoppedChatPanel.tsx`, `components/notebooks/chat/SideChatContextPopover.tsx` (new), `components/notebooks/workspace/DeepDiveWorkspace.tsx`, `locales/*` | F1, F2 | ☑ (429dfea — tsc+eslint clean, 4 keys ×14 locales namespace-clean; visual e2e on punch-list) |
 | F6 | FE-TOGGLE | frontend.md | Per-notebook auto-illustrate toggle + i18n (`chat.autoIllustrate*`) | `components/notebooks/chat/SideChatDefaultMenu.tsx`, `components/notebooks/chat/ChatDock.tsx`, `components/notebooks/workspace/NotebookWorkspaceProvider.tsx`, `locales/*` | F1 | ☑ (8cc887e — tsc+build clean; DropdownMenuCheckboxItem; 14 locales. Live-persist verify parked on B6/W1) |
+| N0 | HOTFIX | backend.md | E2BIG hotfix: oversize system prompts via stdin transcript preamble | `open_notebook/ai/claude_agent.py`, `tests/test_claude_agent.py` | — | ☑ (520627c — landed live during the debugging session; guard `MAX_SYSTEM_PROMPT_ARG_BYTES` preserved by N1/N2) |
+| N1 | AGENT-CTX | backend.md | Slim-index context on the Claude-agent path (Esperanto byte-identical; degrade-never-fail) | `open_notebook/graphs/chat.py`, `open_notebook/graphs/source_chat.py`, `tests/test_agent_context_index.py` (new) | N0 | ☑ (e4985ab — 22 new tests; live: slim log `51059B -> 5366B`, agent answered ch.6 via get_source_outline/search + cited source id; qwen turn routed Esperanto, no slim line) |
+| N2 | USAGE-BE | backend.md | Capture Agent-SDK `ResultMessage.usage` + context-window map (contract #9) | `open_notebook/ai/claude_agent.py`, `open_notebook/ai/context_windows.py` (new), `api/routers/chat/schemas.py`, `api/routers/chat/citations.py`, `tests/test_claude_agent.py` | N0 | ☑ (994da2c — 9 new tests, 27 pass; live: `usage.input_tokens=8236`, `context_window=200000`, `model=claude-opus-4-8` on the agent message; Esperanto message `usage: null`) |
+| N3 | USAGE-FE | frontend.md | Chat context-usage meter (exact fraction+bar / tilde estimate) + `chat.contextMeter*` i18n | `lib/types/api.ts`, `components/notebooks/chat/ContextUsageMeter.tsx` (new), `ChatDock.tsx`, `PoppedChatPanel.tsx`, `locales/*` | N2 (contract only — built in parallel) | ☑ (75ae0c3 — tsc+build clean; 7 keys × 14 locales; locale-parity vitest byte-identical failures to pre-existing baseline. Visual smoke parked on punch-list) |
+| N4 | RESUME | backend.md | Layered SDK session resume (checkpoint stays source of truth) | — | N1, N2 measurements | ⊘ deferred — documented in backend.md; do NOT build ahead of N2 usage data |
 
 Legend: ☐ todo · ◐ in progress · ☑ done · ⏸ blocked · ⊘ deferred.
 
@@ -124,6 +137,9 @@ Legend: ☐ todo · ◐ in progress · ☑ done · ⏸ blocked · ⊘ deferred.
 - **Wave 2 (3 parallel):** B2 (B1✓), F2 (F1✓), F6 (F1✓).
 - **Wave 3 (5 parallel):** B4 (B2✓), B5 (B2,B3✓), B6 (B2✓), F3 (F1✓), F5 (F2✓).
 - **Wave 4:** W1 (B2,B3,B5✓).  **Wave 5:** W2 (W1✓ + S-gate GO).  **Wave 6:** W3 (W2✓).
+- **Wave 7 (N-lane hotfix, 2026-07-05):** N0 — E2BIG stdin reroute, landed inline during the live
+  debugging session.  **Wave 8 (3 parallel):** N1, N2, N3 (N3 built against frozen contract #9 in
+  parallel with N2; runtime verify honored the dep post-integration). N4 stays ⊘.
 - **Peak concurrency = 5** (waves 1 & 3). **Critical path = the worker tail** W1→W2→W3 (gated on B7);
   no agent count shortens it. Frontend (F1→F2→F3/F5) and the rest of backend finish well before W3.
 
@@ -223,6 +239,29 @@ point also remove the two superseded source dirs (`.claude/plans/auto-illustrate
 `.claude/plans/per-chat-context`) and the loose `.claude/plans/shimmering-fluttering-candle.md` if present.
 
 ## Changelog (cross-track)
+- _(2026-07-05)_ **N-lane landed: N0 ☑ (520627c), N1 ☑ (e4985ab), N2 ☑ (994da2c), N3 ☑ (75ae0c3); N4 ⊘.**
+  Root cause: a claude-agent chat with a book-sized context died with `[Errno 7] Argument list too long`
+  (system prompt passed as ONE exec arg; Linux caps a single arg at 128 KiB). N0 hotfix reroutes >100KB
+  prompts via stdin. N1 replaces the pushed context blob with a slim source/note index on the agent path
+  ONLY (MCP tools fetch on demand; Esperanto byte-identical; any index-build failure degrades to the old
+  blob). N2 captures `ResultMessage.usage` → `additional_kwargs["usage"]` → `ChatMessage.usage` per NEW
+  frozen contract #9 + `context_windows.py` map. N3 renders the dock/side-chat context meter (exact
+  fraction + tone bar when usage present; tilde chars/4 estimate otherwise; 7 `chat.contextMeter*` keys ×
+  14 locales). Run as 3 parallel worktree agents (relaunch — the first attempt's session died pre-work;
+  stale worktrees cleaned), clean disjoint merges (9da0412/d5b9d1b/e8dbccc), merged-tree verify green
+  (61 backend tests, tsc, build). **Live e2e PASS on the ML-book notebook:** claude-agent turn → worker
+  log `slim context: system prompt 51059B -> 5366B` (before is ~51KB not the historical 100KB+ because
+  doc-foundation tiered summaries already shrank full-content renders), reply answered ch.6/decision-trees
+  via `get_source_outline`+`search` with 5 tool_uses and cited the source id; session read shows
+  `usage {input_tokens: 8236, output_tokens: 1508, cache_*, model: claude-opus-4-8, context_window:
+  200000}`. qwen3.6 turn routed Esperanto (no slim line, blob path unchanged) with `usage: null`.
+  **Observations:** (a) first qwen turn after idle failed transiently ("provider temporarily
+  unavailable") during the heavy-slot transition + 35B cold load — the chat retry budget gives up faster
+  than verify-clean's (c8932a1 fixed this for summaries only); warm retry fine; pre-existing, not
+  N-lane. (b) one warm qwen reply came back empty (think-strip artifact, known quirk, next turn fine).
+  (c) cheap source/note listings carry no abstract field, so the N1 index is titles-only in practice
+  (abstract hook dormant by design — no per-source round-trips). **Punch-list:** visual meter smoke
+  (dock exact fraction + side-chat tilde estimate).
 - _(2026-07-04, security fix)_ **`to-fix/002` ✅ FIXED (031099e) — W2/W3 now security-clean.** The
   orchestrator's adversarial review had flagged two real findings on the landed W3 diff; both are closed by
   one change in `graphs/illustrate.py`: (1) HIGH — the relevance/safety *judge* fetch
