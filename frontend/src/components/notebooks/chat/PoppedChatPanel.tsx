@@ -3,6 +3,7 @@
 import { ArrowLeftToLine, ArrowUpToLine, X, Quote } from 'lucide-react'
 import { ChatPanel } from '@/components/source/chat'
 import { ChatModelPicker } from './ChatModelPicker'
+import { ContextUsageMeter } from './ContextUsageMeter'
 import { DeleteChatButton } from './DeleteChatButton'
 import { SideChatContextPopover } from './SideChatContextPopover'
 import { deriveChatTitle } from './ChatDock'
@@ -93,6 +94,15 @@ export function PoppedChatPanel({
           {session.title || newChatLabel}
         </span>
         <div className="flex items-center gap-0.5 flex-shrink-0">
+          {/* Context-window usage (chat-foundation N3). The estimate's context
+              term only applies while this session inherits the notebook default
+              selection — a chat with its own context_config has no client-side
+              token count (and we don't add a second fetch loop for one). */}
+          <ContextUsageMeter
+            messages={chat.getMessages(session.id)}
+            contextTokens={session.context_config ? 0 : chat.tokenCount}
+            className="mr-1"
+          />
           <SideChatContextPopover
             sources={sources}
             notes={notes}
