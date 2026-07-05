@@ -132,7 +132,7 @@ class TestNotebookDomain:
         async def fake_get_insights(self):
             return []
 
-        async def fake_get_outline(self):
+        async def fake_get_outline(self, **kwargs):
             return [
                 {
                     "id": f"source_section:{self.id}",
@@ -192,7 +192,7 @@ class TestNotebookDomain:
         async def fake_get_insights(self):
             return []
 
-        async def fake_get_outline(self):
+        async def fake_get_outline(self, **kwargs):
             return []  # non-chaptered source → no outline → Decision #12 fallback
 
         with (
@@ -543,7 +543,7 @@ class TestPodcastService:
         async def fake_get_insights(self):
             return []
 
-        async def fake_get_outline(self):
+        async def fake_get_outline(self, **kwargs):
             return [
                 {
                     "id": f"source_section:{self.id}",

@@ -561,7 +561,12 @@ class Source(ObjectModel):
         insights_list = await self.get_insights()
         insights = [insight.model_dump() for insight in insights_list]
         if context_size == "long":
-            outline = await self.get_outline()
+            # Tiered-summary caps: chapters + main sections for structure,
+            # summaries only at chapter level, truncated — keeps the per-turn
+            # digest at a few K tokens even for a 472-section textbook.
+            outline = await self.get_outline(
+                max_depth=2, summary_depth=1, summary_chars=300
+            )
             # Decision #7/#9: chaptered sources (PDFs) return the tiered digest
             # (abstract + chapter outline), never the raw full_text blob. Decision
             # #12: sources that never chapter — web pages, pasted text, transcripts,
@@ -663,12 +668,26 @@ class Source(ObjectModel):
 
         return roots
 
-    async def get_outline(self) -> List[Dict]:
+    async def get_outline(
+        self,
+        max_depth: Optional[int] = None,
+        summary_depth: Optional[int] = None,
+        summary_chars: Optional[int] = None,
+    ) -> List[Dict]:
         """
         Return section outline (no content) as a nested tree.
 
         Each node: {id, title, level, order, page_start, page_end, summary, children}.
         Used for the agent context (chapter-summary outline) and the TOC sidebar.
+
+        Defaults return the FULL tree (TOC sidebar / sections API). LLM-facing
+        consumers pass token caps (tiered-summary design, 2026-07-05 — a
+        472-section book's uncapped outline is ~80K tokens once summaries are
+        populated, which alone overflows a 100K-token local model):
+        - ``max_depth``: drop nodes with heading level > this (children of a
+          dropped node are always deeper, so subtrees prune cleanly).
+        - ``summary_depth``: include ``summary`` only for levels ≤ this.
+        - ``summary_chars``: truncate included summaries (adds an ellipsis).
         """
         try:
             rows = await repo_query(
@@ -686,21 +705,31 @@ class Source(ObjectModel):
 
         by_id: Dict[str, Dict] = {}
         for row in rows:
+            level = row.get("level", 1)
+            if max_depth is not None and level > max_depth:
+                continue
+            summary = row.get("summary")
+            if summary and summary_depth is not None and level > summary_depth:
+                summary = None
+            if summary and summary_chars is not None and len(summary) > summary_chars:
+                summary = summary[:summary_chars].rstrip() + "…"
             node = {
                 "id": str(row["id"]),
                 "title": row.get("title", ""),
-                "level": row.get("level", 1),
+                "level": level,
                 "order": row.get("order", 0),
                 "page_start": row.get("page_start"),
                 "page_end": row.get("page_end"),
-                "summary": row.get("summary"),
+                "summary": summary,
                 "children": [],
             }
             by_id[node["id"]] = node
 
         roots: List[Dict] = []
         for row in rows:
-            node = by_id[str(row["id"])]
+            node = by_id.get(str(row["id"]))
+            if node is None:  # pruned by max_depth
+                continue
             parent = row.get("parent")
             if parent:
                 parent_id = str(parent)

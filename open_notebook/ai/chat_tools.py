@@ -25,6 +25,17 @@ def _truncate(text: str | None) -> str | None:
     return text
 
 
+def _find_outline_node(nodes: list[dict], section_id: str) -> dict | None:
+    """Depth-first search of an outline tree for the node with ``section_id``."""
+    for node in nodes:
+        if node.get("id") == section_id:
+            return node
+        found = _find_outline_node(node.get("children") or [], section_id)
+        if found is not None:
+            return found
+    return None
+
+
 @tool
 async def search_sources(query: str, limit: int = 5) -> str:
     """Full-text search across the user's sources and notes. Returns matching
@@ -42,12 +53,30 @@ async def search_sources(query: str, limit: int = 5) -> str:
 
 
 @tool
-async def get_source_outline(source_id: str) -> str:
+async def get_source_outline(source_id: str, section_id: str = "") -> str:
     """Get the chapter/section outline of a source document: title, page
-    ranges, and summary for each chapter. Use this to navigate a long document
-    before drilling into a specific section with get_section."""
+    ranges, and summary per chapter. Use this to navigate a long document
+    before drilling into a specific section with get_section.
+
+    Without section_id: a capped overview (chapters + main sections, summaries
+    truncated) — cheap enough for any book. Pass a section_id from that
+    overview to expand ONE chapter's full subtree (all nested subsections,
+    untruncated summaries) when you need to survey a whole chapter."""
     source = await Source.get(source_id)
-    outline = await source.get_outline()
+    if section_id:
+        full = await source.get_outline()
+        subtree = _find_outline_node(full, section_id)
+        if subtree is None:
+            return json.dumps(
+                {"source_id": source_id, "error": f"section '{section_id}' not found"}
+            )
+        return json.dumps(
+            {"source_id": source_id, "title": source.title, "outline": [subtree]},
+            default=str,
+        )
+    # Tiered-summary caps (see Source.get_outline): levels 1–2 only,
+    # summaries truncated — an uncapped 472-section outline is ~80K tokens.
+    outline = await source.get_outline(max_depth=2, summary_depth=2, summary_chars=300)
     return json.dumps(
         {"source_id": source_id, "title": source.title, "outline": outline},
         default=str,

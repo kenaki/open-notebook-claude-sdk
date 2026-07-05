@@ -170,12 +170,46 @@ async def search(args: dict) -> dict:
     "get_source_outline",
     "Get the chapter/section outline of a source document. Returns title, page "
     "ranges, and summary for each chapter. Use this to navigate a long document "
-    "before drilling into a specific section.",
-    {"source_id": str},
+    "before drilling into a specific section. Without section_id: a capped "
+    "overview (chapters + main sections, summaries truncated). Pass a "
+    "section_id from that overview to expand ONE chapter's full subtree.",
+    {
+        "type": "object",
+        "properties": {
+            "source_id": {"type": "string"},
+            "section_id": {
+                "type": "string",
+                "description": "Optional: expand this section's full subtree",
+            },
+        },
+        "required": ["source_id"],
+    },
 )
 async def get_source_outline(args: dict) -> dict:
     source = await Source.get(args["source_id"])
-    outline = await source.get_outline()
+    section_id = args.get("section_id") or ""
+    if section_id:
+        from open_notebook.ai.chat_tools import _find_outline_node
+
+        full = await source.get_outline()
+        subtree = _find_outline_node(full, section_id)
+        if subtree is None:
+            return _result(
+                {
+                    "source_id": args["source_id"],
+                    "error": f"section '{section_id}' not found",
+                }
+            )
+        return _result(
+            {
+                "source_id": args["source_id"],
+                "title": source.title,
+                "outline": [subtree],
+            }
+        )
+    # Tiered-summary caps (see Source.get_outline) — an uncapped 472-section
+    # outline is ~80K tokens once summaries are populated.
+    outline = await source.get_outline(max_depth=2, summary_depth=2, summary_chars=300)
     return _result(
         {
             "source_id": args["source_id"],

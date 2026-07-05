@@ -45,7 +45,6 @@ from surreal_commands import CommandInput, CommandOutput, command, submit_comman
 # fan-outs must gate on the same "chaptering reached a terminal state" predicate.
 from commands.verify_commands import (
     _chaptering_in_flight,
-    _flatten_section_ids,
     _flatten_section_titles,
 )
 from open_notebook.ai.provision import provision_langchain_model
@@ -96,6 +95,27 @@ class GenerateSourceAbstractOutput(CommandOutput):
 # section-bounding fix in commands/section_commands.py nothing should hit it.
 _MAX_SUMMARY_INPUT_CHARS = 300_000
 
+# Tiered-summary policy (2026-07-05): summaries exist for ROUTING — they earn
+# their keep where reading the real text is expensive (level 1 chapters avg
+# ~65K chars ≈ 16 get_section calls; level 2 sections avg ~9.5K). At level 3+
+# the section itself fits in a single get_section call, so a dense summary
+# costs nearly as much context as the real text while adding outline bloat.
+# Fan-out, the abstract readiness gate, and the abstract roll-up all use this
+# bound. summarize_section itself stays level-agnostic (explicit per-section
+# requests still work).
+_MAX_SUMMARY_LEVEL = 2
+
+
+def _summary_target_ids(nodes: List[Dict]) -> List[str]:
+    """Depth-first ids of nodes at level ≤ ``_MAX_SUMMARY_LEVEL``."""
+    ids: List[str] = []
+    for node in nodes:
+        nid = node.get("id")
+        if nid and (node.get("level") or 1) <= _MAX_SUMMARY_LEVEL:
+            ids.append(str(nid))
+        ids.extend(_summary_target_ids(node.get("children") or []))
+    return ids
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -117,6 +137,7 @@ def _flatten_sections_for_abstract(nodes: List[Dict]) -> List[Dict]:
         flat.append(
             {
                 "title": node.get("title") or "(untitled)",
+                "level": node.get("level") or 1,
                 "summary": node.get("summary"),
                 "has_text": bool(text.strip()),
             }
@@ -130,13 +151,15 @@ async def _remaining_unsummarized(source_id: str) -> int:
 
     Mirrors ``generate_source_abstract``'s readiness gate (``has_text`` =
     non-blank ``cleaned_content`` or ``content``; heading-only nodes never get
-    a summary and never count). Used by the event-driven abstract trigger in
-    ``summarize_section``.
+    a summary and never count; level > ``_MAX_SUMMARY_LEVEL`` nodes are outside
+    the tiered-summary policy and never count either). Used by the
+    event-driven abstract trigger in ``summarize_section``.
     """
     rows = await repo_query(
         """
         SELECT count() AS n FROM source_section
         WHERE source = $src
+          AND level <= $max_level
           AND (
               string::len(string::trim(cleaned_content ?? '')) > 0
               OR string::len(string::trim(content ?? '')) > 0
@@ -144,7 +167,7 @@ async def _remaining_unsummarized(source_id: str) -> int:
           AND string::len(string::trim(summary ?? '')) == 0
         GROUP ALL
         """,
-        {"src": ensure_record_id(source_id)},
+        {"src": ensure_record_id(source_id), "max_level": _MAX_SUMMARY_LEVEL},
     )
     return int(rows[0].get("n", 0)) if rows else 0
 
@@ -297,7 +320,9 @@ async def summarize_source(
         )
 
     tree = await source.get_sections()
-    section_ids = _flatten_section_ids(tree)
+    # Tiered-summary policy: fan out only for level ≤ _MAX_SUMMARY_LEVEL —
+    # deeper nodes fit in a single get_section call and don't need summaries.
+    section_ids = _summary_target_ids(tree)
 
     if not section_ids:
         raise RuntimeError(
@@ -385,19 +410,23 @@ async def generate_source_abstract(
         )
 
     rows = _flatten_sections_for_abstract(tree)
+    # Tiered-summary policy: only level ≤ _MAX_SUMMARY_LEVEL nodes are
+    # expected to have summaries (readiness) or contribute to the roll-up
+    # (deeper summaries may exist from older runs — routing never reads them).
+    tier_rows = [r for r in rows if r["level"] <= _MAX_SUMMARY_LEVEL]
     pending = [
         r["title"]
-        for r in rows
+        for r in tier_rows
         if r["has_text"] and not (r["summary"] and r["summary"].strip())
     ]
     if pending:
         raise RuntimeError(
-            f"{len(pending)}/{len(rows)} section(s) with text not yet "
+            f"{len(pending)}/{len(tier_rows)} section(s) with text not yet "
             f"summarized for source {input_data.source_id} "
             f"(e.g. {pending[0]!r}); will retry"
         )
 
-    summarized_rows = [r for r in rows if r["summary"] and r["summary"].strip()]
+    summarized_rows = [r for r in tier_rows if r["summary"] and r["summary"].strip()]
     if not summarized_rows:
         note = "No section summaries available to build an abstract — skipped."
         logger.warning(f"generate_source_abstract: source {source.id}: {note}")
