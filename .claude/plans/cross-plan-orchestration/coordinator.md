@@ -13,25 +13,26 @@
 
 ## SESSION HANDOFF (read first)
 
-> ### ⚡ CURRENT STATE (2026-07-05 — read before anything else)
-> **The feature waves are done; two items remain, one is a live blocker + a fragile stack state.**
+> ### ⚡ CURRENT STATE (2026-07-05 PM — finish run in progress; read before anything else)
+> **`to-fix/003` fix LANDED (`9ec7b8a`) + re-chapter VERIFIED LIVE; b2/b3 re-run IN FLIGHT; stack fully recovered.**
 > - **chat-foundation:** ✅ CODE-COMPLETE (all 16 chunks ☑). `to-fix/002` SSRF **FIXED** (`031099e`,
 >   verified offline 32/32 + live e2e). W2/W3 orchestrator-security-signed-off. Remaining before archive =
 >   human punch-list only (visual browser smokes + user's final SSRF sign-off).
-> - **document-foundation:** ⏸ **BLOCKED on `to-fix/003`** (NEW, 2026-07-05). The b2/b3 re-run was run and
->   it exposed that `build_sections`/`_sections_from_toc` **mis-bounds section `content`** — title-matched
->   slices balloon to ~the whole book (472 sections = 11.5× the book; "Preface" = 92%; 17 sections overflow
->   the 100K summarizer → abstract wedges). The `7c51ea5` b2/b3 fan-out fix itself WORKS; this is a distinct
->   deeper bug. Fix = bound content by the (correct) page ranges + filter admonition pseudo-headings +
->   summarizer context cap; then re-chapter + re-run. Embeddings/search/citations are UNAFFECTED.
-> - **⚠ STACK STATE (must resolve before resuming worker):** `on-worker` is **STOPPED/`failed`** (I halted
->   the wasteful re-run). **~940 stale per-section jobs remain queued** — they WILL resume on the broken
->   data if the worker restarts, so clear them first. **SurrealDB is rejecting new WS signins** post-burst
->   ("problem with authentication"); the app's pooled conn still serves 200s but ad-hoc scripts can't sign
->   in — likely needs a controlled SurrealDB + worker restart to recover, THEN clear the jobs.
-> - **Decision pending (user):** fix chaptering (`to-fix/003`) first vs. recover the stack first vs. both.
+> - **document-foundation:** `to-fix/003` **FIX LANDED** (`9ec7b8a` — Hybrid A+B: positional cursor
+>   matching + plausibility window, admonition filter, 3×-page-budget validation w/ page-text fallback,
+>   300K-char summarizer cap; 7 new unit tests). **Re-chapter verified live:** 472 sections, content total
+>   4.64M chars = 2.53× book (was 21.1M / 11.5×), 0 sections over the summarizer budget (was 17), Preface
+>   22.5K (was 1.69M), all 19 "Exercises" distinct. **Re-run in flight** (this session): 10-section
+>   verify-clean sample (Chapter 1) + full 472-section summarize + auto-abstract, under a live monitor.
+> - **Stack RECOVERED (no restart was needed for the DB):** SurrealDB accepts fresh HTTP + WS signins
+>   again (it self-recovered post-burst); the 924 stale jobs were **cleared** (472 verify + 452 summarize);
+>   `on-worker` restarted on the fixed code and is processing the new run.
+> - **Auto-decided while user AFK (Phase-0 defaults, recommended options):** (1) 003 fix approach =
+>   **Hybrid A+B**; (2) re-run scope = **full summaries + verify-clean SAMPLE** (full VC sweep deferred —
+>   queue later if wanted).
 > - **T3-d** ☑ (bc44fbe) and **Phase4** ☑ (83ecb9a) already landed. Meta-plan archives only when all three
->   feature plans archive — so it stays open until df clears `to-fix/003` + visual smokes.
+>   feature plans archive — remaining after the re-run validates = the human punch-list (visual smokes ×
+>   both plans + SSRF final sign-off), then archival.
 
 **State (2026-06-29, resumed orchestrator — reconciled):** Wave 0 ☑. **Wave 1 ☑.** **Wave 2 ☑ COMPLETE**
 (bg A4 484ef18, bg A5 831aede, df A2 7e13d72, df Phase1 1608053). **Wave 3 partial:** bg B1 ☑ (82257ae),
@@ -327,7 +328,7 @@ Legend: ☐ todo · ◐ in-flight · ☑ done. Update the per-plan coordinator's
 | last | Phase4 | document-foundation | 🔵 | ☑ (83ecb9a — mig 22 applied live v22; annotation CRUD round-trip PASS; highlight plugin + sidebar + chat-about-highlight; visual smoke on punch-list) |
 | fix | to-fix/001 silent-failed-chat-jobs | (bugfix, user-approved 2026-07-04) | 🔵 | ☑ (no-op — already fixed by 3537d09's `resolveDisappearedJob`; verified line-by-line; live repro on punch-list) |
 | fix | to-fix/b2-b3 pipeline-empty-output | (bugfix, user-approved 2026-07-04 — gates df archival) | 🔵 | ☑ code (7c51ea5 — fan-out race + unset vision model; fix VERIFIED works). **Re-run 2026-07-05 EXPOSED a deeper bug → `to-fix/003`** (see below) — re-run HALTED. |
-| fix | to-fix/003 chaptering-content-unbounded | (correctness, found 2026-07-05 — **gates df archival**) | 🔵 | ⏸ OPEN — `_sections_from_toc` mis-bounds section `content` (title-match → whole-book slices; 11.5× dup; 17 sections overflow summarizer → abstract wedges). Fix = bound by page ranges. **Decision + fix needed before df can archive.** Embeddings/search unaffected. |
+| fix | to-fix/003 chaptering-content-unbounded | (correctness, found 2026-07-05 — **gates df archival**) | 🔵 | ◐ FIX LANDED (`9ec7b8a` Hybrid A+B) + re-chapter **verified live** (472 sections, 2.53× book vs 11.5×, 0 summarizer overflows, Preface 22.5K, 19 distinct Exercises). Stale queue cleared, worker restarted, **b2/b3 re-run in flight** (VC ×10 sample + 472 summaries + abstract) — flips ☑ when the re-run validates. |
 
 ---
 
@@ -355,6 +356,24 @@ does not duplicate chunk specs.
 - **ds4-deepseek-v4-flash** — research/decision-gated; orthogonal.
 
 ## Changelog
+- 2026-07-05 PM (finish run — `to-fix/003` fix + stack recovery + re-run launch) — `chunk-plan-execute`
+  "finish the cross plan orchestration". **Phase 0:** user AFK at the batched gate ask → proceeded on the
+  recommended defaults, recorded as auto-decided: **X-003-approach = Hybrid A+B** (positional heading
+  matching for markdown quality + page-range budget validation + admonition filter + summarizer cap) and
+  **X-rerun-scope = full summaries + verify-clean SAMPLE** (10 Chapter-1 sections; full VC sweep deferred).
+  **Stack:** SurrealDB found self-recovered (fresh HTTP+WS signins OK — no restart needed); cleared the 924
+  stale jobs (472 `verify_clean_section` new + 447+5 `summarize_section` new/running); worker restarted on
+  fixed code. **Wave 1 (solo agent, main tree):** `9ec7b8a` — `_sections_from_toc` rewritten (per-title
+  occurrence lists + cursor walk + page-proportional plausibility window `max(40K, len/20)`; admonition
+  pseudo-heading filter incl. markdown-headings path; 3× page-span budget w/ 20K floor → page-text fallback
+  over the effective aggregate span; stored page ranges byte-identical) + 300K-char `summarize_section` cap
+  + `tests/test_section_bounds.py` (7 tests). Verify: 39 pytest green (isolation), imports clean, real-book
+  dry-run AND live re-chapter both show 472 sections / 4.64M chars (2.53×, was 11.5×) / 0 overflows /
+  Preface 22.5K (was 1.69M) / 19 distinct "Exercises" / 34 page-fallbacks. **Agent's in-scope refinement:**
+  a pure cursor walk matched only 46/472 (one spurious far match catapulted the cursor) — the plausibility
+  window is what makes positional matching work; p99 genuine drift ≈14K vs 468K for the spurious match.
+  **Re-run submitted + monitored:** VC sample ×10 → `summarize_source` fan-out (472) → event-driven
+  abstract. Docs updated mid-run so a resumed session sees true state.
 - 2026-07-04 (chat-foundation finish — `to-fix/002` security fix) — Closed the #1 remaining code item. The
   orchestrator's adversarial review of the landed W1–W3 diff had found two real image-pipeline findings
   (HIGH SSRF in the unguarded relevance/safety *judge* fetch; MED-HIGH bait-and-switch from judging one

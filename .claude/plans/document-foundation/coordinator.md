@@ -14,7 +14,22 @@
 
 ## SESSION HANDOFF (read first)
 
-> **⛔ Update (2026-07-05, b2/b3 re-run → NEW blocker `to-fix/003`):** The full 472-section re-run on
+> **✅ Update (2026-07-05 PM, finish run — `to-fix/003` FIX LANDED, re-run in flight):** `9ec7b8a`
+> rewrote `_sections_from_toc` (Hybrid A+B: admonition pseudo-heading filter; positional cursor matching
+> with a page-proportional plausibility window `max(40K, len/20)` chars — a pure cursor walk matched only
+> 46/472 because one spurious far match catapulted the cursor; per-section 3× page-span budget with 20K
+> floor → raw page-text fallback over the *effective aggregate span*; stored `page_start/page_end`
+> byte-identical so B2/verify_commands are unaffected) + a 300K-char input cap in `summarize_section` +
+> 7 unit tests (`tests/test_section_bounds.py`). **Live re-chapter verified:** 472 sections, content total
+> 4.64M chars = **2.53×** book (nesting duplication only; was 21.1M / 11.5×), **0** sections over the
+> summarizer budget (was 17), Preface 22.5K (was 1.69M), all 19 "Exercises" distinct, 34/472 page-text
+> fallbacks. **Stack recovered:** SurrealDB self-recovered (fresh WS signins OK), 924 stale jobs cleared,
+> worker restarted on fixed code. **In flight:** verify-clean ×10 Chapter-1 sample (B2 quality evidence —
+> supersedes the old "need a ≤50-page-section PDF" data-block; sections are now correctly sized) + full
+> 472-section summarize + event-driven abstract (B3 closure). Results will be recorded here when the run
+> completes; then only the visual browser smokes keep df un-archived.
+>
+> **⛔ Superseded — Update (2026-07-05, b2/b3 re-run → NEW blocker `to-fix/003`):** The full 472-section re-run on
 > `source:jnunvbxml03utb8x6kww` was RUN and it **exposed a distinct, deeper chaptering bug**. The
 > `7c51ea5` fan-out fix itself WORKS (real per-section summaries wrote). But `build_sections`'
 > `_sections_from_toc` **mis-bounds section `content`**: it's a title-matched markdown slice that (a)

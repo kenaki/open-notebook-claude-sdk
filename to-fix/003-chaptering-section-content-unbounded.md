@@ -3,11 +3,31 @@ id: 003
 title: Chaptering mis-bounds section content — a "section" can hold ~the whole book
 type: correctness
 severity: high
-status: open
+status: fixed
 area: commands/section_commands.py (_sections_from_toc content slicing)
 created: 2026-07-05
+fixed: 2026-07-05 (9ec7b8a)
+status-note: fix verified live (bounds); b2/b3 re-run on corrected sections launched same session
 blocks: document-foundation B2/B3 archival; makes summarize_section overflow the LLM context
 ---
+
+> **✅ FIXED 2026-07-05 (`9ec7b8a`) — Hybrid A+B, all three "After the fix" bound criteria verified live.**
+> `_sections_from_toc` rewritten: (1) admonition pseudo-headings (tip/note/warning/caution/important)
+> excluded from heading candidates (both TOC and markdown-headings paths); (2) positional cursor walk over
+> per-title occurrence lists — each of the 19 "Exercises" gets its own occurrence — with a
+> **page-proportional plausibility window** `max(40K chars, full_len/20)` (required: one spurious far
+> match, "Semi-supervised learning" 468K chars away, otherwise catapulted the cursor and unmatched 426/472
+> entries; genuine drift p99 ≈ 14K); (3) every markdown slice validated against **3× its effective
+> page-span raw-text length** (20K floor) — mis-bounds and unmatched titles fall back to PyMuPDF page text
+> over the aggregate span. Plus a 300K-char defense-in-depth cap in `summarize_section`. Stored
+> `page_start`/`page_end` byte-identical (verify_commands unaffected). Tests: `tests/test_section_bounds.py`
+> (7) + test_domain 32, all green. **Live re-chapter of this source:** 472 sections; content total
+> **4,643,077 chars = 2.53×** the book (parent-aggregation duplication only; was 21,099,444 = 11.5×);
+> **0 sections over the summarizer budget** (was 17); Preface **22,532** chars (was 1,690,662); 19
+> distinct "Exercises" (1.5K–16K each); 34/472 page-text fallbacks (mostly chapter titles whose Docling
+> heading differs from the TOC). The b2/b3 re-run (verify-clean sample + full summaries + abstract) was
+> submitted on the corrected sections in the same session — its outcome is tracked in the
+> document-foundation coordinator, not here.
 
 # 003 · `build_sections` produces sections whose `content` is ~the entire book
 
