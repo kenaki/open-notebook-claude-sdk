@@ -302,7 +302,7 @@ Legend: ☐ todo · ◐ in-flight · ☑ done. Update the per-plan coordinator's
 | 5d | B4 | document-foundation | 🔵 | ☑ (c6f6004 + fix 8c0b606 — Decision #21 RESOLVED; live-verified 281,733→3,378 chars, no balloon) |
 | 5d | B5 | document-foundation | 🔵 | ☑ (1effece — live-verified 2026-07-03: agent called get_source_outline+get_section) |
 | 5e | X-page | document-foundation | 🔵 | ☑ (mig 21 8009995 — ungroup vector_search per-passage page fidelity; applied + verified live 2026-07-03) |
-| 6+ | chat-foundation W1–W6 (Lane A #2 — RUNNING) | — | mixed | ◐ ALL 16 chunks code-complete: worker W1 ☑ (LIVE diagram e2e), W2 ☑, **W3 ☑ (5edf9f1 — LIVE image e2e PASS: served .webp 329KB hydrated)**. **⚠ security review → `to-fix/002`: 2 real findings (HIGH SSRF judge fetch + MED-HIGH bait-and-switch) MUST fix before W2/W3 sign-off — #1 remaining code item.** Then punch-list smokes → archive. |
+| 6+ | chat-foundation W1–W6 (Lane A #2) | — | mixed | ☑ CODE-COMPLETE (all 16 chunks): W1 ☑ (LIVE diagram e2e), W2 ☑, **W3 ☑ (5edf9f1 + security fix 031099e — LIVE image e2e PASS: served .webp 329KB hydrated)**. **`to-fix/002` ✅ FIXED (031099e): single SSRF-guarded fetch feeds judge+store — offline SSRF matrix 32/32 both paths + live e2e no-regression. W2/W3 orchestrator-signed-off.** Remaining before archive = human punch-list only (visual smokes + user final SSRF sign-off). |
 | last | T3-d | codebase-cleanup-audit | 🟣 | ☑ (bc44fbe — 3 bridges → run_async_in_node factory helper; both branches proven + real chat e2e 9.6s no-deadlock; 44 tests pass) |
 | last | Phase4 | document-foundation | 🔵 | ☑ (83ecb9a — mig 22 applied live v22; annotation CRUD round-trip PASS; highlight plugin + sidebar + chat-about-highlight; visual smoke on punch-list) |
 | fix | to-fix/001 silent-failed-chat-jobs | (bugfix, user-approved 2026-07-04) | 🔵 | ☑ (no-op — already fixed by 3537d09's `resolveDisappearedJob`; verified line-by-line; live repro on punch-list) |
@@ -334,6 +334,18 @@ does not duplicate chunk specs.
 - **ds4-deepseek-v4-flash** — research/decision-gated; orthogonal.
 
 ## Changelog
+- 2026-07-04 (chat-foundation finish — `to-fix/002` security fix) — Closed the #1 remaining code item. The
+  orchestrator's adversarial review of the landed W1–W3 diff had found two real image-pipeline findings
+  (HIGH SSRF in the unguarded relevance/safety *judge* fetch; MED-HIGH bait-and-switch from judging one
+  fetch but storing a separate one). Both fixed by one change in `graphs/illustrate.py` (031099e): every
+  external image byte-fetch now routes through the single IP-pinned, redirect-revalidating
+  `_ssrf_guarded_fetch`, and `_fetch_and_store_image` fetches **once** so the safety judge and the stored
+  WebP derive from the same bytes. Verified offline (SSRF matrix 32/32 against BOTH paths) + a live image
+  e2e (real turn → guarded relevance judge → one guarded fetch → qwen3.6-VL SAFE → WebP 329KB → served
+  200/image-webp, no regression). `to-fix/002` → `status: fixed`. **chat-foundation is now fully
+  code-complete (all 16 chunks ☑); W2/W3 are orchestrator-security-signed-off.** Only the human punch-list
+  remains before its directory archives: the visual browser smokes + the user's final SSRF sign-off. The
+  b2/b3 full-book re-run (document-foundation) is kicking off in the background now that the GPU is free.
 - 2026-07-04 (chat-foundation Waves 1–2 — Lane A #2 execution begins) — Lane A's second plan is now RUNNING (the
   STABILIZE pass had deferred it). **W1 ☑** (454d328: B1 mig18, B3 stable AI msg-id, F1 FE types, F4 Mermaid).
   **W2 ☑** (8cc887e: B2 domain models, F2 per-chat context, F3 illustration poller kind, F6 auto-illustrate toggle)

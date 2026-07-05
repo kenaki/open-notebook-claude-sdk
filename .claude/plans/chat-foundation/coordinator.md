@@ -100,7 +100,7 @@ Chunk ids are stable. **Owns (files)** is the conflict key; **Depends-on** drive
 | B7 | SPIKES | worker.md | R3 vision + R4 relevance spikes → **S-gate** | scratch scripts only | — | ☑ (ad9d70a — report.json). **S-gate BLESSED GO-WITH-ADJUSTMENTS by user 2026-07-04**: τ=0.6, top-K=3, PageImages-first + early-exit, heavy-lane mandatory (P-6). W2/W3 UNBLOCKED. SSRF/safety review mode (user-chosen): orchestrator adversarial review of the landed W1–W3 diff + user final sign-off on the end punch-list. |
 | W1 | WORKER | worker.md | Enrichment command: trigger (in `chat_completion`) → gate → route → **diagram** → sidecar | `commands/illustrate_commands.py`, `open_notebook/graphs/illustrate.py`, `prompts/illustrate/`, `commands/chat_commands.py` (trigger) | B2, B3, B5 | ☑ (01633fc + orchestrator repair e2755a3 for DG-W1-A. **Live e2e PASS**: real chat turn → trigger → gate ON → GPU sequenceDiagram → sidecar → mermaid fence hydrated in session @106s; toggle-OFF turn submits no illustrate job) |
 | W2 | WORKER | worker.md | **Image** pipeline: expand → search → VLM relevance/abstain | (same as W1) | W1, **B7 (S-gate GO)** | ☑ (11d8898 — in-process verify: Rosetta Stone → PageImages EARLY-EXIT, conf 1.00 chosen; abstract subject → deliberate ABSTAIN; τ=0.6/top-K=3 honored; +gate-503 backoff retry shared with W1 path. W3 seam stub declines → mode='none' until W3) |
-| W3 | WORKER | worker.md | **Image** safety (fail-closed) + SSRF fetch → WebP → store → sidecar | (same as W1) | W2 | ☑ code (5edf9f1 — 21/21 offline cases + live image e2e PASS: real chat turn → search → safety-judged → SSRF-fetched → WebP stored → served 200/image-webp 329KB → hydrated). **⚠ Security review found 2 real findings (HIGH SSRF in judge fetch + MED-HIGH bait-and-switch) → `to-fix/002` — MUST fix before W2/W3 sign-off.** Storage fetch itself verified clean. |
+| W3 | WORKER | worker.md | **Image** safety (fail-closed) + SSRF fetch → WebP → store → sidecar | (same as W1) | W2 | ☑ (5edf9f1 + **security fix 031099e**). Live image e2e PASS. **`to-fix/002` ✅ FIXED**: single SSRF-guarded fetch feeds both the safety judge and the store (kills HIGH judge-fetch SSRF + MED-HIGH bait-and-switch); offline SSRF matrix 32/32 both paths + re-run live e2e (guarded relevance judge → 1 guarded fetch → qwen3.6-VL SAFE → WebP 329KB → served 200/image-webp, no regression). **W2/W3 security-clean; only user final sign-off remains (punch-list).** |
 | F1 | FE-TYPES | frontend.md | Types + chat-api passthrough (`context_config`, `auto_illustrate`) | `frontend/src/lib/types/api.ts`, `frontend/src/lib/api/chat.ts` | — | ☑ (454d328 — done by orchestrator on HEAD; chat.ts passes full body, no change needed) |
 | F2 | FE-HOOK | frontend.md | `useNotebookChat`: per-session context resolution + quote-only seed + setter | `frontend/src/lib/hooks/useNotebookChat.ts` (+ `useBuildNotebookContext.ts` buildContextFor extraction, `useNotebookChatSessions.ts` seed+setter — authorized cross-file, disjoint from wave) | F1 | ☑ (8cc887e — tsc clean; setSessionContextConfig exported for F5) |
 | F3 | FE-POLLER | frontend.md | Jobs poller: `'illustration'` kind → auto-register + session invalidate (silent, no toast) | `frontend/src/lib/stores/jobs-store.ts`, `frontend/src/lib/hooks/use-jobs-poller.ts` (+ `components/jobs/JobTrayItem.tsx` Wand2 icon — type-forced ripple, disjoint) | F1 | ☑ (8cc887e — tsc clean; silent on completion+failure; invalidates session query) |
@@ -223,6 +223,25 @@ point also remove the two superseded source dirs (`.claude/plans/auto-illustrate
 `.claude/plans/per-chat-context`) and the loose `.claude/plans/shimmering-fluttering-candle.md` if present.
 
 ## Changelog (cross-track)
+- _(2026-07-04, security fix)_ **`to-fix/002` ✅ FIXED (031099e) — W2/W3 now security-clean.** The
+  orchestrator's adversarial review had flagged two real findings on the landed W3 diff; both are closed by
+  one change in `graphs/illustrate.py`: (1) HIGH — the relevance/safety *judge* fetch
+  (`_fetch_image_data_uri`) had its own unguarded `follow_redirects=True` path (no SSRF validation, no IP
+  pin) → blind SSRF to localhost/metadata; it now **delegates to `_ssrf_guarded_fetch`** and Pillow-decode-
+  gates the bytes before the VLM. (2) MED-HIGH — `_fetch_and_store_image` fetched *twice* (judge bytes vs
+  stored bytes), so a stateful origin could bait-and-switch past the safety judge; it now **fetches once**
+  and the safety judge + WebP encode both operate on those exact bytes. `_decode_reencode_webp` returns
+  `(webp, source_mime)`. **Verify: offline SSRF matrix 32/32 against BOTH the judge and storage paths**
+  (127.0.0.1, 169.254.169.254, localhost, `::1`, `::ffff:127.0.0.1`, decimal/octal/hex IPs, private ranges,
+  non-http scheme, redirect-to-private rejected per-hop, redirect public→public succeeds, IP-pin assertion,
+  15MB/10MB byte caps, Pillow gate on non-image bytes, single-fetch assertion, unsafe→abstain) **+ a live
+  image e2e** (real "Rosetta Stone" turn → PageImages → guarded relevance judge conf 1.00 early-exit → one
+  guarded storage fetch → qwen3.6-VL safety SAFE → WebP 329KB stored → served `GET /api/chat/media/…webp`
+  200/image-webp — byte-identical size to the pre-fix run, no regression). Also confirmed the LOW-MED note:
+  `media.label` renders only via React-escaped `alt=`/`{…}` in `MessageMedia.tsx` (never
+  `dangerouslySetInnerHTML`; the one such call is Mermaid.tsx on the DOMPurify-sanitized SVG). **W2/W3 are
+  now security-signed-off by the orchestrator; the user's final sign-off is the only remaining item (end
+  punch-list). This was the #1 remaining code item — chat-foundation is now fully code-complete.**
 - _(2026-07-04)_ **W3 landed (5edf9f1) — image path code-complete + LIVE image e2e PASS.** Real chat turn
   ("Tell me about the Rosetta Stone") → gate routed IMAGE → PageImages → qwen3.6-VL safety judge SAFE
   (46.8s) → SSRF-guarded pinned fetch → WebP re-encode (329KB) → stored + served `GET /api/chat/media/
