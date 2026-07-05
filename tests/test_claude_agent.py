@@ -17,6 +17,7 @@ from claude_agent_sdk import (
 
 import open_notebook.ai.claude_agent as ca
 from api.routers.models import _claude_agent_response
+from open_notebook.ai.context_windows import get_context_window
 
 
 class _Record:
@@ -115,7 +116,7 @@ def test_stringify_tool_result_non_text_falls_back_to_json():
     assert "image" in out and "abc" in out
 
 
-def _result_message(text):
+def _result_message(text, usage=None):
     return ResultMessage(
         subtype="success",
         duration_ms=1,
@@ -124,6 +125,7 @@ def _result_message(text):
         num_turns=1,
         session_id="s",
         result=text,
+        usage=usage,
     )
 
 
@@ -164,9 +166,11 @@ async def test_run_captures_tool_uses_and_matches_results(monkeypatch):
     ]
     monkeypatch.setattr(ca, "query", _fake_query(messages))
 
-    text, tool_uses = await ca._run("prompt", options=None)
+    text, tool_uses, usage, model = await ca._run("prompt", options=None)
 
     assert text == "Found 2 results."
+    assert usage == {}  # no usage on the ResultMessage
+    assert model == "claude"
     assert len(tool_uses) == 1
     disclosure = tool_uses[0]
     assert disclosure == {
@@ -186,10 +190,61 @@ async def test_run_no_tools_returns_empty_list(monkeypatch):
     ]
     monkeypatch.setattr(ca, "query", _fake_query(messages))
 
-    text, tool_uses = await ca._run("prompt", options=None)
+    text, tool_uses, _usage, _model = await ca._run("prompt", options=None)
 
     assert text == "Hi there."
     assert tool_uses == []
+
+
+# --- N2 USAGE-BE: per-turn token usage capture --------------------------------
+
+
+@pytest.mark.asyncio
+async def test_run_captures_usage_and_last_model_wins(monkeypatch):
+    usage = {"input_tokens": 12, "output_tokens": 34}
+    messages = [
+        AssistantMessage(content=[TextBlock(text="Thinking...")], model="claude"),
+        AssistantMessage(
+            content=[TextBlock(text="Done.")], model="claude-opus-4-8"
+        ),
+        _result_message("Done.", usage=usage),
+    ]
+    monkeypatch.setattr(ca, "query", _fake_query(messages))
+
+    text, _tool_uses, got_usage, model = await ca._run("prompt", options=None)
+
+    assert text == "Done."
+    assert got_usage == usage
+    # The LAST AssistantMessage's model id wins.
+    assert model == "claude-opus-4-8"
+
+
+def test_build_usage_kwargs_copies_only_known_int_fields():
+    sdk_usage = {
+        "input_tokens": 10,
+        "output_tokens": 20,
+        "cache_read_input_tokens": 30,
+        "cache_creation_input_tokens": 40,
+        "service_tier": "standard",  # non-int extras must be dropped
+        "server_tool_use": {"web_search_requests": 0},  # nested → dropped
+        "cache_creation": {"ephemeral_5m_input_tokens": 40},  # nested → dropped
+    }
+    out = ca._build_usage_kwargs(sdk_usage, "claude-opus-4-8")
+    assert out == {
+        "input_tokens": 10,
+        "output_tokens": 20,
+        "cache_read_input_tokens": 30,
+        "cache_creation_input_tokens": 40,
+        "model": "claude-opus-4-8",
+    }
+
+
+def test_build_usage_kwargs_empty_or_none_returns_none():
+    assert ca._build_usage_kwargs(None, "claude-opus-4-8") is None
+    assert ca._build_usage_kwargs({}, "claude-opus-4-8") is None
+    # Bools are ints in Python; they must not leak into token counts, and a
+    # usage dict with no salvageable fields must not become an empty dict.
+    assert ca._build_usage_kwargs({"input_tokens": True}, None) is None
 
 
 def test_response_includes_env_override(monkeypatch):
@@ -226,7 +281,7 @@ def _capture_run(monkeypatch):
     async def fake_run(prompt, options):
         captured["prompt"] = prompt
         captured["options"] = options
-        return "ok", []
+        return "ok", [], {}, None
 
     monkeypatch.setattr(ca, "_run", fake_run)
     return captured
@@ -270,3 +325,90 @@ async def test_generate_oversize_system_prompt_moves_to_transcript(
     append = captured["options"].system_prompt["append"]
     assert append == ca.OVERSIZE_SYSTEM_PROMPT_STUB
     assert len(append.encode("utf-8")) < ca.MAX_SYSTEM_PROMPT_ARG_BYTES
+
+
+# --- N2 USAGE-BE: usage rides AIMessage.additional_kwargs ---------------------
+
+
+@pytest.mark.asyncio
+async def test_generate_attaches_usage_with_model(tmp_path, monkeypatch):
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    monkeypatch.setattr(ca, "CLAUDE_AGENT_CWD", str(tmp_path))
+    _stub_tools_module(monkeypatch)
+    sdk_usage = {
+        "input_tokens": 12,
+        "output_tokens": 34,
+        "cache_read_input_tokens": 56,
+        "cache_creation_input_tokens": 78,
+        "service_tier": "standard",  # dropped: not a contract field
+    }
+    messages = [
+        AssistantMessage(content=[TextBlock(text="Hi.")], model="claude-opus-4-8"),
+        _result_message("Hi.", usage=sdk_usage),
+    ]
+    monkeypatch.setattr(ca, "query", _fake_query(messages))
+
+    message = await ca.generate_with_claude_agent(
+        [SystemMessage(content="sys"), HumanMessage(content="hi")]
+    )
+
+    assert message.content == "Hi."
+    assert message.additional_kwargs["usage"] == {
+        "input_tokens": 12,
+        "output_tokens": 34,
+        "cache_read_input_tokens": 56,
+        "cache_creation_input_tokens": 78,
+        "model": "claude-opus-4-8",
+    }
+    # tool_uses plumbing is untouched.
+    assert message.additional_kwargs["tool_uses"] == []
+
+
+@pytest.mark.asyncio
+async def test_generate_without_usage_omits_key(tmp_path, monkeypatch):
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    monkeypatch.setattr(ca, "CLAUDE_AGENT_CWD", str(tmp_path))
+    _stub_tools_module(monkeypatch)
+    messages = [
+        AssistantMessage(content=[TextBlock(text="Hi.")], model="claude"),
+        _result_message("Hi."),  # no usage on the ResultMessage
+    ]
+    monkeypatch.setattr(ca, "query", _fake_query(messages))
+
+    message = await ca.generate_with_claude_agent(
+        [SystemMessage(content="sys"), HumanMessage(content="hi")]
+    )
+
+    # No empty dict in the checkpoint: the key is absent entirely.
+    assert "usage" not in message.additional_kwargs
+    assert message.additional_kwargs["tool_uses"] == []
+
+
+# --- N2 USAGE-BE: context-window map ------------------------------------------
+
+
+def test_context_window_claude_prefix():
+    assert get_context_window("claude-opus-4-8") == 200_000
+    assert get_context_window("claude-sonnet-4-6") == 200_000
+    assert get_context_window("claude-haiku-4-5-20251001") == 200_000
+
+
+def test_context_window_claude_aliases():
+    assert get_context_window("opus") == 200_000
+    assert get_context_window("sonnet") == 200_000
+    assert get_context_window("haiku") == 200_000
+    assert get_context_window("Sonnet") == 200_000  # case-insensitive
+
+
+def test_context_window_qwen():
+    assert get_context_window("qwen3.6") == 262_144
+    assert get_context_window("qwen3.6:latest") == 262_144
+
+
+def test_context_window_unknown_and_none():
+    assert get_context_window("gpt-4o") is None
+    assert get_context_window("") is None
+    assert get_context_window("   ") is None
+    assert get_context_window(None) is None
