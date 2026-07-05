@@ -197,8 +197,126 @@ async def _run_tool_loop(
     return ai_message
 
 
+# --- Claude-agent slim context (AGENT-CTX N1) --------------------------------
+# On the Claude Agent SDK path the pre-rendered context blob (100KB+ for
+# book-sized notebooks) is redundant: the agent's unscoped
+# ``mcp__open_notebook__*`` tools can fetch any source/note on demand. The
+# agent branch therefore swaps the blob for a compact id+title index of the
+# WHOLE notebook — deliberately ignoring the per-chat context_config, which
+# was never an information boundary on this path (the tools reach everything
+# regardless), so only redundant bytes are dropped, never access control.
+# The Esperanto/LangChain path keeps the full blob byte-identical: those
+# providers may lack tool support and need the content pushed.
+
+_AGENT_INDEX_HEADER = (
+    "Notebook source index — full content is NOT inlined. Retrieve on demand "
+    "with the mcp__open_notebook__ tools (search / get_source_outline / "
+    "get_section / get_source / get_note) and cite ids exactly as listed."
+)
+
+# Abstract-like fields surfaced next to an index line when the cheap listing
+# already carries one. Checked in order; NEVER triggers extra per-record
+# fetches (the index is built from one get_sources() + one get_notes() total).
+_ABSTRACT_FIELDS = ("abstract", "summary", "description")
+_MAX_ABSTRACT_CHARS = 300
+
+
+def _record_field(record, name: str):
+    """Read ``name`` off a record that may be a pydantic model or a dict."""
+    if isinstance(record, dict):
+        return record.get(name)
+    return getattr(record, name, None)
+
+
+def format_index_line(record, prefix: str) -> Optional[str]:
+    """One ``- <prefix>:<id> — "<title>"[ — <abstract>]`` index line.
+
+    Pure. Returns ``None`` when the record has no id (an id-less entry can't
+    be retrieved or cited, so it is skipped). The id keeps its table prefix
+    exactly once whether the record carries ``source:abc`` or a bare ``abc``.
+    """
+    record_id = _record_field(record, "id")
+    if not record_id:
+        return None
+    record_id = str(record_id)
+    if not record_id.startswith(f"{prefix}:"):
+        record_id = f"{prefix}:{record_id}"
+    title = _record_field(record, "title") or "Untitled"
+    line = f'- {record_id} — "{title}"'
+    for field in _ABSTRACT_FIELDS:
+        value = _record_field(record, field)
+        if isinstance(value, str) and value.strip():
+            abstract = " ".join(value.split())
+            if len(abstract) > _MAX_ABSTRACT_CHARS:
+                abstract = abstract[:_MAX_ABSTRACT_CHARS].rstrip() + "…"
+            line += f" — {abstract}"
+            break
+    return line
+
+
+def build_agent_context_index(sources, notes) -> str:
+    """Pure: source + note records -> compact slim-context index text.
+
+    Input records may be domain models (``Source``/``Note``) or plain dicts;
+    only id/title (+ an abstract-like field when already present) are read, so
+    the cheap ``get_sources()`` / ``get_notes()`` listings are enough.
+    """
+    lines = [format_index_line(s, "source") for s in (sources or [])]
+    lines += [format_index_line(n, "note") for n in (notes or [])]
+    body = [line for line in lines if line]
+    if not body:
+        return (
+            _AGENT_INDEX_HEADER
+            + "\n\n(This notebook has no sources or notes yet.)"
+        )
+    return _AGENT_INDEX_HEADER + "\n\n" + "\n".join(body)
+
+
+async def _slim_agent_payload(payload: list, state: Optional[ThreadState]) -> list:
+    """Swap the rendered context blob in ``payload[0]`` for the slim index.
+
+    Claude-agent branch only. Re-renders the ``chat/system`` template with
+    ``context`` replaced by the whole-notebook index, so the citation rules /
+    quote block / notebook header stay intact.
+
+    Degrade, never fail: on ANY problem this returns the original payload
+    untouched — the full blob plus the E2BIG stdin guard in
+    ``open_notebook.ai.claude_agent`` still protect the turn.
+    """
+    try:
+        notebook = (state or {}).get("notebook")
+        if (
+            notebook is None
+            or not payload
+            or not isinstance(payload[0], SystemMessage)
+        ):
+            return payload
+        sources = await notebook.get_sources()  # cheap: omits full_text
+        notes = await notebook.get_notes()  # cheap: omits content
+        slim_state = dict(state)  # type: ignore[arg-type]
+        slim_state["context"] = build_agent_context_index(sources, notes)
+        slim_prompt = Prompter(prompt_template="chat/system").render(
+            data=slim_state  # type: ignore[arg-type]
+        )
+        before = len(str(payload[0].content).encode("utf-8"))
+        after = len(slim_prompt.encode("utf-8"))
+        logger.info(
+            f"Claude-agent slim context: system prompt {before}B -> {after}B"
+        )
+        return [SystemMessage(content=slim_prompt)] + payload[1:]
+    except Exception as e:
+        logger.warning(
+            f"Claude-agent slim context failed; keeping full context blob: {e}"
+        )
+        return payload
+
+
 async def _generate_ai_message(
-    model_id, payload, config: RunnableConfig, job_id: Optional[str] = None
+    model_id,
+    payload,
+    config: RunnableConfig,
+    job_id: Optional[str] = None,
+    state: Optional[ThreadState] = None,
 ) -> AIMessage:
     """Produce the chat AIMessage for the selected model.
 
@@ -208,6 +326,10 @@ async def _generate_ai_message(
     ``open_notebook.ai.chat_tools``) when the model supports tool calling so it
     can navigate a chaptered document instead of only seeing the context blob.
     Models that don't support ``bind_tools`` fall back to plain chat, unchanged.
+
+    ``state`` feeds the agent-path slim-context swap only (see
+    ``_slim_agent_payload``); the Esperanto path never reads it, keeping that
+    path byte-identical.
     """
     if await is_claude_agent_selected(model_id):
         thread_id = config.get("configurable", {}).get("thread_id")
@@ -216,6 +338,7 @@ async def _generate_ai_message(
             f"Chat model routing -> Claude Agent SDK | pinned_model="
             f"{agent_model or 'Claude Code default'} | override={model_id!r}"
         )
+        payload = await _slim_agent_payload(payload, state)
         return await generate_with_claude_agent(
             payload, thread_id=thread_id, model=agent_model
         )
@@ -254,7 +377,9 @@ def call_model_with_messages(state: ThreadState, config: RunnableConfig) -> dict
         # Bridge async generation into this sync LangGraph node (see
         # run_async_in_node: running-loop -> thread, no-loop -> asyncio.run).
         ai_message = run_async_in_node(
-            lambda: _generate_ai_message(model_id, payload, config, job_id=job_id)
+            lambda: _generate_ai_message(
+                model_id, payload, config, job_id=job_id, state=state
+            )
         )
 
         # Clean thinking content from AI response (e.g., <think>...</think> tags)
