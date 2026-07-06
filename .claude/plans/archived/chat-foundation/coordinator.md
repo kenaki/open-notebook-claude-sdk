@@ -239,6 +239,11 @@ point also remove the two superseded source dirs (`.claude/plans/auto-illustrate
 `.claude/plans/per-chat-context`) and the loose `.claude/plans/shimmering-fluttering-candle.md` if present.
 
 ## Changelog (cross-track)
+- _(2026-07-06)_ **🏁 ARCHIVED — chat-foundation closed out.** All 16 chunks ☑ + N-lane N0–N3 ☑ (N4
+  `⊘ deferred` backlog). `to-fix/002` SSRF fixed (`031099e`); W2/W3 orchestrator-security-signed-off.
+  **Handed to the user as individual follow-ups** (per the cross-plan finish instruction): the visual
+  browser smokes + the user's final SSRF sign-off. Final merged-tree verify green (backend 32 + baseline
+  flake; frontend `tsc` exit 0). Directory archived to `archived/chat-foundation/`.
 - _(2026-07-05)_ **N-lane landed: N0 ☑ (520627c), N1 ☑ (e4985ab), N2 ☑ (994da2c), N3 ☑ (75ae0c3); N4 ⊘.**
   Root cause: a claude-agent chat with a book-sized context died with `[Errno 7] Argument list too long`
   (system prompt passed as ONE exec arg; Linux caps a single arg at 128 KiB). N0 hotfix reroutes >100KB

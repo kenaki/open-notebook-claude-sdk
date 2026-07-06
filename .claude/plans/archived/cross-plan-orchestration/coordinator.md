@@ -13,6 +13,25 @@
 
 ## SESSION HANDOFF (read first)
 
+> ### 🏁 ARCHIVED 2026-07-06 — cross-plan orchestration CLOSED OUT (read first)
+> **All three feature plans + the T3-d tail are code-complete and archived. This meta-coordinator is
+> archived per the user's explicit finish instruction ("finish the cross plan orchestration, I want the
+> files archived… if we come across bugs I will solve them individually").**
+> - **background-jobs:** ✅ archived (Wave 5, 2026-07-02).
+> - **chat-foundation:** ✅ archived — all 16 chunks ☑ + N-lane N0–N3 ☑ (N4 `⊘ deferred` backlog). `to-fix/002`
+>   SSRF fixed. **Handed to user:** visual browser smokes + final SSRF sign-off.
+> - **document-foundation:** ✅ archived — every code chunk landed; `to-fix/003` chaptering fix landed +
+>   re-chapter verified live. **Handed to user (accepted as individual follow-ups):** `B2` (data-blocked —
+>   needs a PDF that chapters into ≤50-page sections to exercise the vision quality run) · `Phase3` visual
+>   click-lands-on-page browser smoke · the `b2/b3` + `003` data-quality re-run validation on the one book.
+> - **T3-d** ☑ (bc44fbe) · **Phase4** ☑ (83ecb9a). Final verify on the merged tree (2026-07-06): backend
+>   32 pass + the known `test_models_api` collection-order flake (isolation-clean), imports clean, frontend
+>   `tsc` exit 0. **Note:** a separate uncommitted **annotation-tags (mig 23)** WIP feature is in the tree —
+>   NOT part of this orchestration; left untouched.
+> - **Nothing here blocks archival anymore** — the open items are the user's punch-list, owned by the user.
+>
+> <details><summary>Prior state (2026-07-05 PM — finish run in progress)</summary>
+>
 > ### ⚡ CURRENT STATE (2026-07-05 PM — finish run in progress; read before anything else)
 > **`to-fix/003` fix LANDED (`9ec7b8a`) + re-chapter VERIFIED LIVE; b2/b3 re-run IN FLIGHT; stack fully recovered.**
 > - **chat-foundation:** ✅ CODE-COMPLETE (all 16 chunks ☑). `to-fix/002` SSRF **FIXED** (`031099e`,
@@ -33,6 +52,8 @@
 > - **T3-d** ☑ (bc44fbe) and **Phase4** ☑ (83ecb9a) already landed. Meta-plan archives only when all three
 >   feature plans archive — remaining after the re-run validates = the human punch-list (visual smokes ×
 >   both plans + SSRF final sign-off), then archival.
+>
+> </details>
 
 **State (2026-06-29, resumed orchestrator — reconciled):** Wave 0 ☑. **Wave 1 ☑.** **Wave 2 ☑ COMPLETE**
 (bg A4 484ef18, bg A5 831aede, df A2 7e13d72, df Phase1 1608053). **Wave 3 partial:** bg B1 ☑ (82257ae),
@@ -356,6 +377,20 @@ does not duplicate chunk specs.
 - **ds4-deepseek-v4-flash** — research/decision-gated; orthogonal.
 
 ## Changelog
+- 2026-07-06 (**ARCHIVAL — cross-plan orchestration closed out**) — `chunk-plan-execute` "finish the cross
+  plan orchestration; archive the files; I'll solve remaining bugs individually." All build-now chunks
+  across all three feature plans are ☑ and committed (verified against `git log`); T3-d ☑, Phase4 ☑,
+  background-jobs already archived. Since the last coordinator write, chat-foundation also landed its
+  **N-lane N0–N3** (usage capture + context meter + slim agent context; N4 `⊘ deferred`) plus refinements
+  (tiered-summary caps `005c663`, descriptive job-tray rows `5356922`, verify-clean retry budget `c8932a1`).
+  **Final verify (merged tree):** backend 32 pass + known `test_models_api` collection-order flake
+  (isolation-clean, not a regression), backend imports clean, frontend `tsc` exit 0. Per the user's explicit
+  instruction the residual **human/data punch-list is handed to the user as individual follow-ups** and is
+  NOT a blocker: chat-foundation visual smokes + final SSRF sign-off; document-foundation `B2`
+  (data-blocked vision quality run) + `Phase3` visual click smoke + the `003`/`b2-b3` re-run data validation.
+  `to-fix/` items `001` resolved · `002` fixed · `003` fixed (code) · `b2-b3` fixed (code). A separate
+  uncommitted **annotation-tags (mig 23)** WIP feature in the tree is NOT part of this orchestration and was
+  left untouched. Archived chat-foundation/ + document-foundation/ + this meta-coordinator to `archived/`.
 - 2026-07-05 PM (finish run — `to-fix/003` fix + stack recovery + re-run launch) — `chunk-plan-execute`
   "finish the cross plan orchestration". **Phase 0:** user AFK at the batched gate ask → proceeded on the
   recommended defaults, recorded as auto-decided: **X-003-approach = Hybrid A+B** (positional heading
