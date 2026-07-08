@@ -1,11 +1,11 @@
 import json
 import traceback
-from typing import Any, Dict, List
 
 from fastapi import APIRouter, HTTPException
 from loguru import logger
 
 from api.command_service import CommandService
+from api.context_service import build_context_data
 from api.routers._helpers import ensure_prefix, get_or_404
 from api.routers.chat.schemas import (
     BuildContextRequest,
@@ -13,7 +13,7 @@ from api.routers.chat.schemas import (
     ExecuteChatJobResponse,
     ExecuteChatRequest,
 )
-from open_notebook.domain.notebook import ChatSession, Note, Notebook, Source
+from open_notebook.domain.notebook import ChatSession, Notebook
 
 router = APIRouter()
 
@@ -65,77 +65,12 @@ async def build_context(request: BuildContextRequest):
     try:
         notebook = await get_or_404(Notebook, request.notebook_id, "Notebook")
 
-        context_data: Dict[str, List[Dict[str, str]]] = {"sources": [], "notes": []}
-        total_content = ""
-
-        if request.context_config:
-            for source_id, status in request.context_config.get("sources", {}).items():
-                if "not in" in status:
-                    continue
-
-                try:
-                    full_source_id = (
-                        source_id
-                        if source_id.startswith("source:")
-                        else f"source:{source_id}"
-                    )
-
-                    try:
-                        source = await Source.get(full_source_id)
-                    except Exception:
-                        continue
-
-                    if "insights" in status:
-                        source_context = await source.get_context(context_size="short")
-                        context_data["sources"].append(source_context)
-                        total_content += str(source_context)
-                    elif "full content" in status:
-                        source_context = await source.get_context(context_size="long")
-                        context_data["sources"].append(source_context)
-                        total_content += str(source_context)
-                except Exception as e:
-                    logger.warning(f"Error processing source {source_id}: {str(e)}")
-                    continue
-
-            for note_id, status in request.context_config.get("notes", {}).items():
-                if "not in" in status:
-                    continue
-
-                try:
-                    full_note_id = (
-                        note_id if note_id.startswith("note:") else f"note:{note_id}"
-                    )
-                    note = await Note.get(full_note_id)
-                    if not note:
-                        continue
-
-                    if "full content" in status:
-                        note_context = note.get_context(context_size="long")
-                        context_data["notes"].append(note_context)
-                        total_content += str(note_context)
-                except Exception as e:
-                    logger.warning(f"Error processing note {note_id}: {str(e)}")
-                    continue
-        else:
-            sources = await notebook.get_sources()
-            for source in sources:
-                try:
-                    source_context = await source.get_context(context_size="short")
-                    context_data["sources"].append(source_context)
-                    total_content += str(source_context)
-                except Exception as e:
-                    logger.warning(f"Error processing source {source.id}: {str(e)}")
-                    continue
-
-            notes = await notebook.get_notes()
-            for note in notes:
-                try:
-                    note_context = note.get_context(context_size="short")
-                    context_data["notes"].append(note_context)
-                    total_content += str(note_context)
-                except Exception as e:
-                    logger.warning(f"Error processing note {note.id}: {str(e)}")
-                    continue
+        # Empty config → default (all sources/notes), matching the original
+        # `if request.context_config:` truthiness check.
+        sources_ctx, notes_ctx, total_content = await build_context_data(
+            notebook, request.context_config or None
+        )
+        context_data = {"sources": sources_ctx, "notes": notes_ctx}
 
         char_count = len(total_content)
         try:

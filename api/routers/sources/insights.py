@@ -15,7 +15,9 @@ router = APIRouter()
 async def get_source_insights(source_id: str):
     """Get all insights for a specific source."""
     try:
-        source = await Source.get(source_id)
+        # Existence/metadata check only — OMIT the heavy body fields
+        # (db-design §6 waste #3/#5).
+        source = await Source.get_meta(source_id)
         if not source:
             raise HTTPException(status_code=404, detail="Source not found")
 
@@ -50,7 +52,8 @@ async def create_source_insight(source_id: str, request: CreateSourceInsightRequ
     to see when the insight is ready.
     """
     try:
-        source = await Source.get(source_id)
+        # Existence check only — OMIT the heavy body fields (db-design §6 waste #3/#5).
+        source = await Source.get_meta(source_id)
         if not source:
             raise HTTPException(status_code=404, detail="Source not found")
 

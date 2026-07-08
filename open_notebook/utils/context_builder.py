@@ -158,21 +158,27 @@ class ContextBuilder:
                 source_id if source_id.startswith("source:") else f"source:{source_id}"
             )
 
-            source = await Source.get(full_source_id)
-            if not source:
-                logger.warning(f"Source {source_id} not found")
-                return
-
             # Determine context size based on inclusion level
             context_size: Literal["short", "long"] = (
                 "long" if "full content" in inclusion_level else "short"
             )
+
+            # A "short" digest never reads full_text, so fetch the metadata-only
+            # record (OMIT full_text/page_map/page_labels) for it (db-design §6
+            # waste #3/#5). A "long" digest can fall back to raw full_text for
+            # un-chaptered sources (Decision #12), so it needs the full record.
+            if context_size == "long":
+                source = await Source.get(full_source_id)
+            else:
+                source = await Source.get_meta(full_source_id)
+            if not source:
+                logger.warning(f"Source {source_id} not found")
+                return
+
             # source_context is consumed opaquely here (stored as ContextItem.content,
-            # stringified only for token counting) — no full_text key is read off it.
-            # Since document-foundation B4, "long" is the tiered digest (title +
-            # insights + abstract + chapter outline), never the raw full_text blob,
-            # so this naturally shrinks the token budget without any format change
-            # needed in this builder.
+            # stringified only for token counting). For chaptered sources "long" is
+            # the tiered digest (title + insights + abstract + chapter outline);
+            # un-chaptered sources fall back to raw full_text (Decision #12).
             source_context = await source.get_context(context_size=context_size)
 
             # Add source item
@@ -185,21 +191,23 @@ class ContextBuilder:
             )
             self.add_item(item)
 
-            # Add insights if requested and available
+            # Add insights if requested and available. get_context already fetched
+            # them into source_context["insights"] — reuse those dicts instead of a
+            # second get_insights round trip (db-design §6 waste #6: double
+            # get_insights per source per turn).
             if self.include_insights and "insights" in inclusion_level:
-                insights = await source.get_insights()
-                for insight in insights:
+                for insight in source_context.get("insights", []):
                     insight_priority = (self.context_config.priority_weights or {}).get(
                         "insight", 75
                     )
                     insight_item = ContextItem(
-                        id=insight.id or "",
+                        id=insight.get("id") or "",
                         type="insight",
                         content={
-                            "id": insight.id,
+                            "id": insight.get("id"),
                             "source_id": source.id,
-                            "insight_type": insight.insight_type,
-                            "content": insight.content,
+                            "insight_type": insight.get("insight_type"),
+                            "content": insight.get("content"),
                         },
                         priority=insight_priority,
                     )

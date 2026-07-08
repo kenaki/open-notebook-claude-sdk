@@ -46,7 +46,9 @@ async def get_source_sections(source_id: str, include_content: bool = False):
     When include_content=True, uses Source.get_sections() (full rows, cleaned_content preferred).
     """
     try:
-        source = await Source.get(source_id)
+        # Existence/metadata check only (title is used below) — OMIT the heavy
+        # body fields (db-design §6 waste #3/#5).
+        source = await Source.get_meta(source_id)
         if not source:
             raise HTTPException(status_code=404, detail="Source not found")
 
