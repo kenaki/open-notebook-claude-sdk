@@ -1,0 +1,18 @@
+-- Migration 23: annotation tags — freeform grouping tags on source_annotation.
+--
+-- source_annotation is SCHEMAFULL, so a new field must be DEFINEd here (a
+-- Pydantic-only field would be dropped on save). Mirrors migration 17's
+-- pattern for adding a collection field to a SCHEMAFULL table
+-- (chat_tag_colors ON notebook). Rows created before this migration read back
+-- as [] via the DEFAULT.
+--
+-- tags: a plain array of strings the user attaches to a highlight (e.g.
+-- "Important", "Question", chapter names). Auto-colored on the frontend from
+-- the tag text; no per-tag color state is stored server-side.
+--
+-- NOTE: the element type `array<string>` is REQUIRED. An untyped `TYPE array`
+-- silently drops the array's contents on write in this SurrealDB build (stores
+-- []); only a typed array (or FLEXIBLE, as `rect` uses for opaque dicts)
+-- preserves the elements.
+
+DEFINE FIELD IF NOT EXISTS tags ON TABLE source_annotation TYPE array<string> DEFAULT [];

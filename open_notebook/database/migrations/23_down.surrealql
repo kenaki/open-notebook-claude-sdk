@@ -1,0 +1,2 @@
+-- Rollback migration 23
+REMOVE FIELD IF EXISTS tags ON TABLE source_annotation;

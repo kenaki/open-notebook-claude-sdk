@@ -1,6 +1,7 @@
 'use client'
 
-import { FileText, StickyNote, Lightbulb, Sparkles } from 'lucide-react'
+import { BookMarked, ChevronRight, FileText, StickyNote, Lightbulb, Sparkles } from 'lucide-react'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Citation } from '@/lib/types/api'
 import { useTranslation } from '@/lib/hooks/use-translation'
 
@@ -17,11 +18,14 @@ const TYPE_ICON = {
 } as const
 
 /**
- * Numbered reference cards for an AI message's structured citations (Plan D /
- * Chunk 9). Each card shows the citation number, type icon, resolved title (or
- * the id as fallback) and a short snippet. Clicking opens the existing
- * source/note/insight modal via `onReferenceClick(type, bareId)` — kept wired so
- * Plan E can add the source-card flash without re-touching this component.
+ * Collapsible reference list for an AI message's structured citations (Plan D /
+ * Chunk 9). Collapsed by default to a single summary row ("References · N",
+ * same visual language as ToolUseDisclosure); expanding reveals compact pill
+ * chips — citation number, type icon, truncated title (id as fallback) — that
+ * wrap instead of stacking full-width. The snippet moves to the chip's hover
+ * tooltip. Clicking a chip opens the existing source/note/insight modal via
+ * `onReferenceClick(type, bareId)` — kept wired so Plan E can add the
+ * source-card flash without re-touching this component.
  */
 export function MessageReferences({
   citations,
@@ -34,43 +38,43 @@ export function MessageReferences({
   if (!citations.length) return null
 
   return (
-    <div className="w-full mt-1.5">
-      <p className="text-[10.5px] font-semibold uppercase tracking-[0.07em] text-text-3 mb-1.5">
-        {t('common.references')}
-      </p>
-      <div className="flex flex-col gap-1.5">
-        {citations.map((citation) => {
-          const Icon = TYPE_ICON[citation.type] ?? FileText
-          return (
-            <button
-              key={`${citation.id}-${citation.number}`}
-              type="button"
-              data-citation-id={citation.id}
-              data-citation-type={citation.type}
-              onClick={() => onReferenceClick(citation.type, bareId(citation.id))}
-              className="group flex items-start gap-2 text-left rounded-lg border border-border-2 bg-panel-2 hover:bg-accent-soft px-2.5 py-2 transition-colors"
-            >
-              <span className="flex-shrink-0 h-5 w-5 mt-0.5 rounded-full bg-accent-soft text-primary text-[11px] font-semibold flex items-center justify-center">
-                {citation.number}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="flex items-center gap-1.5">
-                  <Icon className="h-3 w-3 flex-shrink-0 text-text-3" aria-hidden="true" />
-                  <span className="truncate text-xs font-medium text-foreground group-hover:text-primary">
-                    {citation.title || citation.id}
-                  </span>
+    <Collapsible className="w-full mt-1.5">
+      <CollapsibleTrigger className="group flex w-full items-center gap-1.5 rounded-lg border border-border-2 bg-panel-2 px-2.5 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-accent-soft">
+        <BookMarked className="h-3.5 w-3.5 flex-shrink-0 text-text-3" aria-hidden="true" />
+        <span className="font-medium text-foreground">{t('common.references')}</span>
+        <span className="text-text-3">· {citations.length}</span>
+        <ChevronRight
+          className="ml-auto h-3.5 w-3.5 flex-shrink-0 text-text-3 transition-transform duration-[0.18s] group-data-[state=open]:rotate-90"
+          aria-hidden="true"
+        />
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="mt-1.5 flex flex-wrap gap-1.5 pl-1">
+          {citations.map((citation) => {
+            const Icon = TYPE_ICON[citation.type] ?? FileText
+            return (
+              <button
+                key={`${citation.id}-${citation.number}`}
+                type="button"
+                data-citation-id={citation.id}
+                data-citation-type={citation.type}
+                title={citation.snippet || undefined}
+                onClick={() => onReferenceClick(citation.type, bareId(citation.id))}
+                className="group/ref flex max-w-full items-center gap-1.5 rounded-full border border-border-2 bg-panel-2 py-1 pl-1 pr-2.5 text-left transition-colors hover:bg-accent-soft"
+              >
+                <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full bg-accent-soft text-[10px] font-semibold text-primary">
+                  {citation.number}
                 </span>
-                {citation.snippet && (
-                  <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground line-clamp-2">
-                    {citation.snippet}
-                  </span>
-                )}
-              </span>
-            </button>
-          )
-        })}
-      </div>
-    </div>
+                <Icon className="h-3 w-3 flex-shrink-0 text-text-3" aria-hidden="true" />
+                <span className="max-w-[180px] truncate text-[11px] font-medium text-foreground group-hover/ref:text-primary">
+                  {citation.title || bareId(citation.id)}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
   )
 }
 

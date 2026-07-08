@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, type ReactNode } from 'react'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { ConfirmDialog } from '@/components/common/ConfirmDialog'
 import { InlineEdit } from '@/components/common/InlineEdit'
@@ -53,6 +53,22 @@ interface SourceDetailContentProps {
    * button hides itself when this is undefined.
    */
   onChatAboutHighlight?: (quote: string) => void
+  /**
+   * Phase4 batch variant: forwarded to PDFViewer for "Ask AI about <tag>".
+   * Omit where no chat is wired — the sidebar button hides itself.
+   */
+  onChatAboutHighlights?: (quotes: string[], tag: string) => void
+  /**
+   * 'stacked' (default) is the modal layout: header block, then a full-width
+   * tab bar. 'toolbar' collapses everything into ONE header line — leading
+   * slot, editable title, tab triggers, type badge, actions menu, trailing
+   * slot — so the tab content (esp. the PDF) gets the rest of the viewport.
+   */
+  layout?: 'stacked' | 'toolbar'
+  /** Toolbar layout only: rendered at the far left (e.g. back button). */
+  toolbarLeading?: ReactNode
+  /** Toolbar layout only: rendered at the far right (e.g. chat toggle). */
+  toolbarTrailing?: ReactNode
 }
 
 export function SourceDetailContent({
@@ -61,7 +77,11 @@ export function SourceDetailContent({
   onChatClick,
   onClose,
   initialPage,
-  onChatAboutHighlight
+  onChatAboutHighlight,
+  onChatAboutHighlights,
+  layout = 'stacked',
+  toolbarLeading,
+  toolbarTrailing
 }: SourceDetailContentProps) {
   const { t } = useTranslation()
   // Controlled tab so a page citation can programmatically open the PDF tab.
@@ -127,22 +147,219 @@ export function SourceDetailContent({
     return 'text'
   }
 
+  // Toolbar layout keeps its leading slot (the back button) reachable even
+  // while the source is loading or failed to load.
+  const toolbarShell = (body: ReactNode) => (
+    <div className="flex h-full flex-col">
+      {layout === 'toolbar' && toolbarLeading && (
+        <div className="flex flex-shrink-0 items-center gap-3 border-b border-border px-4 py-2">
+          {toolbarLeading}
+        </div>
+      )}
+      {body}
+    </div>
+  )
+
   if (loading) {
-    return (
-      <div className="flex h-full items-center justify-center p-8">
+    return toolbarShell(
+      <div className="flex flex-1 items-center justify-center p-8">
         <LoadingSpinner />
       </div>
     )
   }
 
   if (error || !source) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-4 p-8">
+    return toolbarShell(
+      <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8">
         <p className="text-red-500">{error || t('sources.notFound')}</p>
       </div>
     )
   }
 
+  const actionsMenu = (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon">
+          <MoreVertical className="h-4 w-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {source.asset?.file_path && (
+          <>
+            <DropdownMenuItem
+              onClick={handleDownloadFile}
+              disabled={isDownloadingFile || fileAvailable === false}
+            >
+              <Download className="mr-2 h-4 w-4" />
+              {fileAvailable === false
+                ? t('sources.fileUnavailable')
+                : isDownloadingFile
+                  ? t('sources.preparing')
+                  : t('sources.downloadFile')}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+          </>
+        )}
+        <DropdownMenuItem
+          onClick={handleEmbedContent}
+          disabled={isEmbedding || source.embedded}
+        >
+          <Database className="mr-2 h-4 w-4" />
+          {isEmbedding ? t('sources.embedding') : source.embedded ? t('sources.alreadyEmbedded') : t('sources.embedContent')}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          className="text-destructive"
+          onClick={handleDelete}
+        >
+          <Trash2 className="mr-2 h-4 w-4" />
+          {t('sources.deleteSource')}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+
+  const tabTriggers = (
+    <>
+      <TabsTrigger value="content">{t('sources.content')}</TabsTrigger>
+      <TabsTrigger value="insights">
+        {t('common.insights')} {insights.length > 0 && `(${insights.length})`}
+      </TabsTrigger>
+      <TabsTrigger value="details">{t('sources.details')}</TabsTrigger>
+      {isPdfAsset(source) && (
+        <TabsTrigger value="pdf">{t('sources.viewPdf')}</TabsTrigger>
+      )}
+    </>
+  )
+
+  // forceMount + data-[state=inactive]:hidden keeps visited panels alive
+  // across switches; mountedTabs defers each panel's first mount until its
+  // tab is opened.
+  const tabPanels = (
+    <>
+      <TabsContent value="content" forceMount className="mt-3 min-h-0 flex-1 overflow-y-auto data-[state=inactive]:hidden">
+        {mountedTabs.has('content') && <SourceContentTab source={source} />}
+      </TabsContent>
+
+      <TabsContent value="insights" forceMount className="mt-3 min-h-0 flex-1 overflow-y-auto data-[state=inactive]:hidden">
+        {mountedTabs.has('insights') && (
+          <SourceInsightsTab
+            insights={insights}
+            loadingInsights={loadingInsights}
+            transformations={transformations}
+            selectedTransformation={selectedTransformation}
+            onSelectTransformation={setSelectedTransformation}
+            creatingInsight={creatingInsight}
+            onCreateInsight={createInsight}
+            onViewInsight={setSelectedInsight}
+            onDeleteInsight={setInsightToDelete}
+          />
+        )}
+      </TabsContent>
+
+      <TabsContent value="details" forceMount className="mt-3 min-h-0 flex-1 overflow-y-auto data-[state=inactive]:hidden">
+        {mountedTabs.has('details') && (
+          <SourceDetailsTab
+            source={source}
+            sourceId={sourceId}
+            isEmbedding={isEmbedding}
+            onEmbedContent={handleEmbedContent}
+            copied={copied}
+            onCopyUrl={handleCopyUrl}
+            onOpenExternal={handleOpenExternal}
+            isDownloadingFile={isDownloadingFile}
+            fileAvailable={fileAvailable}
+            onDownloadFile={handleDownloadFile}
+            onAssociationsSave={fetchSource}
+          />
+        )}
+      </TabsContent>
+
+      {isPdfAsset(source) && (
+        <TabsContent value="pdf" forceMount className="mt-3 flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
+          {/* initialPage is 0-based; the citation page is 1-indexed physical.
+              key remounts the viewer when the cited page changes. */}
+          {mountedTabs.has('pdf') && (
+            <PDFViewer
+              key={`pdf-${initialPage ?? 'first'}`}
+              sourceId={source.id}
+              initialPage={initialPage != null ? Math.max(0, initialPage - 1) : undefined}
+              onChatAboutHighlight={onChatAboutHighlight}
+              onChatAboutHighlights={onChatAboutHighlights}
+            />
+          )}
+        </TabsContent>
+      )}
+    </>
+  )
+
+  const dialogs = (
+    <>
+      <SourceInsightDialog
+        open={Boolean(selectedInsight)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedInsight(null)
+          }
+        }}
+        insight={selectedInsight ?? undefined}
+        onDelete={handleDeleteSelectedInsight}
+      />
+
+      <ConfirmDialog
+        open={!!insightToDelete}
+        onOpenChange={(open) => {
+          if (!open) {
+            setInsightToDelete(null)
+          }
+        }}
+        title={t('sources.deleteInsight')}
+        description={t('sources.deleteInsightConfirm')}
+        confirmText={t('common.delete')}
+        confirmVariant="destructive"
+        onConfirm={handleDeleteInsight}
+        isLoading={deletingInsight}
+      />
+    </>
+  )
+
+  // Toolbar layout (full-page route): everything in ONE header line so the
+  // active tab — especially the PDF — gets the rest of the viewport.
+  if (layout === 'toolbar') {
+    return (
+      <div className="flex flex-col h-full">
+        <Tabs value={activeTab} onValueChange={handleTabChange} className="flex min-h-0 w-full flex-1 flex-col">
+          <div className="flex flex-shrink-0 items-center gap-3 border-b border-border px-4 py-2">
+            {toolbarLeading}
+            <div className="min-w-0 flex-1">
+              <InlineEdit
+                value={source.title || ''}
+                onSave={handleUpdateTitle}
+                className="truncate text-sm font-semibold"
+                inputClassName="text-sm font-semibold"
+                placeholder={t('sources.titlePlaceholder')}
+                emptyText={t('sources.untitledSource')}
+              />
+            </div>
+            <TabsList className="flex-shrink-0">{tabTriggers}</TabsList>
+            <div className="flex flex-shrink-0 items-center gap-2">
+              <Badge variant="secondary" className="text-xs">
+                {getSourceType()}
+              </Badge>
+              {actionsMenu}
+              {toolbarTrailing}
+            </div>
+          </div>
+          <div className="flex min-h-0 flex-1 flex-col px-4 pb-3">
+            {tabPanels}
+          </div>
+        </Tabs>
+        {dialogs}
+      </div>
+    )
+  }
+
+  // Stacked layout (source modal): header block, then a full-width tab bar.
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
@@ -175,46 +392,7 @@ export function SourceDetailContent({
               </Button>
             )}
 
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon">
-                  <MoreVertical className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {source.asset?.file_path && (
-                  <>
-                    <DropdownMenuItem
-                      onClick={handleDownloadFile}
-                      disabled={isDownloadingFile || fileAvailable === false}
-                    >
-                      <Download className="mr-2 h-4 w-4" />
-                      {fileAvailable === false
-                        ? t('sources.fileUnavailable')
-                        : isDownloadingFile
-                          ? t('sources.preparing')
-                          : t('sources.downloadFile')}
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                  </>
-                )}
-                <DropdownMenuItem
-                  onClick={handleEmbedContent}
-                  disabled={isEmbedding || source.embedded}
-                >
-                  <Database className="mr-2 h-4 w-4" />
-                  {isEmbedding ? t('sources.embedding') : source.embedded ? t('sources.alreadyEmbedded') : t('sources.embedContent')}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  className="text-destructive"
-                  onClick={handleDelete}
-                >
-                  <Trash2 className="mr-2 h-4 w-4" />
-                  {t('sources.deleteSource')}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            {actionsMenu}
           </div>
         </div>
       </div>
@@ -223,99 +401,13 @@ export function SourceDetailContent({
       <div className="flex min-h-0 flex-1 flex-col px-2">
         <Tabs value={activeTab} onValueChange={handleTabChange} className="flex min-h-0 w-full flex-1 flex-col">
           <TabsList className={`grid w-full ${isPdfAsset(source) ? 'grid-cols-4' : 'grid-cols-3'} flex-shrink-0`}>
-            <TabsTrigger value="content">{t('sources.content')}</TabsTrigger>
-            <TabsTrigger value="insights">
-              {t('common.insights')} {insights.length > 0 && `(${insights.length})`}
-            </TabsTrigger>
-            <TabsTrigger value="details">{t('sources.details')}</TabsTrigger>
-            {isPdfAsset(source) && (
-              <TabsTrigger value="pdf">{t('sources.viewPdf')}</TabsTrigger>
-            )}
+            {tabTriggers}
           </TabsList>
-
-          {/* forceMount + data-[state=inactive]:hidden keeps visited panels
-              alive across switches; mountedTabs defers each panel's first
-              mount until its tab is opened. */}
-          <TabsContent value="content" forceMount className="mt-3 min-h-0 flex-1 overflow-y-auto data-[state=inactive]:hidden">
-            {mountedTabs.has('content') && <SourceContentTab source={source} />}
-          </TabsContent>
-
-          <TabsContent value="insights" forceMount className="mt-3 min-h-0 flex-1 overflow-y-auto data-[state=inactive]:hidden">
-            {mountedTabs.has('insights') && (
-              <SourceInsightsTab
-                insights={insights}
-                loadingInsights={loadingInsights}
-                transformations={transformations}
-                selectedTransformation={selectedTransformation}
-                onSelectTransformation={setSelectedTransformation}
-                creatingInsight={creatingInsight}
-                onCreateInsight={createInsight}
-                onViewInsight={setSelectedInsight}
-                onDeleteInsight={setInsightToDelete}
-              />
-            )}
-          </TabsContent>
-
-          <TabsContent value="details" forceMount className="mt-3 min-h-0 flex-1 overflow-y-auto data-[state=inactive]:hidden">
-            {mountedTabs.has('details') && (
-              <SourceDetailsTab
-                source={source}
-                sourceId={sourceId}
-                isEmbedding={isEmbedding}
-                onEmbedContent={handleEmbedContent}
-                copied={copied}
-                onCopyUrl={handleCopyUrl}
-                onOpenExternal={handleOpenExternal}
-                isDownloadingFile={isDownloadingFile}
-                fileAvailable={fileAvailable}
-                onDownloadFile={handleDownloadFile}
-                onAssociationsSave={fetchSource}
-              />
-            )}
-          </TabsContent>
-
-          {isPdfAsset(source) && (
-            <TabsContent value="pdf" forceMount className="mt-3 flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
-              {/* initialPage is 0-based; the citation page is 1-indexed physical.
-                  key remounts the viewer when the cited page changes. */}
-              {mountedTabs.has('pdf') && (
-                <PDFViewer
-                  key={`pdf-${initialPage ?? 'first'}`}
-                  sourceId={source.id}
-                  initialPage={initialPage != null ? Math.max(0, initialPage - 1) : undefined}
-                  onChatAboutHighlight={onChatAboutHighlight}
-                />
-              )}
-            </TabsContent>
-          )}
+          {tabPanels}
         </Tabs>
       </div>
 
-      <SourceInsightDialog
-        open={Boolean(selectedInsight)}
-        onOpenChange={(open) => {
-          if (!open) {
-            setSelectedInsight(null)
-          }
-        }}
-        insight={selectedInsight ?? undefined}
-        onDelete={handleDeleteSelectedInsight}
-      />
-
-      <ConfirmDialog
-        open={!!insightToDelete}
-        onOpenChange={(open) => {
-          if (!open) {
-            setInsightToDelete(null)
-          }
-        }}
-        title={t('sources.deleteInsight')}
-        description={t('sources.deleteInsightConfirm')}
-        confirmText={t('common.delete')}
-        confirmVariant="destructive"
-        onConfirm={handleDeleteInsight}
-        isLoading={deletingInsight}
-      />
+      {dialogs}
     </div>
   )
 }

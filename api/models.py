@@ -455,6 +455,7 @@ class AnnotationResponse(BaseModel):
     color: str
     note: Optional[str] = None
     quote: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
     created: str
     updated: str
 
@@ -467,11 +468,14 @@ class CreateAnnotationRequest(BaseModel):
     color: str = Field(default="#fde047", description="Highlight color (hex)")
     note: Optional[str] = Field(default=None, description="User comment on the highlight")
     quote: Optional[str] = Field(default=None, description="The selected text")
+    tags: List[str] = Field(default_factory=list, description="Grouping tags")
 
 
 class UpdateAnnotationRequest(BaseModel):
     note: Optional[str] = None
     color: Optional[str] = None
+    # None = leave tags unchanged; a list (incl. []) replaces the whole set.
+    tags: Optional[List[str]] = None
 
 
 # Context API models

@@ -23,6 +23,7 @@ def _annotation_to_response(annotation: SourceAnnotation) -> AnnotationResponse:
         color=annotation.color,
         note=annotation.note,
         quote=annotation.quote,
+        tags=annotation.tags,
         created=str(annotation.created),
         updated=str(annotation.updated),
     )
@@ -64,6 +65,7 @@ async def create_source_annotation(source_id: str, request: CreateAnnotationRequ
             color=request.color,
             note=request.note,
             quote=request.quote,
+            tags=request.tags,
         )
         await annotation.save()
         return _annotation_to_response(annotation)
@@ -76,7 +78,7 @@ async def create_source_annotation(source_id: str, request: CreateAnnotationRequ
 
 @router.patch("/annotations/{annotation_id}", response_model=AnnotationResponse)
 async def update_annotation(annotation_id: str, request: UpdateAnnotationRequest):
-    """Update an annotation's note and/or color."""
+    """Update an annotation's note, color and/or tags."""
     try:
         annotation = await SourceAnnotation.get(annotation_id)
 
@@ -84,6 +86,8 @@ async def update_annotation(annotation_id: str, request: UpdateAnnotationRequest
             annotation.note = request.note
         if request.color is not None:
             annotation.color = request.color
+        if request.tags is not None:
+            annotation.tags = request.tags
 
         await annotation.save()
         return _annotation_to_response(annotation)

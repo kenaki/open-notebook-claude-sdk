@@ -965,6 +965,10 @@ class SourceAnnotation(ObjectModel):
     color: str = "#fde047"
     note: Optional[str] = None
     quote: Optional[str] = None
+    # Freeform grouping tags (many per highlight). Auto-colored on the frontend
+    # from the tag text. Defaults to an empty list so highlights created before
+    # migration 23 read back cleanly. Mirrors ChatSession.tags.
+    tags: List[str] = Field(default_factory=list)
     created: Optional[datetime] = None
     updated: Optional[datetime] = None
 

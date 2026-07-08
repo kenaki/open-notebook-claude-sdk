@@ -18,6 +18,7 @@ import '@react-pdf-viewer/highlight/lib/styles/index.css'
 import { sourcesApi } from '@/lib/api/sources'
 import { memo, useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { Sparkles, StickyNote } from 'lucide-react'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import {
   useSourceAnnotations,
@@ -28,7 +29,9 @@ import {
 import { AnnotationsSidebar } from '@/components/source/detail/AnnotationsSidebar'
 import {
   AnnotationHighlightPopover,
-  HIGHLIGHT_COLORS,
+  ColorDots,
+  DEFAULT_HIGHLIGHT_COLOR,
+  HIGHLIGHT_PALETTE,
 } from '@/components/source/detail/AnnotationHighlightPopover'
 import type { Annotation } from '@/lib/types/api'
 
@@ -36,6 +39,18 @@ import type { Annotation } from '@/lib/types/api'
 // node_modules/pdfjs-dist/build) so PDF viewing works offline/self-hosted.
 // Keep the copy in sync with the pdfjs-dist version pinned in package.json.
 const PDFJS_WORKER_URL = '/pdf.worker.min.js'
+
+// New highlights default to the color used last (sticky highlighter pen).
+const LAST_COLOR_KEY = 'pdf-highlight-color'
+const readLastColor = (): string => {
+  try {
+    const stored = window.localStorage.getItem(LAST_COLOR_KEY)
+    if (stored && HIGHLIGHT_PALETTE.some((c) => c.value === stored)) return stored
+  } catch {
+    // SSR or storage unavailable — fall through to the default.
+  }
+  return DEFAULT_HIGHLIGHT_COLOR
+}
 
 interface PDFViewerProps {
   sourceId: string
@@ -54,6 +69,12 @@ interface PDFViewerProps {
    * with no wired chat (e.g. the source modal) omit this — the button hides.
    */
   onChatAboutHighlight?: (quote: string) => void
+  /**
+   * Batch variant: called with every quote carrying a given tag (plus the tag)
+   * when the user clicks "Ask AI about <tag>" in the sidebar. Same wiring as
+   * onChatAboutHighlight — omitted where no chat is wired, hiding the button.
+   */
+  onChatAboutHighlights?: (quotes: string[], tag: string) => void
 }
 
 // memo: the parent's tab-switch state changes must not re-render the viewer —
@@ -64,55 +85,126 @@ export const PDFViewer = memo(function PDFViewer({
   sourceId,
   initialPage = 0,
   onChatAboutHighlight,
+  onChatAboutHighlights,
 }: PDFViewerProps) {
   const { t } = useTranslation()
   const layoutPlugin = defaultLayoutPlugin()
 
   const { data: annotations = [] } = useSourceAnnotations(sourceId)
+  // Union of tags across the doc — feeds the popover's quick-add suggestions.
+  const allTags = useMemo(
+    () => [...new Set(annotations.flatMap((a) => a.tags ?? []))],
+    [annotations]
+  )
   const createAnnotation = useCreateAnnotation(sourceId)
   const updateAnnotation = useUpdateAnnotation(sourceId)
   const deleteAnnotation = useDeleteAnnotation(sourceId)
 
   // Which EXISTING highlight's popover is open (click position is where the
   // user clicked the overlay, so the popover appears right under the cursor).
+  // noteMode: opened via the selection toolbar's "Note" action — the popover
+  // starts with the note editor expanded and focused.
   const [activeAnnotation, setActiveAnnotation] = useState<{
     annotation: Annotation
     top: number
     left: number
+    noteMode?: boolean
   } | null>(null)
+
+  // Sticky highlighter pen: new highlights use the color picked last.
+  const [lastColor, setLastColor] = useState(readLastColor)
+  const rememberColor = (color: string) => {
+    setLastColor(color)
+    try {
+      window.localStorage.setItem(LAST_COLOR_KEY, color)
+    } catch {
+      // Non-persistent preference is still fine.
+    }
+  }
 
   // renderHighlightTarget/renderHighlights close over `annotations` and the
   // mutation functions below — recreated every render alongside layoutPlugin
   // (see comment above), so they never see stale data. `highlightPlugin`
   // itself is a plain factory (no internal React state keyed off identity),
   // matching how `defaultLayoutPlugin()` is already used unmemoized here.
-  const renderHighlightTarget = (props: RenderHighlightTargetProps) => (
-    <div
-      style={{
-        position: 'absolute',
-        left: `${props.selectionRegion.left}%`,
-        top: `${props.selectionRegion.top + props.selectionRegion.height}%`,
-        transform: 'translateY(4px)',
-        zIndex: 50,
-      }}
-    >
-      <button
-        type="button"
-        className="rounded-md border border-border bg-popover px-2 py-1 text-xs font-medium text-popover-foreground shadow-[var(--shadow)] hover:bg-muted"
-        onClick={() => {
-          createAnnotation.mutate({
-            page: props.selectionRegion.pageIndex + 1,
-            rect: props.highlightAreas,
-            color: HIGHLIGHT_COLORS[0],
-            quote: props.selectedText,
-          })
-          props.cancel()
+  const renderHighlightTarget = (props: RenderHighlightTargetProps) => {
+    const createHighlight = (color: string) =>
+      createAnnotation.mutateAsync({
+        page: props.selectionRegion.pageIndex + 1,
+        rect: props.highlightAreas,
+        color,
+        quote: props.selectedText,
+      })
+
+    return (
+      <div
+        style={{
+          position: 'absolute',
+          left: `${props.selectionRegion.left}%`,
+          top: `${props.selectionRegion.top + props.selectionRegion.height}%`,
+          transform: 'translateY(4px)',
+          zIndex: 50,
         }}
       >
-        {t('sources.annotations.addHighlight')}
-      </button>
-    </div>
-  )
+        {/* Selection toolbar: pick a color to highlight, add a highlight with
+            a note, or send the passage to the chat. */}
+        <div
+          role="toolbar"
+          aria-label={t('sources.annotations.addHighlight')}
+          className="flex items-center gap-2 rounded-lg border border-border bg-popover px-2.5 py-1.5 shadow-[var(--shadow)]"
+        >
+          <ColorDots
+            size="sm"
+            selected={lastColor}
+            onPick={(color) => {
+              rememberColor(color)
+              createHighlight(color).catch(() => {
+                // Failure already surfaced by the mutation's error toast.
+              })
+              props.cancel()
+            }}
+          />
+          <span className="h-4 w-px bg-border" aria-hidden="true" />
+          <button
+            type="button"
+            className="flex items-center gap-1 text-xs font-medium text-popover-foreground hover:text-primary"
+            onClick={(e) => {
+              const { clientX, clientY } = e
+              createHighlight(lastColor)
+                .then((created) =>
+                  setActiveAnnotation({
+                    annotation: created,
+                    top: clientY,
+                    left: clientX,
+                    noteMode: true,
+                  })
+                )
+                .catch(() => {
+                  // Failure already surfaced by the mutation's error toast.
+                })
+              props.cancel()
+            }}
+          >
+            <StickyNote className="h-3.5 w-3.5" aria-hidden="true" />
+            {t('sources.annotations.addNote')}
+          </button>
+          {onChatAboutHighlight && (
+            <button
+              type="button"
+              className="flex items-center gap-1 text-xs font-medium text-primary hover:opacity-80"
+              onClick={() => {
+                onChatAboutHighlight(props.selectedText)
+                props.cancel()
+              }}
+            >
+              <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+              {t('sources.annotations.askAi')}
+            </button>
+          )}
+        </div>
+      </div>
+    )
+  }
 
   const renderHighlights = (props: RenderHighlightsProps) => (
     <div>
@@ -122,15 +214,29 @@ export const PDFViewer = memo(function PDFViewer({
           .map((area, idx) => (
             <div
               key={`${annotation.id}-${idx}`}
+              data-highlight-id={annotation.id}
               onClick={(e) => {
                 e.stopPropagation()
                 setActiveAnnotation({ annotation, top: e.clientY, left: e.clientX })
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.opacity = '0.6'
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.opacity = '0.4'
               }}
               style={{
                 ...props.getCssProperties(area, props.rotation),
                 background: annotation.color,
                 opacity: 0.4,
                 cursor: 'pointer',
+                pointerEvents: 'auto',
+                transition: 'opacity 0.15s',
+                // pdf.js's (invisible) text layer sits at z-index 1 and would
+                // otherwise swallow every click; the visible glyphs are on the
+                // canvas below, so painting above the text layer changes
+                // nothing visually but makes the highlight clickable.
+                zIndex: 2,
               }}
             />
           ))
@@ -201,6 +307,17 @@ export const PDFViewer = memo(function PDFViewer({
           const area = annotation.rect[0]
           if (area) highlightPluginInstance.jumpToHighlightArea(area)
         }}
+        onAskAiAboutTag={
+          onChatAboutHighlights
+            ? (tag) => {
+                const quotes = annotations
+                  .filter((a) => a.tags?.includes(tag))
+                  .map((a) => a.quote)
+                  .filter((q): q is string => !!q)
+                onChatAboutHighlights(quotes, tag)
+              }
+            : undefined
+        }
       />
 
       {activeAnnotation && (
@@ -209,16 +326,26 @@ export const PDFViewer = memo(function PDFViewer({
           top={activeAnnotation.top}
           left={activeAnnotation.left}
           onClose={() => setActiveAnnotation(null)}
+          startInNoteMode={activeAnnotation.noteMode}
           onSaveNote={(note) => {
             updateAnnotation.mutate({ id: activeAnnotation.annotation.id, data: { note } })
             setActiveAnnotation(null)
           }}
           onChangeColor={(color) => {
+            rememberColor(color)
             updateAnnotation.mutate({ id: activeAnnotation.annotation.id, data: { color } })
             setActiveAnnotation((prev) =>
               prev ? { ...prev, annotation: { ...prev.annotation, color } } : prev
             )
           }}
+          onSaveTags={(tags) => {
+            updateAnnotation.mutate({ id: activeAnnotation.annotation.id, data: { tags } })
+            // Optimistic local update so the popover reflects the change at once.
+            setActiveAnnotation((prev) =>
+              prev ? { ...prev, annotation: { ...prev.annotation, tags } } : prev
+            )
+          }}
+          allTags={allTags}
           onDelete={() => {
             deleteAnnotation.mutate(activeAnnotation.annotation.id)
             setActiveAnnotation(null)

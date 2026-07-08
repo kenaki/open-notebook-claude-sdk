@@ -98,6 +98,7 @@ export interface Annotation {
   color: string
   note?: string | null
   quote?: string | null
+  tags: string[]
   created: string
   updated: string
 }
@@ -108,11 +109,14 @@ export interface CreateAnnotationRequest {
   color?: string
   note?: string | null
   quote?: string | null
+  tags?: string[]
 }
 
 export interface UpdateAnnotationRequest {
   note?: string | null
   color?: string | null
+  // Omit to leave tags unchanged; pass a list (incl. []) to replace the set.
+  tags?: string[]
 }
 
 export interface SourceStatusResponse {
