@@ -523,6 +523,7 @@ export const esES = {
       figureAlt: "Figura",
       figureMissing: "Imagen de la figura no disponible",
       empty: "Todavía no hay nada que mostrar.",
+      highlightLabel: "Resaltado",
     },
   },
   chat: {

@@ -5,15 +5,66 @@ import { useQueries } from '@tanstack/react-query'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { useParseStatus, SOURCE_BLOCK_KEYS } from '@/lib/hooks/use-source-blocks'
+import {
+  useSourceAnnotations,
+  useCreateAnnotation,
+  useUpdateAnnotation,
+  useDeleteAnnotation,
+} from '@/lib/hooks/use-source-annotations'
 import { sourcesApi } from '@/lib/api/sources'
-import type { Block } from '@/lib/types/api'
+import type { Annotation, Block } from '@/lib/types/api'
+import { AnnotationHighlightPopover, DEFAULT_HIGHLIGHT_COLOR } from '@/components/source/detail/AnnotationHighlightPopover'
 import {
   buildReaderRenderItems,
   readerItemKey,
   readerItemPage,
   ReaderBlockItem,
+  ReaderHighlightContext,
 } from './ReaderBlock'
 import { ReaderOutline } from './ReaderOutline'
+import { ReaderSelectionToolbar } from './ReaderSelectionToolbar'
+
+/** Nearest ancestor element carrying a `data-seq` (D6's DOM contract), or null. */
+function ancestorWithSeq(node: Node | null): HTMLElement | null {
+  let el: HTMLElement | null =
+    node instanceof HTMLElement ? node : node?.parentElement ?? null
+  while (el && el.dataset?.seq === undefined) el = el.parentElement
+  return el && el.dataset?.seq !== undefined ? el : null
+}
+
+/** Char offset of a DOM (node, offset) position within a block element's text —
+ * sums the lengths of the text nodes preceding it. Offsets index the raw block
+ * text (highlight `<mark>`s preserve the exact string), so they stay consistent
+ * with the backend, which offsets into `block.text`. */
+function offsetWithin(root: HTMLElement, node: Node, nodeOffset: number): number {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  let total = 0
+  let cur = walker.nextNode()
+  while (cur) {
+    if (cur === node) return total + nodeOffset
+    total += cur.textContent?.length ?? 0
+    cur = walker.nextNode()
+  }
+  return total
+}
+
+interface SelectionDraft {
+  blockSeq: number
+  blockEndSeq: number
+  anchorStart: number | null
+  anchorEnd: number | null
+  quote: string
+  top: number
+  left: number
+  atomic?: boolean
+}
+
+interface ActivePopover {
+  annotation: Annotation
+  top: number
+  left: number
+  noteMode?: boolean
+}
 
 /**
  * pdf-block-ingestion Track D6 — the markdown reader tab: headings, KaTeX
@@ -38,7 +89,18 @@ interface ChunkRange {
   end: number
 }
 
-export function ReaderView({ sourceId }: { sourceId: string }) {
+export function ReaderView({
+  sourceId,
+  onChatAboutHighlight,
+}: {
+  sourceId: string
+  /**
+   * Optional "Ask AI about this passage" action (D8 wires it for reader↔chat
+   * parity). Threaded into the selection toolbar + highlight popover; when
+   * undefined the Ask-AI button hides itself, exactly like the PDF viewer.
+   */
+  onChatAboutHighlight?: (quote: string) => void
+}) {
   const { t } = useTranslation()
   const parseStatus = useParseStatus(sourceId)
   const gen = parseStatus.data?.gen
@@ -90,6 +152,111 @@ export function ReaderView({ sourceId }: { sourceId: string }) {
   }, [spanQueries.map((q) => q.dataUpdatedAt).join(',')])
 
   const renderItems = useMemo(() => buildReaderRenderItems(blocks), [blocks])
+
+  // --- Reader-born annotations (D7): inline render + selection create. ------ //
+  const { data: annotations = [] } = useSourceAnnotations(sourceId)
+  const createAnnotation = useCreateAnnotation(sourceId)
+  const updateAnnotation = useUpdateAnnotation(sourceId)
+  const deleteAnnotation = useDeleteAnnotation(sourceId)
+  // Only anchored highlights render inline (stale/legacy are sidebar-only, §2.3).
+  const anchoredAnnotations = useMemo(
+    () => annotations.filter((a) => a.anchor_state === 'anchored' && a.block_seq != null),
+    [annotations]
+  )
+  const allTags = useMemo(
+    () => [...new Set(annotations.flatMap((a) => a.tags ?? []))],
+    [annotations]
+  )
+  const [selDraft, setSelDraft] = useState<SelectionDraft | null>(null)
+  const [activePopover, setActivePopover] = useState<ActivePopover | null>(null)
+
+  // DOM text selection → a (block_seq, block_end_seq, offsets, quote) draft.
+  const contentRef = useRef<HTMLDivElement>(null)
+  const handleMouseUp = useCallback(() => {
+    const sel = window.getSelection()
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) return
+    const range = sel.getRangeAt(0)
+    const root = contentRef.current
+    if (!root || !root.contains(range.commonAncestorContainer)) return
+    const startEl = ancestorWithSeq(range.startContainer)
+    const endEl = ancestorWithSeq(range.endContainer)
+    if (!startEl || !endEl) return
+    const startSeq = Number(startEl.dataset.seq)
+    const endSeq = Number(endEl.dataset.seq)
+    if (Number.isNaN(startSeq) || Number.isNaN(endSeq)) return
+    const quote = sel.toString()
+    if (!quote.trim()) return
+
+    const forward = startSeq <= endSeq
+    const blockSeq = forward ? startSeq : endSeq
+    const blockEndSeq = forward ? endSeq : startSeq
+    let anchorStart: number | null = null
+    let anchorEnd: number | null = null
+    if (blockSeq === blockEndSeq) {
+      // Single block → offset-precise; order the two DOM positions.
+      const a = offsetWithin(startEl, range.startContainer, range.startOffset)
+      const b = offsetWithin(endEl, range.endContainer, range.endOffset)
+      anchorStart = Math.min(a, b)
+      anchorEnd = Math.max(a, b)
+    }
+    const rect = range.getBoundingClientRect()
+    setActivePopover(null)
+    setSelDraft({
+      blockSeq,
+      blockEndSeq,
+      anchorStart,
+      anchorEnd,
+      quote,
+      top: rect.bottom + 6,
+      left: rect.left,
+    })
+  }, [])
+
+  // Whole-block selection of an atomic figure/table/equation (can't text-select).
+  const handleAtomicSelect = useCallback((block: Block, e: React.MouseEvent) => {
+    setActivePopover(null)
+    setSelDraft({
+      blockSeq: block.seq,
+      blockEndSeq: block.seq,
+      anchorStart: null,
+      anchorEnd: null,
+      quote: block.text ?? '',
+      top: e.clientY + 6,
+      left: e.clientX,
+      atomic: true,
+    })
+  }, [])
+
+  const handleAnnotationClick = useCallback((annotation: Annotation, e: React.MouseEvent) => {
+    setSelDraft(null)
+    setActivePopover({ annotation, top: e.clientY, left: e.clientX })
+  }, [])
+
+  const hl: ReaderHighlightContext = useMemo(
+    () => ({
+      annotations: anchoredAnnotations,
+      onAnnotationClick: handleAnnotationClick,
+      onAtomicSelect: handleAtomicSelect,
+    }),
+    [anchoredAnnotations, handleAnnotationClick, handleAtomicSelect]
+  )
+
+  const createFromDraft = useCallback(
+    async (color: string) => {
+      if (!selDraft) return null
+      const created = await createAnnotation.mutateAsync({
+        block_seq: selDraft.blockSeq,
+        block_end_seq: selDraft.blockEndSeq,
+        anchor_start: selDraft.anchorStart,
+        anchor_end: selDraft.anchorEnd,
+        quote: selDraft.quote,
+        color,
+      })
+      window.getSelection()?.removeAllRanges()
+      return created
+    },
+    [selDraft, createAnnotation]
+  )
 
   const containerRef = useRef<HTMLDivElement>(null)
   const topSentinelRef = useRef<HTMLDivElement>(null)
@@ -197,7 +364,11 @@ export function ReaderView({ sourceId }: { sourceId: string }) {
             <LoadingSpinner size="sm" />
           </div>
         )}
-        <div className="chat-markdown prose prose-sm prose-neutral dark:prose-invert max-w-none break-words">
+        <div
+          ref={contentRef}
+          onMouseUp={handleMouseUp}
+          className="chat-markdown prose prose-sm prose-neutral dark:prose-invert max-w-none break-words"
+        >
           {renderItems.length === 0 && (
             <p className="text-sm text-muted-foreground">{t('sources.reader.empty')}</p>
           )}
@@ -218,7 +389,7 @@ export function ReaderView({ sourceId }: { sourceId: string }) {
                     <span className="h-px flex-1 bg-border" />
                   </div>
                 )}
-                <ReaderBlockItem item={item} />
+                <ReaderBlockItem item={item} hl={hl} />
               </div>
             )
           })}
@@ -230,6 +401,92 @@ export function ReaderView({ sourceId }: { sourceId: string }) {
         )}
         <div ref={bottomSentinelRef} className="h-1" />
       </div>
+
+      {/* Reader-born selection toolbar: pick a color to highlight, add with a
+          note, or Ask AI (D7). */}
+      {selDraft && (
+        <ReaderSelectionToolbar
+          top={selDraft.top}
+          left={selDraft.left}
+          onClose={() => setSelDraft(null)}
+          onPickColor={(color) => {
+            createFromDraft(color)
+              .then(() => setSelDraft(null))
+              .catch(() => {
+                /* mutation's error toast already surfaced the failure */
+              })
+          }}
+          onNote={() => {
+            createFromDraft(DEFAULT_HIGHLIGHT_COLOR)
+              .then((created) => {
+                setSelDraft(null)
+                if (created) {
+                  setActivePopover({
+                    annotation: created,
+                    top: selDraft.top,
+                    left: selDraft.left,
+                    noteMode: true,
+                  })
+                }
+              })
+              .catch(() => {
+                /* mutation's error toast already surfaced the failure */
+              })
+          }}
+          onAskAi={
+            onChatAboutHighlight
+              ? () => {
+                  onChatAboutHighlight(selDraft.quote)
+                  setSelDraft(null)
+                  window.getSelection()?.removeAllRanges()
+                }
+              : undefined
+          }
+        />
+      )}
+
+      {/* Clicking an inline highlight opens the shared popover (note/color/tags/
+          delete + optional Ask AI) — the same component the PDF tab uses. */}
+      {activePopover && (
+        <AnnotationHighlightPopover
+          annotation={activePopover.annotation}
+          top={activePopover.top}
+          left={activePopover.left}
+          sourceId={sourceId}
+          blockSeq={activePopover.annotation.block_seq}
+          startInNoteMode={activePopover.noteMode}
+          allTags={allTags}
+          onClose={() => setActivePopover(null)}
+          onSaveNote={(note) => {
+            updateAnnotation.mutate({ id: activePopover.annotation.id, data: { note } })
+            setActivePopover(null)
+          }}
+          onChangeColor={(color) => {
+            updateAnnotation.mutate({ id: activePopover.annotation.id, data: { color } })
+            setActivePopover((prev) =>
+              prev ? { ...prev, annotation: { ...prev.annotation, color } } : prev
+            )
+          }}
+          onSaveTags={(tags) => {
+            updateAnnotation.mutate({ id: activePopover.annotation.id, data: { tags } })
+            setActivePopover((prev) =>
+              prev ? { ...prev, annotation: { ...prev.annotation, tags } } : prev
+            )
+          }}
+          onDelete={() => {
+            deleteAnnotation.mutate(activePopover.annotation.id)
+            setActivePopover(null)
+          }}
+          onChatAboutHighlight={
+            onChatAboutHighlight
+              ? (quote) => {
+                  onChatAboutHighlight(quote)
+                  setActivePopover(null)
+                }
+              : undefined
+          }
+        />
+      )}
     </div>
   )
 }

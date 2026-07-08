@@ -190,12 +190,24 @@ export interface ParseStatusResponse {
 }
 
 export interface CreateAnnotationRequest {
-  page: number
-  rect: AnnotationRect[]
+  // PDF-born path: page + rect (server resolves the block anchor from them).
+  // Both optional so the reader-born path can omit them — the server derives
+  // page + rect from the block range's bboxes (pdf-block-ingestion D7).
+  page?: number
+  rect?: AnnotationRect[]
   color?: string
   note?: string | null
   quote?: string | null
   tags?: string[]
+  // Reader-born path (pdf-block-ingestion D7, db-design §2.3): the selected
+  // block range + char offsets + quote. When `block_seq` is set the request is
+  // reader-born; the server validates the range against the current parse
+  // generation, derives page + rect, and sets anchor_gen. `anchor_start`/
+  // `anchor_end` are null for a multi-block span or an atomic block.
+  block_seq?: number
+  block_end_seq?: number
+  anchor_start?: number | null
+  anchor_end?: number | null
 }
 
 export interface UpdateAnnotationRequest {

@@ -523,6 +523,7 @@ export const itIT = {
       figureAlt: "Figura",
       figureMissing: "Immagine della figura non disponibile",
       empty: "Ancora nulla da mostrare.",
+      highlightLabel: "Evidenziazione",
     },
   },
   chat: {

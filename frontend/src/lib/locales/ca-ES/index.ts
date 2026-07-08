@@ -523,6 +523,7 @@ export const caES = {
       figureAlt: "Figura",
       figureMissing: "Imatge de la figura no disponible",
       empty: "Encara no hi ha res a mostrar.",
+      highlightLabel: "Ressaltat",
     },
   },
   chat: {

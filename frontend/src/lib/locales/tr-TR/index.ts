@@ -523,6 +523,7 @@ export const trTR = {
       figureAlt: "Şekil",
       figureMissing: "Şekil görseli kullanılamıyor",
       empty: "Henüz gösterilecek bir şey yok.",
+      highlightLabel: "Vurgu",
     },
   },
   chat: {

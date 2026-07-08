@@ -523,6 +523,7 @@ export const ruRU = {
       figureAlt: "Рисунок",
       figureMissing: "Изображение рисунка недоступно",
       empty: "Пока нечего показать.",
+      highlightLabel: "Выделение",
     },
   },
   chat: {

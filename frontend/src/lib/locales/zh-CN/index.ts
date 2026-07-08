@@ -523,6 +523,7 @@ export const zhCN = {
       figureAlt: "图",
       figureMissing: "图片不可用",
       empty: "暂无内容可显示。",
+      highlightLabel: "高亮",
     },
   },
   chat: {

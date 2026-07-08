@@ -10,7 +10,11 @@ from api.models import (
 )
 from open_notebook.domain.notebook import Source, SourceAnnotation
 from open_notebook.exceptions import NotFoundError
-from open_notebook.utils.block_anchor import resolve_anchor
+from open_notebook.utils.block_anchor import (
+    ReaderAnchorError,
+    derive_reader_anchor,
+    resolve_anchor,
+)
 
 router = APIRouter()
 
@@ -77,14 +81,53 @@ async def get_source_annotations(source_id: str):
     status_code=201,
 )
 async def create_source_annotation(source_id: str, request: CreateAnnotationRequest):
-    """Create a PDF highlight annotation for a source.
+    """Create a highlight annotation for a source (db-design §2.3, Track D1/D7).
 
-    The anchor (block range + char offsets) is server-resolved from the rect +
-    quote against the current parse generation; an un-parsed source stores a
-    legacy rect/quote-only annotation (db-design §2.3 / Track D1)."""
+    Two create directions share the columns and branch on whether the client
+    sent block fields:
+
+    * **PDF-born** (rect+quote): the server RESOLVES the block anchor from the
+      rect against the current parse generation; an un-parsed source stores a
+      legacy rect/quote-only annotation.
+    * **reader-born** (block range + offsets + quote): the server validates the
+      range against the current generation and DERIVES the render rect from the
+      blocks' bboxes so the highlight also paints on the PDF tab (409 when the
+      source has no parsed generation, 404 when the range is stale/missing).
+    """
     try:
         source = await Source.get_meta(source_id)
 
+        if request.block_seq is not None:
+            # Reader-born (D7): derive page + rect from the block range.
+            anchor = await derive_reader_anchor(
+                source,
+                request.block_seq,
+                request.block_end_seq
+                if request.block_end_seq is not None
+                else request.block_seq,
+                request.anchor_start,
+                request.anchor_end,
+                request.quote,
+            )
+            annotation = SourceAnnotation(
+                source=source_id,
+                page=anchor.page,
+                rect=anchor.rect,
+                color=request.color,
+                note=request.note,
+                quote=request.quote,
+                tags=request.tags,
+                block_seq=anchor.block_seq,
+                block_end_seq=anchor.block_end_seq,
+                anchor_start=anchor.anchor_start,
+                anchor_end=anchor.anchor_end,
+                anchor_gen=anchor.anchor_gen,
+                quote_hash=anchor.quote_hash,
+            )
+            await annotation.save()
+            return _annotation_to_response(annotation, source.parse_generation)
+
+        # PDF-born (D1): server resolves the anchor from rect + quote.
         annotation = SourceAnnotation(
             source=source_id,
             page=request.page,
@@ -108,6 +151,8 @@ async def create_source_annotation(source_id: str, request: CreateAnnotationRequ
 
         await annotation.save()
         return _annotation_to_response(annotation, source.parse_generation)
+    except ReaderAnchorError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
     except HTTPException:
         raise
     except NotFoundError:

@@ -523,6 +523,7 @@ export const plPL = {
       figureAlt: "Rysunek",
       figureMissing: "Obraz rysunku niedostępny",
       empty: "Jeszcze nic do wyświetlenia.",
+      highlightLabel: "Podświetlenie",
     },
   },
   chat: {

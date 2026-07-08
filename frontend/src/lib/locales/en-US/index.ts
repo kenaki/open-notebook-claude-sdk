@@ -523,6 +523,7 @@ export const enUS = {
       figureAlt: "Figure",
       figureMissing: "Figure image unavailable",
       empty: "Nothing to show yet.",
+      highlightLabel: "Highlight",
     },
   },
   chat: {

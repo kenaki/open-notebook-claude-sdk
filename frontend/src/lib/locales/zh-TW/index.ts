@@ -523,6 +523,7 @@ export const zhTW = {
       figureAlt: "圖",
       figureMissing: "圖片無法使用",
       empty: "目前沒有內容可顯示。",
+      highlightLabel: "標註",
     },
   },
   chat: {

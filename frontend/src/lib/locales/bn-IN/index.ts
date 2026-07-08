@@ -523,6 +523,7 @@ export const bnIN = {
       figureAlt: "চিত্র",
       figureMissing: "চিত্রের ছবি অনুপলব্ধ",
       empty: "এখনও দেখানোর মতো কিছু নেই।",
+      highlightLabel: "হাইলাইট",
     },
   },
   chat: {

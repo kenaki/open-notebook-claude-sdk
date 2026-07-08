@@ -223,3 +223,101 @@ async def test_resolve_anchor_no_page_blocks_returns_none(monkeypatch):
     _patch_blocks(monkeypatch, header=header, page_blocks=[])
     src = SimpleNamespace(id="source:abc", parse_generation=3)
     assert await block_anchor.resolve_anchor(src, [_rect(10.0, 10.0)], "quick") is None
+
+
+# --------------------------------------------------------------------------- #
+# derive_reader_anchor — reader-born (Track D7): block range -> derived rect.
+# blocks.get_range is stubbed (SELECT * raw dicts).
+# --------------------------------------------------------------------------- #
+
+
+def _patch_get_range(monkeypatch, rows):
+    async def _fake_get_range(src_key, gen, lo, hi):
+        return [r for r in rows if lo <= r["seq"] <= hi]
+
+    monkeypatch.setattr(block_anchor.blocks, "get_range", _fake_get_range)
+
+
+@pytest.mark.asyncio
+async def test_derive_reader_anchor_single_text_block(monkeypatch):
+    _patch_get_range(monkeypatch, PAGE_BLOCKS)
+    src = SimpleNamespace(id="source:abc", parse_generation=4)
+
+    result = await block_anchor.derive_reader_anchor(
+        src, block_seq=0, block_end_seq=0, anchor_start=4, anchor_end=15, quote="quick brown"
+    )
+    # Offsets preserved for a single text block.
+    assert (result.block_seq, result.block_end_seq) == (0, 0)
+    assert (result.anchor_start, result.anchor_end) == (4, 15)
+    assert result.anchor_gen == 4
+    assert result.quote_hash == quote_hash("quick brown")
+    # One rect derived from the block bbox [0.1, 0.10, 0.9, 0.20] -> percentages.
+    assert result.page == 1
+    assert len(result.rect) == 1
+    rect = result.rect[0]
+    assert rect["pageIndex"] == 0
+    assert rect["left"] == pytest.approx(10.0)
+    assert rect["top"] == pytest.approx(10.0)
+    assert rect["width"] == pytest.approx(80.0)
+    assert rect["height"] == pytest.approx(10.0)
+
+
+@pytest.mark.asyncio
+async def test_derive_reader_anchor_atomic_block_offsets_none(monkeypatch):
+    _patch_get_range(monkeypatch, PAGE_BLOCKS)
+    src = SimpleNamespace(id="source:abc", parse_generation=4)
+
+    result = await block_anchor.derive_reader_anchor(
+        src, block_seq=1, block_end_seq=1, anchor_start=0, anchor_end=5, quote="resting cat"
+    )
+    # Atomic figure -> offsets dropped even though client sent them.
+    assert (result.block_seq, result.block_end_seq) == (1, 1)
+    assert result.anchor_start is None and result.anchor_end is None
+    assert len(result.rect) == 1
+
+
+@pytest.mark.asyncio
+async def test_derive_reader_anchor_multi_block_span_offsets_none(monkeypatch):
+    _patch_get_range(monkeypatch, PAGE_BLOCKS)
+    src = SimpleNamespace(id="source:abc", parse_generation=4)
+
+    result = await block_anchor.derive_reader_anchor(
+        src, block_seq=0, block_end_seq=2, anchor_start=1, anchor_end=3, quote=None
+    )
+    assert (result.block_seq, result.block_end_seq) == (0, 2)
+    assert result.anchor_start is None and result.anchor_end is None
+    # One rect per positioned block in the range.
+    assert len(result.rect) == 3
+
+
+@pytest.mark.asyncio
+async def test_derive_reader_anchor_out_of_bounds_offsets_dropped(monkeypatch):
+    _patch_get_range(monkeypatch, PAGE_BLOCKS)
+    src = SimpleNamespace(id="source:abc", parse_generation=4)
+
+    result = await block_anchor.derive_reader_anchor(
+        src, block_seq=0, block_end_seq=0, anchor_start=0, anchor_end=9999, quote="x"
+    )
+    assert result.anchor_start is None and result.anchor_end is None
+
+
+@pytest.mark.asyncio
+async def test_derive_reader_anchor_unparsed_source_409(monkeypatch):
+    src = SimpleNamespace(id="source:abc", parse_generation=None)
+    with pytest.raises(block_anchor.ReaderAnchorError) as exc:
+        await block_anchor.derive_reader_anchor(
+            src, block_seq=0, block_end_seq=0, anchor_start=None, anchor_end=None, quote="x"
+        )
+    assert exc.value.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_derive_reader_anchor_missing_range_404(monkeypatch):
+    # Range refers to seqs absent from the current generation (stale/wrong-gen).
+    _patch_get_range(monkeypatch, PAGE_BLOCKS)
+    src = SimpleNamespace(id="source:abc", parse_generation=4)
+    with pytest.raises(block_anchor.ReaderAnchorError) as exc:
+        await block_anchor.derive_reader_anchor(
+            src, block_seq=50, block_end_seq=51, anchor_start=None, anchor_end=None, quote="x"
+        )
+    assert exc.value.status_code == 404

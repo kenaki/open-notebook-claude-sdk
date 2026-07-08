@@ -523,6 +523,7 @@ export const ptBR = {
       figureAlt: "Figura",
       figureMissing: "Imagem da figura indisponível",
       empty: "Nada para mostrar ainda.",
+      highlightLabel: "Destaque",
     },
   },
   chat: {

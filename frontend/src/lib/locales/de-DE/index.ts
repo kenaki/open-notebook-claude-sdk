@@ -526,6 +526,7 @@ export const deDE = {
       figureAlt: "Abbildung",
       figureMissing: "Abbildung nicht verfügbar",
       empty: "Noch nichts anzuzeigen.",
+      highlightLabel: "Markierung",
     },
   },
   chat: {

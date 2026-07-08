@@ -474,14 +474,46 @@ class AnnotationResponse(BaseModel):
 
 
 class CreateAnnotationRequest(BaseModel):
-    page: int = Field(..., description="1-indexed physical page of the first rect")
+    """Create a highlight in one of two directions (db-design §2.3, Track D1/D7).
+
+    * **PDF-born** (default): the client sends ``page`` + ``rect`` (line-rects of
+      the pdf.js selection); the server RESOLVES the block anchor from rect+quote.
+    * **reader-born** (D7): the client sends the block range
+      (``block_seq``/``block_end_seq``) + char offsets + ``quote`` and the server
+      DERIVES ``page`` + ``rect`` from the blocks' bboxes — so ``page``/``rect``
+      are optional here (server-filled). ``block_seq`` being present is what
+      selects the reader-born path.
+    """
+
+    page: int = Field(default=1, description="1-indexed physical page of the first rect (PDF-born; server-derived for reader-born)")
     rect: List[AnnotationRect] = Field(
-        ..., min_length=1, description="One entry per line-rect of the selection"
+        default_factory=list,
+        description="One entry per line-rect of the selection (PDF-born; server-derived for reader-born)",
     )
     color: str = Field(default="#fde047", description="Highlight color (hex)")
     note: Optional[str] = Field(default=None, description="User comment on the highlight")
     quote: Optional[str] = Field(default=None, description="The selected text")
     tags: List[str] = Field(default_factory=list, description="Grouping tags")
+    # Reader-born block anchor (D7). When block_seq is set, the request is
+    # reader-born: the server validates the range against the CURRENT parse
+    # generation and derives page+rect from the blocks' bboxes. Offsets are the
+    # char positions within block_seq/block_end_seq's text (null for a
+    # multi-block span or an atomic figure/table/equation, per §2.3).
+    block_seq: Optional[int] = Field(default=None, description="Reader-born: start block seq")
+    block_end_seq: Optional[int] = Field(default=None, description="Reader-born: end block seq (defaults to block_seq)")
+    anchor_start: Optional[int] = Field(default=None, description="Reader-born: char offset within block_seq's text")
+    anchor_end: Optional[int] = Field(default=None, description="Reader-born: char offset within block_end_seq's text")
+
+    @model_validator(mode="after")
+    def _validate_create_path(self) -> "CreateAnnotationRequest":
+        if self.block_seq is None:
+            # PDF-born: a rect is required (server resolves the anchor from it).
+            if not self.rect:
+                raise ValueError("rect must contain at least one line-rect for a PDF-born annotation")
+        elif self.block_end_seq is None:
+            # Single-block reader selection: end defaults to start.
+            self.block_end_seq = self.block_seq
+        return self
 
 
 class UpdateAnnotationRequest(BaseModel):

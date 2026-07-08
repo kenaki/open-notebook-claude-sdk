@@ -523,6 +523,7 @@ export const frFR = {
       figureAlt: "Figure",
       figureMissing: "Image de la figure indisponible",
       empty: "Rien à afficher pour l'instant.",
+      highlightLabel: "Surlignage",
     },
   },
   chat: {

@@ -523,6 +523,7 @@ export const jaJP = {
       figureAlt: "図",
       figureMissing: "図の画像は利用できません",
       empty: "表示する内容がまだありません。",
+      highlightLabel: "ハイライト",
     },
   },
   chat: {
