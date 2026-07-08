@@ -12,6 +12,14 @@ LANGGRAPH_CHECKPOINT_FILE = f"{sqlite_folder}/checkpoints.sqlite"
 UPLOADS_FOLDER = f"{DATA_FOLDER}/uploads"
 os.makedirs(UPLOADS_FOLDER, exist_ok=True)
 
+# MAX UPLOAD SIZE (MB). Uploads larger than this are rejected with HTTP 413
+# before touching disk. 0 disables the limit (not recommended — the API host
+# must then absorb arbitrarily large request bodies).
+try:
+    MAX_UPLOAD_SIZE_MB = int(os.environ.get("OPEN_NOTEBOOK_MAX_UPLOAD_MB", "500"))
+except ValueError:
+    MAX_UPLOAD_SIZE_MB = 500
+
 # CHAT MEDIA FOLDER (image/video attachments on chat messages; files only, no DB
 # record in v1 — see coordinator Q-mediastore)
 CHAT_MEDIA_FOLDER = f"{UPLOADS_FOLDER}/chat-media"

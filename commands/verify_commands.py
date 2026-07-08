@@ -40,6 +40,7 @@ from open_notebook.database.repository import repo_query
 from open_notebook.domain.notebook import Source, SourceSection
 from open_notebook.exceptions import ConfigurationError
 from open_notebook.utils import clean_thinking_content
+from open_notebook.utils.error_classifier import classify_error
 from open_notebook.utils.text_utils import extract_text_content
 
 # ---------------------------------------------------------------------------
@@ -371,7 +372,14 @@ async def verify_clean_section(
 
     # --- Invoke ---
     lc_model = vision_model.to_langchain()
-    response = await lc_model.ainvoke([message])
+    try:
+        response = await lc_model.ainvoke([message])
+    except Exception as e:
+        # Classify raw provider errors into typed, user-friendly exceptions.
+        # Transient classes still retry (5× exp-jitter above); ConfigurationError
+        # stays permanent via stop_on.
+        exc_class, err_message = classify_error(e)
+        raise exc_class(f"Vision verify failed: {err_message}") from e
     raw = clean_thinking_content(extract_text_content(response.content))
 
     if not raw or not raw.strip():

@@ -52,6 +52,7 @@ from open_notebook.database.repository import ensure_record_id, repo_query
 from open_notebook.domain.notebook import Source, SourceSection
 from open_notebook.exceptions import ConfigurationError
 from open_notebook.utils import clean_thinking_content
+from open_notebook.utils.error_classifier import classify_error
 from open_notebook.utils.text_utils import extract_text_content
 
 # ---------------------------------------------------------------------------
@@ -224,9 +225,17 @@ async def summarize_section(
     model = await provision_langchain_model(
         text, None, "transformation", max_tokens=8192
     )
-    response = await model.ainvoke(
-        [HumanMessage(content=f"Summarize this document section concisely:\n\n{text}")]
-    )
+    try:
+        response = await model.ainvoke(
+            [HumanMessage(content=f"Summarize this document section concisely:\n\n{text}")]
+        )
+    except Exception as e:
+        # Classify raw provider errors (502s, timeouts, auth…) into typed
+        # exceptions with user-friendly messages. Transient classes
+        # (ExternalServiceError/NetworkError/RateLimitError) are still retried
+        # by surreal-commands; ConfigurationError stays permanent (stop_on).
+        exc_class, message = classify_error(e)
+        raise exc_class(f"Chapter summary failed: {message}") from e
     summary = clean_thinking_content(extract_text_content(response.content))
 
     if not summary or not summary.strip():
@@ -444,7 +453,11 @@ async def generate_source_abstract(
     model = await provision_langchain_model(
         rollup_text, None, "transformation", max_tokens=8192
     )
-    response = await model.ainvoke([HumanMessage(content=prompt)])
+    try:
+        response = await model.ainvoke([HumanMessage(content=prompt)])
+    except Exception as e:
+        exc_class, message = classify_error(e)
+        raise exc_class(f"Document abstract failed: {message}") from e
     abstract_text = clean_thinking_content(extract_text_content(response.content))
 
     if not abstract_text or not abstract_text.strip():

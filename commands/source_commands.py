@@ -153,6 +153,17 @@ async def process_source_command(
         # which hid extraction failures and left the source without a retryable
         # `failed` status in the UI.
         logger.error(f"Source processing failed (permanent): {e}")
+        # Best-effort: also stamp the failure on the source record itself, so
+        # the failed state survives even if the command record is pruned and so
+        # PDF sources (parse_status='pending') don't look perpetually parsing.
+        try:
+            from open_notebook.database.repository import repo_update
+
+            await repo_update(
+                "source", input_data.source_id, {"parse_status": "failed"}
+            )
+        except Exception as inner:
+            logger.debug(f"process_source: parse_status stamp skipped: {inner!r}")
         raise
     except Exception as e:
         # Transient failure - will be retried (surreal-commands logs final failure)

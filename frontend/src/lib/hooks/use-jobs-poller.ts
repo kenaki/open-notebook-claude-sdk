@@ -354,9 +354,19 @@ export function useJobsPoller() {
       // Every kind's failure is surfaced — failures are rare and worth knowing —
       // EXCEPT illustration, which is silent even on failure (see above).
       if (!isIllustrationJob) {
-        const message = isChatJob
-          ? getApiErrorMessage(job.error, t, 'jobs.chatFailed')
-          : t('jobs.failedToast').replace('{job}', jobTitle(job))
+        let message: string
+        if (isChatJob) {
+          message = getApiErrorMessage(job.error, t, 'jobs.chatFailed')
+        } else {
+          // Include the job's actual error so the toast is actionable ("The AI
+          // provider is temporarily unavailable…") instead of a bare "{job}
+          // failed". Backend messages are user-friendly via classify_error;
+          // getApiErrorMessage maps known ones to i18n and passes the rest through.
+          message = t('jobs.failedToast').replace('{job}', jobTitle(job))
+          if (job.error) {
+            message = `${message}: ${getApiErrorMessage(job.error, t)}`
+          }
+        }
         toast.error(message, { action: viewAction })
       }
     }

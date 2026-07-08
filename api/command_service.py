@@ -148,12 +148,56 @@ class CommandService:
 
     @staticmethod
     async def cancel_command_job(job_id: str) -> bool:
-        """Cancel a running command job"""
+        """Cancel a queued command job.
+
+        Queued (`new`) jobs are flipped to `canceled` so the worker never picks
+        them up. `running` jobs are also flipped — an in-flight executor cannot
+        be interrupted and will overwrite the status when it finishes, but
+        flipping matters for ORPHANED `running` rows (worker died mid-job),
+        which the worker would otherwise re-process on restart.
+        """
+        from open_notebook.database.repository import ensure_record_id, repo_query
+
         try:
-            # Implementation depends on surreal-commands cancellation support
-            # For now, just log the attempt
-            logger.info(f"Attempting to cancel job: {job_id}")
-            return True
+            rows = await repo_query(
+                "UPDATE command SET status = 'canceled', "
+                "error_message = 'Canceled by user' "
+                "WHERE id = $jid AND status IN ['new', 'running'] RETURN AFTER;",
+                {"jid": ensure_record_id(job_id)},
+            )
+            canceled = bool(rows)
+            logger.info(
+                f"Cancel job {job_id}: {'canceled' if canceled else 'not cancelable (running or finished)'}"
+            )
+            return canceled
         except Exception as e:
             logger.error(f"Failed to cancel command job: {e}")
+            raise
+
+    @staticmethod
+    async def cancel_source_jobs(source_id: str) -> int:
+        """Cancel every pending job belonging to a source's processing pipeline.
+
+        Matches on `args.source_id` — every pipeline command (process_source,
+        build_blocks, build_sections, verify_*, summarize_*, embed_source,
+        generate_source_abstract) carries it. Queued jobs never start; orphaned
+        `running` rows (dead worker) are not re-processed on worker restart.
+        An actively-executing job cannot be interrupted and will overwrite its
+        status when it finishes. Returns the number flipped.
+        """
+        from open_notebook.database.repository import repo_query
+
+        try:
+            rows = await repo_query(
+                "UPDATE command SET status = 'canceled', "
+                "error_message = 'Canceled by user' "
+                "WHERE args.source_id = $sid AND status IN ['new', 'running'] "
+                "RETURN AFTER;",
+                {"sid": str(source_id)},
+            )
+            count = len(rows) if rows else 0
+            logger.info(f"Canceled {count} pending job(s) for source {source_id}")
+            return count
+        except Exception as e:
+            logger.error(f"Failed to cancel jobs for source {source_id}: {e}")
             raise

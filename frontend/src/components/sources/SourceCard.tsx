@@ -270,11 +270,32 @@ function SourceCardImpl({
               </h4>
             </div>
 
-            {/* Processing message for active statuses */}
+            {/* Processing message for active statuses. On failure the backend
+                substitutes the specific error into `message` (e.g. "Could not
+                extract content from this source…"), so this is actionable. */}
             {statusData?.message && (isProcessing || isFailed) && (
-              <p className="text-xs text-gray-600 mb-2 italic">
+              <p
+                className={cn(
+                  'text-xs mb-2 italic',
+                  isFailed ? 'text-failed' : 'text-gray-600'
+                )}
+              >
                 {statusData.message}
               </p>
+            )}
+
+            {/* Downstream pipeline failures (chapter summaries, embedding, …)
+                aggregated by the status endpoint — visible while the card is
+                still polling (processing or failed). */}
+            {(isProcessing || isFailed) && (statusData?.failed_jobs?.length ?? 0) > 0 && (
+              <ul className="text-xs text-failed mb-2 space-y-0.5">
+                {statusData!.failed_jobs!.slice(0, 3).map((job) => (
+                  <li key={job.name} className="truncate" title={job.latest_error ?? undefined}>
+                    {job.count}× {job.name.replace(/_/g, ' ')}
+                    {job.latest_error ? ` — ${job.latest_error}` : ''}
+                  </li>
+                ))}
+              </ul>
             )}
 
             {/* Metadata badges */}

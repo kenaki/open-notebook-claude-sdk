@@ -393,6 +393,20 @@ async def embed_insight_command(input_data: EmbedInsightInput) -> EmbedInsightOu
         raise
 
 
+async def _mark_embed_failed(source_id: str) -> None:
+    """Best-effort: flip a PDF's parse lifecycle to 'failed' on a permanent
+    embed failure so the source doesn't sit at 'embedding' forever. Never
+    raises — cleanup must not mask the original error."""
+    try:
+        rows = await repo_query(
+            "SELECT parse_status FROM $sid", {"sid": ensure_record_id(source_id)}
+        )
+        if rows and rows[0].get("parse_status") in ("embedding", "parsing", "pending"):
+            await repo_update("source", source_id, {"parse_status": "failed"})
+    except Exception as exc:
+        logger.debug(f"embed_source: parse_status='failed' stamp skipped: {exc!r}")
+
+
 @command(
     "embed_source",
     app="open_notebook",
@@ -633,19 +647,17 @@ async def embed_source_command(input_data: EmbedSourceInput) -> EmbedSourceOutpu
         )
 
     except ValueError as e:
-        # Permanent failure - don't retry
-        processing_time = time.time() - start_time
+        # Permanent failure — mark the parse lifecycle failed (a PDF otherwise
+        # sits at parse_status='embedding' forever, silently non-searchable)
+        # and re-raise so surreal-commands marks the job `failed` (stop_on
+        # prevents retries). Returning success=False instead recorded the job
+        # as `completed`, hiding the failure from the tray and its toast.
         cmd_id = get_command_id(input_data)
         logger.error(
             f"Failed to embed source {input_data.source_id} (command: {cmd_id}): {e}"
         )
-        return EmbedSourceOutput(
-            success=False,
-            source_id=input_data.source_id,
-            chunks_created=0,
-            processing_time=processing_time,
-            error_message=str(e),
-        )
+        await _mark_embed_failed(input_data.source_id)
+        raise
     except Exception as e:
         # Transient failure - will be retried (surreal-commands logs final failure)
         cmd_id = get_command_id(input_data)

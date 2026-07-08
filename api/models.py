@@ -650,6 +650,14 @@ class SourceStatusResponse(BaseModel):
         None, description="Detailed processing information"
     )
     command_id: Optional[str] = Field(None, description="Command ID if available")
+    parse_status: Optional[str] = Field(
+        None,
+        description="Block-parse lifecycle for PDF sources: pending/parsing/embedding/ready/failed",
+    )
+    failed_jobs: Optional[List[Dict[str, Any]]] = Field(
+        None,
+        description="Failed downstream pipeline jobs for the current run: [{name, count, latest_error}]",
+    )
 
 
 # Error response

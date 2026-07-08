@@ -259,13 +259,54 @@ async def get_source_full_text(source_id: str):
         raise HTTPException(status_code=500, detail="Error fetching source full text")
 
 
+async def _failed_pipeline_jobs(source_id: str, command_id: Optional[str]) -> List[dict]:
+    """Aggregate FAILED downstream pipeline jobs for a source.
+
+    Every fan-out command (build_blocks, build_sections, verify_*, summarize_*,
+    embed_source, generate_source_abstract) carries `args.source_id`, so a
+    "process_source completed but 21 chapter summaries died" situation is
+    visible instead of silently absent. Scoped to jobs created at/after the
+    source's current processing command, so failures from an older, retried run
+    don't haunt the status forever. Best-effort: returns [] on any error.
+    """
+    try:
+        since_clause = ""
+        vars: dict = {"sid": str(source_id)}
+        if command_id:
+            cmd_rows = await repo_query(
+                "SELECT created FROM $cid", {"cid": ensure_record_id(command_id)}
+            )
+            if cmd_rows and cmd_rows[0].get("created"):
+                since_clause = "AND created >= $since "
+                vars["since"] = cmd_rows[0]["created"]
+
+        rows = await repo_query(
+            "SELECT name, error_message, updated FROM command "
+            "WHERE args.source_id = $sid AND status = 'failed' "
+            f"{since_clause}"
+            "ORDER BY updated DESC LIMIT 200",
+            vars,
+        )
+        by_name: dict = {}
+        for row in rows or []:
+            name = row.get("name") or "unknown"
+            entry = by_name.setdefault(
+                name, {"name": name, "count": 0, "latest_error": None}
+            )
+            entry["count"] += 1
+            if entry["latest_error"] is None and row.get("error_message"):
+                entry["latest_error"] = row["error_message"]
+        return list(by_name.values())
+    except Exception as e:
+        logger.warning(f"Failed to aggregate failed jobs for {source_id}: {e}")
+        return []
+
+
 @router.get("/sources/{source_id}/status", response_model=SourceStatusResponse)
 async def get_source_status(source_id: str):
-    """Get processing status for a source."""
+    """Get processing status for a source, including downstream pipeline health."""
     try:
-        source = await Source.get(source_id)
-        if not source:
-            raise HTTPException(status_code=404, detail="Source not found")
+        source = await Source.get_meta(source_id)
 
         if not source.command:
             return SourceStatusResponse(
@@ -273,6 +314,7 @@ async def get_source_status(source_id: str):
                 message="Legacy source (completed before async processing)",
                 processing_info=None,
                 command_id=None,
+                parse_status=source.parse_status,
             )
 
         try:
@@ -284,15 +326,28 @@ async def get_source_status(source_id: str):
                 "failed": "Source processing failed",
                 "running": "Source processing in progress",
                 "queued": "Source processing queued",
+                "canceled": "Source processing canceled",
                 "unknown": "Source processing status unknown",
             }
             message = status_messages.get(status or "", f"Source processing status: {status}")
+
+            # Surface the specific failure reason directly in the message when
+            # we have one — "Source processing failed" alone tells the user
+            # nothing actionable.
+            if status == "failed" and processing_info and processing_info.get("error"):
+                message = str(processing_info["error"])
+
+            failed_jobs = await _failed_pipeline_jobs(
+                source_id, str(source.command) if source.command else None
+            )
 
             return SourceStatusResponse(
                 status=status,
                 message=message,
                 processing_info=processing_info,
                 command_id=str(source.command) if source.command else None,
+                parse_status=source.parse_status,
+                failed_jobs=failed_jobs or None,
             )
 
         except Exception as e:
@@ -302,13 +357,51 @@ async def get_source_status(source_id: str):
                 message="Failed to retrieve processing status",
                 processing_info=None,
                 command_id=str(source.command) if source.command else None,
+                parse_status=source.parse_status,
             )
 
+    except NotFoundError:
+        raise HTTPException(status_code=404, detail="Source not found")
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error fetching status for source {source_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error fetching source status: {str(e)}")
+
+
+@router.post("/sources/{source_id}/cancel-processing")
+async def cancel_source_processing(source_id: str):
+    """Cancel all pending pipeline jobs for a source.
+
+    Flips every queued/orphaned-running command that references this source to
+    `canceled` so the worker never (re)processes them, and marks the source's
+    parse lifecycle failed so the UI reflects the abort instead of a stuck
+    'processing' state. An actively-executing job cannot be interrupted.
+    """
+    from api.command_service import CommandService
+
+    try:
+        await Source.get_meta(source_id)
+    except NotFoundError:
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    try:
+        canceled = await CommandService.cancel_source_jobs(source_id)
+        if canceled:
+            try:
+                await repo_query(
+                    "UPDATE $sid SET parse_status = 'failed' "
+                    "WHERE parse_status IN ['pending', 'parsing', 'embedding'];",
+                    {"sid": ensure_record_id(source_id)},
+                )
+            except Exception as e:
+                logger.warning(f"parse_status stamp after cancel skipped: {e}")
+        return {"source_id": source_id, "canceled_jobs": canceled}
+    except Exception as e:
+        logger.error(f"Error canceling processing for source {source_id}: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to cancel processing: {str(e)}"
+        )
 
 
 @router.put("/sources/{source_id}", response_model=None)

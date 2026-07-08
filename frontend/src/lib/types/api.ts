@@ -224,6 +224,10 @@ export interface SourceStatusResponse {
   message: string
   processing_info?: Record<string, unknown>
   command_id?: string
+  /** Block-parse lifecycle for PDF sources: pending/parsing/embedding/ready/failed */
+  parse_status?: string
+  /** Failed downstream pipeline jobs for the current run */
+  failed_jobs?: Array<{ name: string; count: number; latest_error?: string | null }>
 }
 
 export interface SettingsResponse {

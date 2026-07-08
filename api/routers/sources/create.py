@@ -9,7 +9,7 @@ from surreal_commands import execute_command_sync
 from api.command_service import CommandService
 from api.models import SourceCreate, SourceResponse
 from api.routers.sources._helpers import source_to_response
-from api.upload_utils import save_uploaded_file
+from api.upload_utils import UploadTooLargeError, save_uploaded_file
 from commands.source_commands import SourceProcessingInput
 from open_notebook.config import UPLOADS_FOLDER
 from open_notebook.database.repository import ensure_record_id, repo_query
@@ -155,6 +155,17 @@ async def create_source(
         if upload_file and source_data.type == "upload":
             try:
                 file_path = await save_uploaded_file(upload_file)
+            except UploadTooLargeError as e:
+                logger.warning(f"Upload rejected (too large): {e}")
+                raise HTTPException(status_code=413, detail=str(e))
+            except OSError as e:
+                # Disk-level failure (out of space, permissions) — the server's
+                # problem, not the client's.
+                logger.error(f"File upload failed (storage error): {e}")
+                raise HTTPException(
+                    status_code=500,
+                    detail="File upload failed: the server could not store the file (disk full or not writable).",
+                )
             except Exception as e:
                 logger.error(f"File upload failed: {e}")
                 raise HTTPException(status_code=400, detail=f"File upload failed: {str(e)}")

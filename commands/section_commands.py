@@ -509,14 +509,12 @@ async def build_sections_command(input_data: BuildSectionsInput) -> BuildSection
         )
 
     except ValueError as exc:
-        processing_time = time.time() - start_time
+        # Permanent failure — re-raise so surreal-commands marks the job
+        # `failed` (stop_on=[ValueError] prevents retries). Returning a
+        # success=False payload instead records the job as `completed`, which
+        # hides the failure from the job tray and its failure toast.
         logger.error(f"build_sections permanent failure for {input_data.source_id}: {exc}")
-        return BuildSectionsOutput(
-            success=False,
-            source_id=input_data.source_id,
-            processing_time=processing_time,
-            error_message=str(exc),
-        )
+        raise
     except Exception:
         # Transient — will retry
         raise

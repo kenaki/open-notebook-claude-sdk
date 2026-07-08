@@ -11,7 +11,11 @@ from pathlib import Path
 from fastapi import UploadFile
 from loguru import logger
 
-from open_notebook.config import UPLOADS_FOLDER
+from open_notebook.config import MAX_UPLOAD_SIZE_MB, UPLOADS_FOLDER
+
+
+class UploadTooLargeError(ValueError):
+    """Upload exceeds MAX_UPLOAD_SIZE_MB. Mapped to HTTP 413 by the routers."""
 
 
 def generate_unique_filename(original_filename: str, upload_folder: str) -> str:
@@ -60,13 +64,24 @@ async def save_uploaded_file(
     # Generate unique filename
     file_path = generate_unique_filename(upload_file.filename, upload_folder)
 
-    try:
-        # Save file
-        with open(file_path, "wb") as f:
-            content = await upload_file.read()
-            f.write(content)
+    max_bytes = MAX_UPLOAD_SIZE_MB * 1024 * 1024 if MAX_UPLOAD_SIZE_MB > 0 else 0
 
-        logger.info(f"Saved uploaded file to: {file_path}")
+    try:
+        # Stream to disk in 1 MiB chunks — never buffers the whole file in
+        # memory, and enforces the size cap while writing (Content-Length can
+        # be absent or spoofed, so the cap is checked on actual bytes).
+        written = 0
+        with open(file_path, "wb") as f:
+            while chunk := await upload_file.read(1 << 20):
+                written += len(chunk)
+                if max_bytes and written > max_bytes:
+                    raise UploadTooLargeError(
+                        f"File exceeds the maximum upload size of "
+                        f"{MAX_UPLOAD_SIZE_MB} MB"
+                    )
+                f.write(chunk)
+
+        logger.info(f"Saved uploaded file to: {file_path} ({written} bytes)")
         return file_path
     except Exception as e:
         logger.error(f"Failed to save uploaded file: {e}")
