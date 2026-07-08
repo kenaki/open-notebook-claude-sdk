@@ -456,6 +456,19 @@ class AnnotationResponse(BaseModel):
     note: Optional[str] = None
     quote: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
+    # Block-substrate anchor (pdf-block-ingestion Track D1, Decision #13). The
+    # anchor is server-resolved from rect+quote at create time; these mirror the
+    # SourceAnnotation columns. block_seq..block_end_seq is the block RANGE (equal
+    # for a single-block highlight); anchor_start/anchor_end are char offsets
+    # (None for a geometric span or an atomic figure/table/equation). anchor_state
+    # is DERIVED server-side (never stored): no block_seq -> legacy; anchor_gen !=
+    # source.parse_generation -> stale; else anchored.
+    block_seq: Optional[int] = None
+    block_end_seq: Optional[int] = None
+    anchor_start: Optional[int] = None
+    anchor_end: Optional[int] = None
+    anchor_gen: Optional[int] = None
+    anchor_state: Literal["anchored", "stale", "legacy"] = "legacy"
     created: str
     updated: str
 
