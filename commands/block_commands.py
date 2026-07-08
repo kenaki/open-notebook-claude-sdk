@@ -23,8 +23,13 @@ rest of the ingest lifecycle:
               resubmit ``build_sections`` (REPLACE semantics — it deletes
               existing rows first) so sections rebuild from the rich markdown,
               then submit ``embed_source`` (completes the lifecycle → ``ready``
-              in B4). Re-anchor + old-gen cleanup is B5 — until it lands old
-              generations are left in place.
+              in B4).
+6c. RE-ANCHOR (B5) — re-anchor every annotation against the new gen via the
+              shared ``anchor_match`` core (miss → anchor fields untouched,
+              rect+quote fallback keeps it usable), THEN range-delete each old
+              gen's blocks/crops and mark its header ``superseded``. Re-anchor
+              runs BEFORE the old-gen delete; the whole step is best-effort so a
+              hiccup never fails the (already flipped) build.
 9. FAILURE  — pre-flip: partial gen dropped, header ``failed`` + error, source
               ``parse_status='failed'``; the live gen is never touched.
               ``ValueError`` / ``ConfigurationError`` are permanent (no retry);
@@ -49,13 +54,14 @@ from open_notebook.database.repository import (
 )
 from open_notebook.domain import blocks
 from open_notebook.domain.blocks import PARSE_TABLE, block_rid, parse_rid
-from open_notebook.domain.notebook import Source
+from open_notebook.domain.notebook import Source, SourceAnnotation
 from open_notebook.exceptions import ConfigurationError
 from open_notebook.parsers.base import blocks_to_markdown, finalize
 from open_notebook.parsers.docling_parser import (
     DoclingBlockParser,
     page_map_from_blocks,
 )
+from open_notebook.utils.anchor_match import anchor_match, quote_hash
 from open_notebook.utils.block_images import extract_block_images
 from open_notebook.utils.job_progress import report_job_progress
 
@@ -186,6 +192,130 @@ async def _mark_failed(
             await repo_update("source", str(source.id), {"parse_status": "failed"})
         except Exception as inner:
             logger.debug(f"build_blocks: source parse_status='failed' skipped: {inner!r}")
+
+
+# ---------------------------------------------------------------------------
+# Re-anchor + old-generation cleanup (B5, db-design §4 step 8, Decision #11)
+# ---------------------------------------------------------------------------
+
+
+def _annotation_page(ann: SourceAnnotation) -> Optional[int]:
+    """1-based physical page of the annotation from ``rect[0].pageIndex`` (§10).
+
+    None when the annotation has no rects or a malformed first rect — such an
+    annotation cannot be geometrically re-anchored (stays a legacy record)."""
+    if not ann.rect:
+        return None
+    try:
+        return int(ann.rect[0]["pageIndex"]) + 1
+    except (KeyError, TypeError, ValueError, IndexError):
+        return None
+
+
+async def reanchor_annotations(source: Source, new_gen: int) -> int:
+    """Re-anchor every annotation of ``source`` against generation ``new_gen``.
+
+    For each :class:`SourceAnnotation` (db-design §4 step 8, Decision #11 lazy
+    re-anchor): fetch the annotation page's new-gen blocks WITH text and resolve
+    a block RANGE via the shared :func:`anchor_match` core (bbox∩rect candidates
+    + quote/quote_hash containment). On a hit, persist
+    ``block_seq``/``block_end_seq`` (the range), ``anchor_start``/``anchor_end``
+    (char offsets; ``None`` for atomic figure/table/equation), and
+    ``anchor_gen=new_gen``. On a miss the previous anchor fields are left
+    UNTOUCHED — a stale ``anchor_gen`` marks it derived-stale while rect+quote
+    keep it usable (the sidebar still lists it).
+
+    Legacy backfill: any annotation with a ``quote`` but no ``quote_hash`` gets
+    its ``quote_hash`` computed + persisted here regardless of match outcome, so
+    a first-ever parse lazily backfills pre-existing highlights (Decision #11 —
+    never a forced backfill; it rides the parse).
+
+    Uses only ``source.id`` (not ``source.parse_generation`` — the in-memory
+    object may predate the flip); ``new_gen`` is the authority. Returns the count
+    of annotations that resolved to a block range this run. Pure DB round trips
+    around the DB-free ``anchor_match`` core (shared with D1's create-time
+    resolver — never recreated here).
+    """
+    src_id = str(source.id)
+    src_key = _src_key(src_id)
+    annotations = await SourceAnnotation.get_for_source(src_id)
+    if not annotations:
+        return 0
+
+    header = await blocks.get_parse_header(src_key, new_gen)
+    page_index = header.page_index if header else None
+    page_cache: dict = {}  # page (1-based) -> new-gen blocks WITH text
+    reanchored = 0
+
+    for ann in annotations:
+        updates: dict = {}
+
+        # Legacy backfill: stamp quote_hash if the annotation has a quote but no
+        # hash yet (independent of whether it re-anchors).
+        if ann.quote and not ann.quote_hash:
+            qh = quote_hash(ann.quote)
+            if qh:
+                updates["quote_hash"] = qh
+
+        match = None
+        page = _annotation_page(ann)
+        if page_index and page is not None:
+            if page not in page_cache:
+                page_cache[page] = await blocks.get_page_blocks(
+                    src_key, new_gen, page, page_index, include_text=True
+                )
+            match = anchor_match(page_cache[page], ann.rect, ann.quote)
+
+        if match is not None:
+            updates.update(
+                {
+                    "block_seq": match.block_seq,
+                    "block_end_seq": match.block_end_seq,
+                    "anchor_start": match.anchor_start,
+                    "anchor_end": match.anchor_end,
+                    "anchor_gen": new_gen,
+                }
+            )
+            reanchored += 1
+
+        if updates:
+            await repo_update("source_annotation", str(ann.id), updates)
+
+    logger.info(
+        f"build_blocks: re-anchored {reanchored}/{len(annotations)} annotation(s) "
+        f"for {src_id} against gen {new_gen}"
+    )
+    return reanchored
+
+
+async def _supersede_old_generations(src_key: str, keep_gen: int) -> List[int]:
+    """Range-delete every non-current ready/superseded gen's blocks (+ crops) and
+    mark its header ``superseded`` (db-design §4 step 8).
+
+    Unlike :func:`blocks.sweep_orphan_generations`, the parse HEADER is retained
+    (status flipped to ``superseded``) as an audit trail — only the blocks and
+    their rasterized crops are reclaimed. ``building`` gens are swept on entry;
+    ``failed`` gens already had their blocks dropped, so both are skipped here.
+    Idempotent: re-running over an already-superseded gen just re-deletes an empty
+    band and re-stamps the status.
+    """
+    swept: List[int] = []
+    for header in await blocks.list_parse_headers(src_key):
+        if header.gen == keep_gen:
+            continue
+        if header.status not in ("ready", "superseded"):
+            continue
+        await blocks.delete_generation(src_key, header.gen)
+        await repo_update(
+            PARSE_TABLE, parse_rid(src_key, header.gen), {"status": "superseded"}
+        )
+        swept.append(header.gen)
+    if swept:
+        logger.info(
+            f"build_blocks: superseded old gens {swept} for {src_key} "
+            f"(kept gen {keep_gen})"
+        )
+    return swept
 
 
 # ---------------------------------------------------------------------------
@@ -365,8 +495,22 @@ async def build_blocks_command(input_data: BuildBlocksInput) -> BuildBlocksOutpu
                 f"build_blocks: embed_source submit failed for {source.id}: {exc}"
             )
 
-        # B5: re-anchor annotations + old-generation cleanup is not landed yet;
-        # old generations are intentionally left in place until then.
+        # ---- 6c. RE-ANCHOR annotations + supersede old gens (B5) ---------
+        # Re-anchor FIRST (reads the new live gen's blocks), THEN reclaim old
+        # generations — never the reverse. Best-effort: the parse already
+        # flipped + embed is chained, so a re-anchor/cleanup hiccup must not fail
+        # the (successful) build or trigger a whole-command retry that would just
+        # gate-skip. On the first-ever parse there is no old gen to supersede and
+        # this lazily backfills pre-existing legacy annotations (Decision #11).
+        try:
+            await report_job_progress(job_id, "Re-anchoring annotations", gen=gen)
+            await reanchor_annotations(source, gen)
+            await _supersede_old_generations(src_key, gen)
+        except Exception as exc:  # non-fatal — new gen stays live regardless
+            logger.warning(
+                f"build_blocks: re-anchor/old-gen cleanup failed for {source.id} "
+                f"(new gen {gen} kept live): {exc!r}"
+            )
 
         processing_time = time.time() - start_time
         logger.info(
