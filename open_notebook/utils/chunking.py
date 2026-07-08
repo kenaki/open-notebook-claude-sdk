@@ -18,7 +18,7 @@ import os
 import re
 from enum import Enum
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, TypedDict
 
 from langchain_text_splitters import (
     HTMLHeaderTextSplitter,
@@ -495,6 +495,173 @@ def chunk_text(
 
 
 # ---------------------------------------------------------------------------
+# B4: Block-aware chunking (PDF block substrate — db-design §2.3, §4 step 7)
+# ---------------------------------------------------------------------------
+
+
+class BlockChunk(TypedDict):
+    """One embedding chunk packed from typed blocks.
+
+    ``block_start``/``block_end`` are the inclusive ``seq`` range the chunk
+    covers — exact by construction (no lossy char-map heuristic). ``page_number``
+    is the first packed block's ``page``.
+    """
+
+    content: str
+    block_start: int
+    block_end: int
+    page_number: Optional[int]
+
+
+# Blocks that are their own atomic chunk — never packed with neighbours.
+_ATOMIC_BLOCK_TYPES = frozenset({"code", "table", "equation"})
+
+
+def _block_chunk_text(block: dict) -> Optional[str]:
+    """Render one typed block to its embeddable text, or None to skip it.
+
+    - equation  -> its latex wrapped ``$$…$$`` (falls back to raw text) so
+      retrieved chunks stay renderable markdown;
+    - figure    -> skipped unless it carries caption text;
+    - everything else (paragraph/list_item/code/caption/heading/table) -> its
+      ``text`` (tables store their markdown export in ``text``).
+    """
+    btype = str(block.get("type") or "")
+    if btype == "equation":
+        latex = (block.get("latex") or "").strip()
+        if latex:
+            return f"$$\n{latex}\n$$"
+        text = (block.get("text") or "").strip()
+        return text or None
+    # figure has no text unless a caption was folded in; skip otherwise.
+    text = (block.get("text") or "").strip()
+    return text or None
+
+
+def _emit_block_chunk(
+    result: List[BlockChunk], block: dict, text: str, chunk_size: int
+) -> None:
+    """Emit a single block as its own chunk, re-splitting if it is oversized.
+
+    An oversized single block re-splits via the existing
+    ``RecursiveCharacterTextSplitter`` (overlap preserved *inside* the split);
+    every sub-chunk keeps ``block_start == block_end == seq`` — the block stays
+    the anchor even when its text spans several embedding rows.
+    """
+    seq = block.get("seq")
+    page = block.get("page")
+    if token_count(text) <= chunk_size:
+        result.append(
+            {
+                "content": text,
+                "block_start": seq,
+                "block_end": seq,
+                "page_number": page,
+            }
+        )
+        return
+    for sub in _get_plain_splitter().split_text(text):
+        sub = sub.strip()
+        if sub:
+            result.append(
+                {
+                    "content": sub,
+                    "block_start": seq,
+                    "block_end": seq,
+                    "page_number": page,
+                }
+            )
+
+
+def chunk_blocks(
+    blocks: List[dict], chunk_size: int = CHUNK_SIZE
+) -> List[BlockChunk]:
+    """Pack consecutive text-bearing blocks into embedding chunks (db-design §4 step 7).
+
+    *blocks* is the finalized, seq-ordered block list for one parse generation
+    (raw dicts as returned by ``blocks.get_range`` — keys ``seq``, ``page``,
+    ``type``, ``text``, ``latex``, ``level``).
+
+    Packing rules:
+    - text-bearing blocks (paragraph/list_item/caption/heading text; table
+      markdown; equation latex ``$$…$$``) pack in seq order up to ~``chunk_size``
+      tokens, with **no overlap** across the block-packed boundary (blocks are
+      the boundary);
+    - a ``heading`` with ``level <= 2`` always starts a new chunk;
+    - ``code``/``table``/``equation`` blocks are atomic — each is its own chunk,
+      never merged with neighbours;
+    - a single oversized block re-splits via the recursive splitter, all
+      sub-chunks keeping ``block_start == block_end`` (overlap kept only there);
+    - ``figure`` blocks are skipped unless they carry caption text.
+
+    ``page_number`` on each chunk is the first packed block's ``page``.
+    """
+    result: List[BlockChunk] = []
+    buf_texts: List[str] = []
+    buf_start: Optional[int] = None
+    buf_end: Optional[int] = None
+    buf_page: Optional[int] = None
+    buf_tokens = 0
+
+    def flush() -> None:
+        nonlocal buf_texts, buf_start, buf_end, buf_page, buf_tokens
+        if buf_texts:
+            result.append(
+                {
+                    "content": "\n\n".join(buf_texts),
+                    "block_start": buf_start,
+                    "block_end": buf_end,
+                    "page_number": buf_page,
+                }
+            )
+        buf_texts = []
+        buf_start = buf_end = buf_page = None
+        buf_tokens = 0
+
+    for block in blocks:
+        text = _block_chunk_text(block)
+        if text is None:
+            continue  # non-text-bearing (e.g. figure without caption)
+
+        btype = str(block.get("type") or "")
+        seq = block.get("seq")
+        page = block.get("page")
+
+        # Atomic blocks: flush the buffer, emit as their own chunk.
+        if btype in _ATOMIC_BLOCK_TYPES:
+            flush()
+            _emit_block_chunk(result, block, text, chunk_size)
+            continue
+
+        # A top-level heading always starts a fresh chunk.
+        if btype == "heading" and (block.get("level") or 99) <= 2:
+            flush()
+
+        tokens = token_count(text)
+
+        # An oversized single (non-atomic) block re-splits on its own.
+        if tokens > chunk_size:
+            flush()
+            _emit_block_chunk(result, block, text, chunk_size)
+            continue
+
+        # Adding this block would overflow the budget -> close the buffer first
+        # (no overlap across the block-packed boundary).
+        if buf_texts and buf_tokens + tokens > chunk_size:
+            flush()
+
+        if not buf_texts:
+            buf_start = seq
+            buf_page = page
+        buf_texts.append(text)
+        buf_end = seq
+        buf_tokens += tokens
+
+    flush()
+    return result
+
+
+# ---------------------------------------------------------------------------
 # A3: Section-aware chunk matching helpers
 # ---------------------------------------------------------------------------
 
@@ -583,6 +750,11 @@ def build_page_char_map(
     Build a sorted list of ``(char_start, char_end, page_no)`` tuples by locating
     each *page_map* block's text within *full_text*.
 
+    **Legacy path only** (B4): block-parsed sources derive an exact
+    ``[block_start, block_end]`` + ``page_number`` from the typed blocks via
+    :func:`chunk_blocks`, so this lossy 80-char find heuristic runs only for
+    sources with no ready block generation.
+
     *page_map* is the persisted per-block provenance produced by A2's
     ``_extract_docling_page_map`` — a list of ``{"text": str, "page_no": int}``
     dicts in document order.  Blocks whose text cannot be located (e.g. headings
@@ -623,6 +795,9 @@ def find_chunk_page(
 ) -> Optional[int]:
     """
     Return the physical ``page_no`` for *chunk* using *page_char_map*.
+
+    **Legacy path only** (B4) — block-parsed sources get an exact page from
+    :func:`chunk_blocks`; this runs only for sources without a ready block gen.
 
     Locates the chunk by searching for its first 80 characters inside *full_text*,
     then finds the page of the block that overlaps the chunk's start offset.  If

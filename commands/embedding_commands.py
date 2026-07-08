@@ -8,13 +8,20 @@ from pydantic import BaseModel
 from surreal_commands import CommandInput, CommandOutput, command, submit_command
 
 from open_notebook.ai.models import model_manager
-from open_notebook.database.repository import ensure_record_id, repo_insert, repo_query
+from open_notebook.database.repository import (
+    ensure_record_id,
+    repo_insert,
+    repo_query,
+    repo_update,
+)
+from open_notebook.domain import blocks
 from open_notebook.domain.notebook import Note, Source, SourceInsight
 from open_notebook.exceptions import ConfigurationError
 from open_notebook.utils.chunking import (
     ContentType,
     build_page_char_map,
     build_section_char_map,
+    chunk_blocks,
     chunk_text,
     detect_content_type,
     find_chunk_page,
@@ -406,15 +413,19 @@ async def embed_source_command(input_data: EmbedSourceInput) -> EmbedSourceOutpu
     Generate and store embeddings for a source document.
 
     Creates multiple chunk embeddings stored in the source_embedding table.
-    Uses content-type aware chunking based on file extension or content heuristics.
 
-    Flow:
-    1. Load Source by ID
-    2. DELETE existing source_embedding records for this source
-    3. Detect content type from file path or content
-    4. Chunk text using appropriate splitter
-    5. Generate embeddings for all chunks in batches
-    6. Bulk INSERT source_embedding records
+    Two chunking paths (B4, db-design §2.3 / §4 step 7):
+    - **Block path** — a source with a ready block generation
+      (``parse_generation`` + a ``source_parse`` header ``status='ready'``) packs
+      WHOLE typed blocks in seq order via ``chunk_blocks`` → exact
+      ``[block_start, block_end]`` + ``page_number`` per chunk, ``gen`` =
+      ``parse_generation``. Retires the lossy 80-char page heuristic.
+    - **Legacy path** — no blocks: content-type aware ``chunk_text`` with the
+      section/page-map heuristics unchanged; rows get ``gen = max(existing)+1``.
+
+    Both paths are **no-blackout** (Decision #10): new-gen rows are bulk-INSERTed
+    FIRST, then old rows (``gen IS NONE OR gen != new``) are DELETEd — so
+    ``fn::vector_search`` never sees a zero-embedding window during a re-embed.
 
     Retry Strategy:
     - Retries up to 5 times for transient failures (network, timeout, etc.)
@@ -434,101 +445,179 @@ async def embed_source_command(input_data: EmbedSourceInput) -> EmbedSourceOutpu
         if not source.full_text or not source.full_text.strip():
             raise ValueError(f"Source '{input_data.source_id}' has no text to embed")
 
-        # 2. DELETE existing embeddings (idempotency)
-        logger.debug(f"Deleting existing embeddings for source {input_data.source_id}")
-        await repo_query(
-            "DELETE source_embedding WHERE source = $source_id",
-            {"source_id": ensure_record_id(input_data.source_id)},
-        )
-
-        # 3. Detect content type from file path if available
-        file_path = source.asset.file_path if source.asset else None
-        content_type = detect_content_type(source.full_text, file_path)
-        logger.debug(f"Detected content type: {content_type.value}")
-
-        # 4. Chunk text using appropriate splitter
-        chunks = chunk_text(source.full_text, content_type=content_type)
-        total_chunks = len(chunks)
-
-        # Log chunk statistics for debugging
-        chunk_sizes = [len(c) for c in chunks]
-        logger.info(
-            f"Created {total_chunks} chunks for source {input_data.source_id} "
-            f"(sizes: min={min(chunk_sizes) if chunk_sizes else 0}, "
-            f"max={max(chunk_sizes) if chunk_sizes else 0}, "
-            f"avg={sum(chunk_sizes) // len(chunk_sizes) if chunk_sizes else 0} chars)"
-        )
-
-        if total_chunks == 0:
-            raise ValueError("No chunks created after splitting text")
-
-        # 5. Generate embeddings for all chunks in batches
+        sid = ensure_record_id(input_data.source_id)
         cmd_id = get_command_id(input_data)
-        logger.debug(f"Generating embeddings for {total_chunks} chunks")
-        embeddings = await generate_embeddings(chunks, command_id=cmd_id)
 
-        # Verify we got embeddings for all chunks
-        if len(embeddings) != len(chunks):
-            raise ValueError(
-                f"Embedding count mismatch: got {len(embeddings)} embeddings "
-                f"for {len(chunks)} chunks"
+        # Decide the chunking path: block-aware when a ready parse generation
+        # exists, else the legacy full_text path.
+        src_key = str(source.id).split(":", 1)[1] if ":" in str(source.id) else str(source.id)
+        parse_gen = source.parse_generation
+        parse_header = None
+        if parse_gen:
+            try:
+                parse_header = await blocks.get_parse_header(src_key, parse_gen)
+            except Exception as header_exc:  # pragma: no cover - defensive
+                logger.debug(f"Parse-header lookup failed: {header_exc!r}")
+                parse_header = None
+        use_block_path = bool(
+            parse_gen and parse_header and parse_header.status == "ready"
+        )
+
+        if use_block_path:
+            # --- BLOCK PATH (db-design §2.3 / §4 step 7) ---
+            hi = (
+                parse_header.block_count
+                if parse_header.block_count is not None
+                else 10_000_000
             )
+            block_rows = await blocks.get_range(src_key, parse_gen, 0, hi)
+            block_chunks = chunk_blocks(block_rows)
+            chunks = [bc["content"] for bc in block_chunks]
+            total_chunks = len(chunks)
+            logger.info(
+                f"Created {total_chunks} block chunks for source "
+                f"{input_data.source_id} (gen {parse_gen}, {len(block_rows)} blocks)"
+            )
+            if total_chunks == 0:
+                raise ValueError("No chunks created after packing blocks")
 
-        # 6. Bulk INSERT source_embedding records
-        # A3: stamp section on each record (None when sections not yet built)
-        source_sections_raw = await repo_query(
-            # `order` is a reserved word in SurrealQL: `ORDER BY order` parses
-            # ("Missing order idiom") ONLY when `order` is also in the SELECT
-            # projection — backticks and `ASC` do NOT help (verified against the
-            # live DB). This is why get_outline works and this query didn't:
-            # project `order` so the ORDER BY can resolve it.
-            "SELECT id, content, order FROM source_section WHERE source = $sid ORDER BY order",
-            {"sid": ensure_record_id(input_data.source_id)},
-        )
-        section_map = (
-            build_section_char_map(source.full_text, source_sections_raw)
-            if source_sections_raw and source.full_text
-            else []
-        )
-        logger.debug(
-            f"Section map: {len(section_map)} entries for {total_chunks} chunks"
-        )
+            embeddings = await generate_embeddings(chunks, command_id=cmd_id)
+            if len(embeddings) != len(chunks):
+                raise ValueError(
+                    f"Embedding count mismatch: got {len(embeddings)} embeddings "
+                    f"for {len(chunks)} chunks"
+                )
 
-        # Phase3: stamp page_number on each record from the source's persisted
-        # page_map (A2 provenance). None when the source has no page_map (non-PDF,
-        # pre-Docling, or PyMuPDF-fallback ingest) or a chunk can't be located.
-        page_char_map = (
-            build_page_char_map(source.full_text, source.page_map)
-            if source.page_map and source.full_text
-            else []
-        )
-        logger.debug(
-            f"Page map: {len(page_char_map)} entries for {total_chunks} chunks"
-        )
-
-        records = []
-        for idx, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
-            section_rid = None
-            if section_map and source.full_text:
-                sec_id = find_chunk_section(chunk, source.full_text, section_map)
-                if sec_id:
-                    section_rid = ensure_record_id(sec_id)
-            page_number = None
-            if page_char_map and source.full_text:
-                page_number = find_chunk_page(chunk, source.full_text, page_char_map)
-            records.append(
+            embed_gen = parse_gen
+            records = [
                 {
-                    "source": ensure_record_id(input_data.source_id),
+                    "source": sid,
                     "order": idx,
-                    "content": chunk,
+                    "content": bc["content"],
                     "embedding": embedding,
-                    "section": section_rid,
-                    "page_number": page_number,
+                    "section": None,
+                    "page_number": bc["page_number"],
+                    "block_start": bc["block_start"],
+                    "block_end": bc["block_end"],
+                    "gen": embed_gen,
                 }
+                for idx, (bc, embedding) in enumerate(zip(block_chunks, embeddings))
+            ]
+        else:
+            # --- LEGACY PATH (content-type chunking + page/section heuristics) ---
+            file_path = source.asset.file_path if source.asset else None
+            content_type = detect_content_type(source.full_text, file_path)
+            logger.debug(f"Detected content type: {content_type.value}")
+
+            chunks = chunk_text(source.full_text, content_type=content_type)
+            total_chunks = len(chunks)
+
+            chunk_sizes = [len(c) for c in chunks]
+            logger.info(
+                f"Created {total_chunks} chunks for source {input_data.source_id} "
+                f"(sizes: min={min(chunk_sizes) if chunk_sizes else 0}, "
+                f"max={max(chunk_sizes) if chunk_sizes else 0}, "
+                f"avg={sum(chunk_sizes) // len(chunk_sizes) if chunk_sizes else 0} chars)"
             )
 
+            if total_chunks == 0:
+                raise ValueError("No chunks created after splitting text")
+
+            logger.debug(f"Generating embeddings for {total_chunks} chunks")
+            embeddings = await generate_embeddings(chunks, command_id=cmd_id)
+
+            if len(embeddings) != len(chunks):
+                raise ValueError(
+                    f"Embedding count mismatch: got {len(embeddings)} embeddings "
+                    f"for {len(chunks)} chunks"
+                )
+
+            # A3: stamp section on each record (None when sections not yet built)
+            source_sections_raw = await repo_query(
+                # `order` is a reserved word in SurrealQL: `ORDER BY order` parses
+                # ("Missing order idiom") ONLY when `order` is also in the SELECT
+                # projection — backticks and `ASC` do NOT help (verified against
+                # the live DB). This is why get_outline works and this query
+                # didn't: project `order` so the ORDER BY can resolve it.
+                "SELECT id, content, order FROM source_section WHERE source = $sid ORDER BY order",
+                {"sid": sid},
+            )
+            section_map = (
+                build_section_char_map(source.full_text, source_sections_raw)
+                if source_sections_raw and source.full_text
+                else []
+            )
+            logger.debug(
+                f"Section map: {len(section_map)} entries for {total_chunks} chunks"
+            )
+
+            # Phase3: stamp page_number on each record from the source's persisted
+            # page_map (A2 provenance). None when the source has no page_map
+            # (non-PDF, pre-Docling, or PyMuPDF-fallback) or a chunk can't locate.
+            page_char_map = (
+                build_page_char_map(source.full_text, source.page_map)
+                if source.page_map and source.full_text
+                else []
+            )
+            logger.debug(
+                f"Page map: {len(page_char_map)} entries for {total_chunks} chunks"
+            )
+
+            # Legacy rows still get a monotonic gen so the no-blackout
+            # insert-first/delete-after ordering works for them too (Decision #10).
+            existing_gen_rows = await repo_query(
+                "SELECT gen FROM source_embedding WHERE source = $sid", {"sid": sid}
+            )
+            embed_gen = (
+                max(
+                    (
+                        r.get("gen")
+                        for r in existing_gen_rows
+                        if r.get("gen") is not None
+                    ),
+                    default=0,
+                )
+                + 1
+            )
+
+            records = []
+            for idx, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
+                section_rid = None
+                if section_map and source.full_text:
+                    sec_id = find_chunk_section(chunk, source.full_text, section_map)
+                    if sec_id:
+                        section_rid = ensure_record_id(sec_id)
+                page_number = None
+                if page_char_map and source.full_text:
+                    page_number = find_chunk_page(
+                        chunk, source.full_text, page_char_map
+                    )
+                records.append(
+                    {
+                        "source": sid,
+                        "order": idx,
+                        "content": chunk,
+                        "embedding": embedding,
+                        "section": section_rid,
+                        "page_number": page_number,
+                        "gen": embed_gen,
+                    }
+                )
+
+        # No-blackout re-embed (Decision #10): INSERT new-gen rows FIRST, THEN
+        # delete every stale row (legacy NONE gen + any earlier gen). Readers of
+        # fn::vector_search never see a zero-embedding window.
         logger.debug(f"Inserting {len(records)} source_embedding records")
         await repo_insert("source_embedding", records)
+        await repo_query(
+            "DELETE source_embedding WHERE source = $sid "
+            "AND (gen IS NONE OR gen != $gen)",
+            {"sid": sid, "gen": embed_gen},
+        )
+
+        # Complete the parse lifecycle: embedding -> ready.
+        if source.parse_status == "embedding":
+            await repo_update("source", str(source.id), {"parse_status": "ready"})
 
         processing_time = time.time() - start_time
         logger.info(

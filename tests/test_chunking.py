@@ -10,6 +10,7 @@ from open_notebook.utils.chunking import (
     CHUNK_SIZE,
     MIN_CHUNK_SIZE,
     ContentType,
+    chunk_blocks,
     chunk_text,
     detect_content_type,
     detect_content_type_from_extension,
@@ -351,6 +352,134 @@ Content for section 2.
         chunks = chunk_text(text, content_type=ContentType.PLAIN)
         # The function must always return at least one chunk for non-empty input.
         assert len(chunks) >= 1
+
+
+# ============================================================================
+# TEST SUITE: Block-aware chunking (B4)
+# ============================================================================
+
+
+def _para(seq, text, page=1):
+    return {"seq": seq, "page": page, "type": "paragraph", "text": text}
+
+
+def _sized_para(seq, tokens, page=1):
+    """A paragraph block whose text is ~*tokens* tokens."""
+    text = _build_text_with_max_tokens("word alpha beta gamma. ", tokens)
+    return {"seq": seq, "page": page, "type": "paragraph", "text": text}
+
+
+class TestChunkBlocks:
+    """Unit tests for chunk_blocks (db-design §2.3 / §4 step 7)."""
+
+    def test_packs_consecutive_paragraphs_exact_range(self):
+        blocks = [_para(0, "Alpha.", 1), _para(1, "Beta.", 1), _para(2, "Gamma.", 1)]
+        chunks = chunk_blocks(blocks)
+        assert len(chunks) == 1
+        c = chunks[0]
+        assert c["block_start"] == 0
+        assert c["block_end"] == 2
+        assert c["page_number"] == 1
+        assert "Alpha." in c["content"] and "Gamma." in c["content"]
+
+    def test_page_number_is_first_block_page(self):
+        blocks = [_para(0, "Alpha.", 3), _para(1, "Beta.", 4)]
+        chunks = chunk_blocks(blocks)
+        assert chunks[0]["page_number"] == 3
+
+    def test_heading_level_two_starts_new_chunk(self):
+        blocks = [
+            _para(0, "Intro paragraph.", 1),
+            {"seq": 1, "page": 1, "type": "heading", "level": 2, "text": "Section"},
+            _para(2, "Body paragraph.", 1),
+        ]
+        chunks = chunk_blocks(blocks)
+        assert len(chunks) == 2
+        assert chunks[0]["block_start"] == 0 and chunks[0]["block_end"] == 0
+        # heading packs with the following paragraph
+        assert chunks[1]["block_start"] == 1 and chunks[1]["block_end"] == 2
+
+    def test_heading_level_three_does_not_break(self):
+        blocks = [
+            _para(0, "Intro.", 1),
+            {"seq": 1, "page": 1, "type": "heading", "level": 3, "text": "Sub"},
+            _para(2, "Body.", 1),
+        ]
+        chunks = chunk_blocks(blocks)
+        assert len(chunks) == 1
+        assert chunks[0]["block_start"] == 0 and chunks[0]["block_end"] == 2
+
+    def test_table_is_atomic_chunk(self):
+        blocks = [
+            _para(0, "Before.", 1),
+            {"seq": 1, "page": 1, "type": "table", "text": "| a | b |\n| 1 | 2 |"},
+            _para(2, "After.", 1),
+        ]
+        chunks = chunk_blocks(blocks)
+        assert len(chunks) == 3
+        assert chunks[1]["block_start"] == 1 and chunks[1]["block_end"] == 1
+        assert "| a | b |" in chunks[1]["content"]
+
+    def test_equation_is_atomic_and_latex_wrapped(self):
+        blocks = [
+            _para(0, "Before.", 1),
+            {"seq": 1, "page": 1, "type": "equation", "latex": "E = mc^2"},
+            _para(2, "After.", 1),
+        ]
+        chunks = chunk_blocks(blocks)
+        assert len(chunks) == 3
+        eq = chunks[1]
+        assert eq["block_start"] == 1 and eq["block_end"] == 1
+        assert eq["content"] == "$$\nE = mc^2\n$$"
+
+    def test_code_is_atomic_chunk(self):
+        blocks = [
+            _para(0, "Before.", 1),
+            {"seq": 1, "page": 1, "type": "code", "text": "print('hi')"},
+            _para(2, "After.", 1),
+        ]
+        chunks = chunk_blocks(blocks)
+        assert len(chunks) == 3
+        assert chunks[1]["block_start"] == chunks[1]["block_end"] == 1
+
+    def test_figure_without_caption_is_skipped(self):
+        blocks = [
+            _para(0, "Before.", 1),
+            {"seq": 1, "page": 1, "type": "figure", "text": None},
+            _para(2, "After.", 1),
+        ]
+        chunks = chunk_blocks(blocks)
+        # figure skipped -> the two paragraphs pack into one chunk spanning 0..2
+        assert len(chunks) == 1
+        assert chunks[0]["block_start"] == 0 and chunks[0]["block_end"] == 2
+
+    def test_oversized_single_block_resplits_keeping_same_seq(self):
+        big = _sized_para(5, CHUNK_SIZE * 3, page=2)
+        chunks = chunk_blocks([big])
+        assert len(chunks) > 1
+        for c in chunks:
+            assert c["block_start"] == 5 and c["block_end"] == 5
+            assert c["page_number"] == 2
+            assert token_count(c["content"]) <= CHUNK_SIZE
+
+    def test_budget_overflow_splits_without_seq_overlap(self):
+        # Three blocks each ~0.45*CHUNK_SIZE: 0+1 pack (~0.9), 2 overflows.
+        per = int(CHUNK_SIZE * 0.45)
+        blocks = [
+            _sized_para(0, per),
+            _sized_para(1, per),
+            _sized_para(2, per),
+        ]
+        chunks = chunk_blocks(blocks)
+        assert len(chunks) >= 2
+        # contiguous, non-overlapping seq ranges
+        for prev, nxt in zip(chunks, chunks[1:]):
+            assert nxt["block_start"] == prev["block_end"] + 1
+        assert chunks[0]["block_start"] == 0
+        assert chunks[-1]["block_end"] == 2
+
+    def test_empty_blocks_returns_empty(self):
+        assert chunk_blocks([]) == []
 
 
 if __name__ == "__main__":
