@@ -4,7 +4,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from loguru import logger
 
 from open_notebook.ai.context_windows import get_context_window
-from open_notebook.domain.notebook import ChatMessageMedia, Note, Source, SourceInsight
+from open_notebook.database.repository import ensure_record_id, repo_query
+from open_notebook.domain.notebook import ChatMessageMedia
 
 from api.routers.chat.schemas import (
     ChatMessage,
@@ -36,29 +37,55 @@ def _make_snippet(text: Optional[str], limit: int = 160) -> Optional[str]:
     return collapsed[:limit].rstrip() + "…"
 
 
-async def _fetch_citation_meta(
-    ctype: str, full_id: str
-) -> Tuple[Optional[str], Optional[str]]:
-    """Resolve a (title, snippet) pair for a cited document, defensively."""
-    try:
-        if ctype == "source":
-            src = await Source.get(full_id)
-            if src:
-                return src.title, _make_snippet(getattr(src, "full_text", None))
-        elif ctype == "note":
-            note = await Note.get(full_id)
-            if note:
-                return note.title, _make_snippet(getattr(note, "content", None))
-        elif ctype == "source_insight":
-            insight = await SourceInsight.get(full_id)
-            if insight:
-                return (
-                    getattr(insight, "insight_type", None),
-                    _make_snippet(getattr(insight, "content", None)),
-                )
-    except Exception as e:
-        logger.warning(f"Could not resolve citation {full_id}: {str(e)}")
-    return None, None
+# (title field, snippet field) per citation table. Only the title + a short
+# snippet are ever surfaced, so we slice the snippet server-side instead of
+# loading whole records (a source's full_text + page_map can be a whole book).
+_CITATION_FIELDS: Dict[str, Tuple[str, str]] = {
+    "source": ("title", "full_text"),
+    "note": ("title", "content"),
+    "source_insight": ("insight_type", "content"),
+}
+
+
+async def _fetch_citations_meta(
+    ids_by_type: Dict[str, List[str]],
+) -> Dict[str, Tuple[Optional[str], Optional[str]]]:
+    """Batch-resolve (title, snippet) for every cited record: ONE query per table.
+
+    Replaces the former per-citation ``Source/Note/SourceInsight.get`` (each of
+    which loaded the whole record — full_text, page_map — just to build a
+    160-char snippet). Returns a per-request memo keyed by the citation's full id.
+    Records that are missing or whose table query fails are simply absent, so the
+    caller degrades to ``(None, None)`` exactly as before.
+    """
+    memo: Dict[str, Tuple[Optional[str], Optional[str]]] = {}
+    for ctype, ids in ids_by_type.items():
+        fields = _CITATION_FIELDS.get(ctype)
+        if not fields or not ids:
+            continue
+        title_field, snippet_field = fields
+        # ?? '' guards a NONE snippet field so string::slice never errors
+        # (Open Question Q-snippet-slice); slice 0..300 raw chars, then the
+        # 160-char snippet rule below trims/collapses to the identical preview.
+        query = (
+            f"SELECT id, {title_field} AS title, "
+            f"string::slice({snippet_field} ?? '', 0, 300) AS snippet FROM $ids"
+        )
+        record_ids = [ensure_record_id(i) for i in ids]
+        # Map the canonical RecordID string back to the original marker id.
+        by_key = {str(r): orig for r, orig in zip(record_ids, ids)}
+        try:
+            rows = await repo_query(query, {"ids": record_ids})
+        except Exception as e:
+            logger.warning(f"Could not resolve {ctype} citations: {str(e)}")
+            continue
+        for row in rows or []:
+            rid = row.get("id")
+            if rid is None:
+                continue
+            key = by_key.get(str(rid), str(rid))
+            memo[key] = (row.get("title"), _make_snippet(row.get("snippet")))
+    return memo
 
 
 async def _resolve_citations(
@@ -84,22 +111,31 @@ async def _resolve_citations(
             if stripped:
                 followups.append(stripped)
 
-    # Extract + number citations by first appearance (dedup on full id)
-    citations: List[Citation] = []
+    # First pass: number citations by first appearance (dedup on full id) and
+    # group the distinct ids by type for a single batched metadata query each.
     seen: Dict[str, int] = {}
+    ids_by_type: Dict[str, List[str]] = {}
+    ordered: List[Tuple[str, str, Optional[str]]] = []
     for match in _CITATION_PATTERN.finditer(clean):
         ctype, cid, page = match.group(1), match.group(2), match.group(3)
         full_id = f"{ctype}:{cid}"
         if full_id in seen:
             continue
-        number = len(seen) + 1
-        seen[full_id] = number
-        title, snippet = await _fetch_citation_meta(ctype, full_id)
+        seen[full_id] = len(seen) + 1
+        ids_by_type.setdefault(ctype, []).append(full_id)
+        ordered.append((ctype, full_id, page))
+
+    # One query per cited table (per-request memo), then assemble the payload.
+    meta = await _fetch_citations_meta(ids_by_type)
+
+    citations: List[Citation] = []
+    for ctype, full_id, page in ordered:
+        title, snippet = meta.get(full_id, (None, None))
         citations.append(
             Citation(
                 id=full_id,
                 type=ctype,  # type: ignore[arg-type]
-                number=number,
+                number=seen[full_id],
                 title=title,
                 snippet=snippet,
                 page=int(page) if page else None,
