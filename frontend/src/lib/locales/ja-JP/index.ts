@@ -513,6 +513,17 @@ export const jaJP = {
       groupBySection: "セクションでグループ化",
       unsectioned: "セクションなし",
     },
+    reader: {
+      tab: "リーダー",
+      disabledTooltip: "このドキュメントはまだブロックに解析されていません。リーダー表示を有効にするには再処理してください。",
+      notReady: "このドキュメントはまだ解析されていません。",
+      outline: "目次",
+      untitledSection: "無題のセクション",
+      page: "p. {page}",
+      figureAlt: "図",
+      figureMissing: "図の画像は利用できません",
+      empty: "表示する内容がまだありません。",
+    },
   },
   chat: {
     referencedHighlights: "参照されたハイライト",

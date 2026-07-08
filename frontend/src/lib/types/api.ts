@@ -153,6 +153,28 @@ export interface PageBlocksResponse {
   blocks: Block[]
 }
 
+// A page-span of blocks with full text, for the markdown reader (pdf-block-
+// ingestion Track D6, db-design §3a). Mirrors the backend `BlockSpanResponse`
+// exactly. `start_page`/`end_page` reflect the CLAMPED bounds actually served
+// (GET /sources/{id}/blocks/span caps a request at 10 pages).
+export interface BlockSpanResponse {
+  gen: number
+  start_page: number
+  end_page: number
+  blocks: Block[]
+}
+
+// One heading entry in a parsed source's outline (mirrors the backend
+// `section_index` dicts written by `open_notebook/parsers/base.py::finalize`).
+// `subtree_end` is the last seq nested under this heading (its subtree range
+// is `[seq, subtree_end]`) — absent/undefined on older/degenerate data.
+export interface SectionIndexEntry {
+  seq: number
+  level: number
+  title: string
+  subtree_end?: number
+}
+
 // Parse status header for a source's current generation (GET /sources/{id}/parse).
 // Mirrors the backend `ParseStatusResponse`. 404 when the source was never
 // parsed — the frontend hook surfaces that as an error (→ legacy/unparsed UI).
@@ -163,7 +185,7 @@ export interface ParseStatusResponse {
   parser_version?: string
   block_count?: number
   page_count?: number
-  section_index?: unknown[]
+  section_index?: SectionIndexEntry[]
   error?: string
 }
 

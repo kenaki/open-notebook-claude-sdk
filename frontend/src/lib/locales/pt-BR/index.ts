@@ -513,6 +513,17 @@ export const ptBR = {
       groupBySection: "Agrupar por seção",
       unsectioned: "Sem seção",
     },
+    reader: {
+      tab: "Leitura",
+      disabledTooltip: "Este documento ainda não foi dividido em blocos. Reprocesse para ativar a visualização de leitura.",
+      notReady: "Este documento ainda não foi analisado.",
+      outline: "Sumário",
+      untitledSection: "Seção sem título",
+      page: "p. {page}",
+      figureAlt: "Figura",
+      figureMissing: "Imagem da figura indisponível",
+      empty: "Nada para mostrar ainda.",
+    },
   },
   chat: {
     referencedHighlights: "Destaques referenciados",

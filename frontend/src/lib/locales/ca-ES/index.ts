@@ -513,6 +513,17 @@ export const caES = {
       groupBySection: "Agrupa per secció",
       unsectioned: "Sense secció",
     },
+    reader: {
+      tab: "Lectura",
+      disabledTooltip: "Aquest document encara no s'ha dividit en blocs. Torna'l a processar per activar la vista de lectura.",
+      notReady: "Aquest document encara no s'ha analitzat.",
+      outline: "Esquema",
+      untitledSection: "Secció sense títol",
+      page: "p. {page}",
+      figureAlt: "Figura",
+      figureMissing: "Imatge de la figura no disponible",
+      empty: "Encara no hi ha res a mostrar.",
+    },
   },
   chat: {
     referencedHighlights: "Subratllats referenciats",

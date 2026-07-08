@@ -513,6 +513,17 @@ export const trTR = {
       groupBySection: "Bölüme göre grupla",
       unsectioned: "Bölümsüz",
     },
+    reader: {
+      tab: "Okuyucu",
+      disabledTooltip: "Bu belge henüz bloklara ayrıştırılmadı. Okuyucu görünümünü etkinleştirmek için yeniden işleyin.",
+      notReady: "Bu belge henüz ayrıştırılmadı.",
+      outline: "Ana hat",
+      untitledSection: "Başlıksız bölüm",
+      page: "s. {page}",
+      figureAlt: "Şekil",
+      figureMissing: "Şekil görseli kullanılamıyor",
+      empty: "Henüz gösterilecek bir şey yok.",
+    },
   },
   chat: {
     referencedHighlights: "Başvurulan vurgular",

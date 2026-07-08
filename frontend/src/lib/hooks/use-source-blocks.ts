@@ -4,6 +4,7 @@ import type {
   Annotation,
   AnnotationRect,
   Block,
+  BlockSpanResponse,
   PageBlocksResponse,
   ParseStatusResponse,
 } from '@/lib/types/api'
@@ -28,6 +29,10 @@ export const SOURCE_BLOCK_KEYS = {
     ['sources', sourceId, 'blocks', 'page', page] as const,
   block: (sourceId: string, seq: number) =>
     ['sources', sourceId, 'blocks', 'seq', seq] as const,
+  // `gen` in the key (not invalidation) means a re-parse naturally gets a
+  // fresh cache entry instead of serving stale span content under the old key.
+  blockSpan: (sourceId: string, gen: number, startPage: number, endPage: number) =>
+    ['sources', sourceId, 'blocks', 'span', gen, startPage, endPage] as const,
 }
 
 /**
@@ -90,6 +95,45 @@ export function useBlock(
   return useQuery({
     queryKey: SOURCE_BLOCK_KEYS.block(sourceId ?? '', seq ?? -1),
     queryFn: () => sourcesApi.getBlock(sourceId as string, seq as number),
+    enabled: ready && (options?.enabled ?? true),
+    staleTime: Infinity,
+    retry: false,
+    meta: { silent: true },
+  })
+}
+
+/**
+ * One page-span of blocks with full text (db-design §3a) — the data primitive
+ * behind the markdown reader (D6). Pass `gen` from `useParseStatus` so the
+ * cache key naturally busts on a re-parse (a new generation gets a fresh key
+ * instead of needing an invalidation). Long-lived cache — a parsed
+ * generation's span content never changes. The reader loads several spans as
+ * the user scrolls (see ReaderView) via `useQueries` sharing this same query
+ * key/fn shape, so a span fetched here and one prefetched there dedupe.
+ */
+export function useBlockSpan(
+  sourceId?: string,
+  gen?: number,
+  startPage?: number,
+  endPage?: number,
+  options?: { enabled?: boolean }
+): UseQueryResult<BlockSpanResponse> {
+  const ready =
+    !!sourceId &&
+    typeof gen === 'number' &&
+    typeof startPage === 'number' &&
+    typeof endPage === 'number' &&
+    startPage >= 1 &&
+    endPage >= startPage
+  return useQuery({
+    queryKey: SOURCE_BLOCK_KEYS.blockSpan(
+      sourceId ?? '',
+      gen ?? -1,
+      startPage ?? 0,
+      endPage ?? 0
+    ),
+    queryFn: () =>
+      sourcesApi.getBlockSpan(sourceId as string, startPage as number, endPage as number),
     enabled: ready && (options?.enabled ?? true),
     staleTime: Infinity,
     retry: false,

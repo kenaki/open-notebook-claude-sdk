@@ -40,6 +40,7 @@ import { SourceContentTab } from './SourceContentTab'
 import { SourceInsightsTab } from './SourceInsightsTab'
 import { SourceDetailsTab } from './SourceDetailsTab'
 import { PDFViewer } from '@/components/common/PDFViewer'
+import { ReaderView } from '@/components/source/reader/ReaderView'
 import type { SourceDetailResponse, ParseStatusResponse } from '@/lib/types/api'
 
 /** Returns true when the source's uploaded file is a PDF. */
@@ -227,6 +228,9 @@ export function SourceDetailContent({
   // Only PDFs carry a block-parse lifecycle; disable the poll for other sources.
   const isPdf = source ? isPdfAsset(source) : false
   const parseStatus = useParseStatus(isPdf ? sourceId : undefined)
+  // Reader tab (pdf-block-ingestion D6) is only usable once the block
+  // substrate is parsed for this source's current generation.
+  const readerReady = parseStatus.isSuccess
   const reparseMutation = useMutation({
     mutationFn: () => sourcesApi.reparse(sourceId),
     onSuccess: () => {
@@ -369,6 +373,24 @@ export function SourceDetailContent({
       {isPdfAsset(source) && (
         <TabsTrigger value="pdf">{t('sources.viewPdf')}</TabsTrigger>
       )}
+      {isPdfAsset(source) && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            {/* A disabled TabsTrigger gets pointer-events:none, so hover hit-
+                testing falls through to this wrapping span — give it a real
+                (flex) box, matching the trigger's own flex-1 sizing, so the
+                tooltip still shows over the disabled area. */}
+            <span className="flex flex-1">
+              <TabsTrigger value="reader" disabled={!readerReady}>
+                {t('sources.reader.tab')}
+              </TabsTrigger>
+            </span>
+          </TooltipTrigger>
+          {!readerReady && (
+            <TooltipContent className="max-w-56">{t('sources.reader.disabledTooltip')}</TooltipContent>
+          )}
+        </Tooltip>
+      )}
     </>
   )
 
@@ -428,6 +450,12 @@ export function SourceDetailContent({
               onChatAboutHighlights={onChatAboutHighlights}
             />
           )}
+        </TabsContent>
+      )}
+
+      {isPdfAsset(source) && (
+        <TabsContent value="reader" forceMount className="mt-3 flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
+          {mountedTabs.has('reader') && readerReady && <ReaderView sourceId={source.id} />}
         </TabsContent>
       )}
     </>
@@ -554,7 +582,7 @@ export function SourceDetailContent({
       {/* Tabs Content */}
       <div className="flex min-h-0 flex-1 flex-col px-2">
         <Tabs value={activeTab} onValueChange={handleTabChange} className="flex min-h-0 w-full flex-1 flex-col">
-          <TabsList className={`grid w-full ${isPdfAsset(source) ? 'grid-cols-4' : 'grid-cols-3'} flex-shrink-0`}>
+          <TabsList className={`grid w-full ${isPdfAsset(source) ? 'grid-cols-5' : 'grid-cols-3'} flex-shrink-0`}>
             {tabTriggers}
           </TabsList>
           {tabPanels}

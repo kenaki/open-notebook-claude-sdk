@@ -513,6 +513,17 @@ export const bnIN = {
       groupBySection: "বিভাগ অনুযায়ী গোষ্ঠীবদ্ধ করুন",
       unsectioned: "বিভাগহীন",
     },
+    reader: {
+      tab: "পাঠক",
+      disabledTooltip: "এই নথিটি এখনও ব্লকে পার্স করা হয়নি। পাঠক ভিউ চালু করতে পুনরায় প্রসেস করুন।",
+      notReady: "এই নথিটি এখনও পার্স করা হয়নি।",
+      outline: "রূপরেখা",
+      untitledSection: "শিরোনামহীন বিভাগ",
+      page: "পৃ. {page}",
+      figureAlt: "চিত্র",
+      figureMissing: "চিত্রের ছবি অনুপলব্ধ",
+      empty: "এখনও দেখানোর মতো কিছু নেই।",
+    },
   },
   chat: {
     referencedHighlights: "উল্লেখিত হাইলাইট",

@@ -513,6 +513,17 @@ export const ruRU = {
       groupBySection: "Группировать по разделам",
       unsectioned: "Без раздела",
     },
+    reader: {
+      tab: "Читалка",
+      disabledTooltip: "Этот документ ещё не разобран на блоки. Перезапустите обработку, чтобы включить режим чтения.",
+      notReady: "Этот документ ещё не разобран.",
+      outline: "Оглавление",
+      untitledSection: "Раздел без названия",
+      page: "с. {page}",
+      figureAlt: "Рисунок",
+      figureMissing: "Изображение рисунка недоступно",
+      empty: "Пока нечего показать.",
+    },
   },
   chat: {
     referencedHighlights: "Упомянутые выделения",

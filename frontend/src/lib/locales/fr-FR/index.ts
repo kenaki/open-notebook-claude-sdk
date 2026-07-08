@@ -513,6 +513,17 @@ export const frFR = {
       groupBySection: "Grouper par section",
       unsectioned: "Sans section",
     },
+    reader: {
+      tab: "Lecture",
+      disabledTooltip: "Ce document n'a pas encore été découpé en blocs. Relancez le traitement pour activer la vue de lecture.",
+      notReady: "Ce document n'a pas encore été analysé.",
+      outline: "Plan",
+      untitledSection: "Section sans titre",
+      page: "p. {page}",
+      figureAlt: "Figure",
+      figureMissing: "Image de la figure indisponible",
+      empty: "Rien à afficher pour l'instant.",
+    },
   },
   chat: {
     referencedHighlights: "Surlignages référencés",

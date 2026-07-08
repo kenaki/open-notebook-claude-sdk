@@ -513,6 +513,17 @@ export const zhCN = {
       groupBySection: "按章节分组",
       unsectioned: "无章节",
     },
+    reader: {
+      tab: "阅读视图",
+      disabledTooltip: "该文档尚未解析为区块。请重新处理以启用阅读视图。",
+      notReady: "该文档尚未解析。",
+      outline: "大纲",
+      untitledSection: "未命名章节",
+      page: "第 {page} 页",
+      figureAlt: "图",
+      figureMissing: "图片不可用",
+      empty: "暂无内容可显示。",
+    },
   },
   chat: {
     referencedHighlights: "引用的高亮",

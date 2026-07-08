@@ -513,6 +513,17 @@ export const itIT = {
       groupBySection: "Raggruppa per sezione",
       unsectioned: "Senza sezione",
     },
+    reader: {
+      tab: "Lettura",
+      disabledTooltip: "Questo documento non è ancora stato suddiviso in blocchi. Rielaboralo per attivare la vista di lettura.",
+      notReady: "Questo documento non è ancora stato analizzato.",
+      outline: "Struttura",
+      untitledSection: "Sezione senza titolo",
+      page: "p. {page}",
+      figureAlt: "Figura",
+      figureMissing: "Immagine della figura non disponibile",
+      empty: "Ancora nulla da mostrare.",
+    },
   },
   chat: {
     referencedHighlights: "Evidenziazioni referenziate",

@@ -513,6 +513,17 @@ export const plPL = {
       groupBySection: "Grupuj według sekcji",
       unsectioned: "Bez sekcji",
     },
+    reader: {
+      tab: "Czytnik",
+      disabledTooltip: "Ten dokument nie został jeszcze podzielony na bloki. Przetwórz go ponownie, aby włączyć widok czytnika.",
+      notReady: "Ten dokument nie został jeszcze przeanalizowany.",
+      outline: "Konspekt",
+      untitledSection: "Sekcja bez tytułu",
+      page: "s. {page}",
+      figureAlt: "Rysunek",
+      figureMissing: "Obraz rysunku niedostępny",
+      empty: "Jeszcze nic do wyświetlenia.",
+    },
   },
   chat: {
     referencedHighlights: "Przywołane zaznaczenia",

@@ -516,6 +516,17 @@ export const deDE = {
       groupBySection: "Nach Abschnitt gruppieren",
       unsectioned: "Ohne Abschnitt",
     },
+    reader: {
+      tab: "Leseansicht",
+      disabledTooltip: "Dieses Dokument wurde noch nicht in Blöcke zerlegt. Verarbeiten Sie es erneut, um die Leseansicht zu aktivieren.",
+      notReady: "Dieses Dokument wurde noch nicht analysiert.",
+      outline: "Gliederung",
+      untitledSection: "Unbenannter Abschnitt",
+      page: "S. {page}",
+      figureAlt: "Abbildung",
+      figureMissing: "Abbildung nicht verfügbar",
+      empty: "Noch nichts anzuzeigen.",
+    },
   },
   chat: {
     referencedHighlights: "Referenzierte Markierungen",

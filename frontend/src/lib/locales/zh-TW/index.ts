@@ -513,6 +513,17 @@ export const zhTW = {
       groupBySection: "依章節分組",
       unsectioned: "無章節",
     },
+    reader: {
+      tab: "閱讀檢視",
+      disabledTooltip: "此文件尚未解析為區塊。請重新處理以啟用閱讀檢視。",
+      notReady: "此文件尚未解析。",
+      outline: "大綱",
+      untitledSection: "未命名章節",
+      page: "第 {page} 頁",
+      figureAlt: "圖",
+      figureMissing: "圖片無法使用",
+      empty: "目前沒有內容可顯示。",
+    },
   },
   chat: {
     referencedHighlights: "引用的標註",

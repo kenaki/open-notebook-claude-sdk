@@ -513,6 +513,17 @@ export const esES = {
       groupBySection: "Agrupar por sección",
       unsectioned: "Sin sección",
     },
+    reader: {
+      tab: "Lectura",
+      disabledTooltip: "Este documento aún no se ha dividido en bloques. Vuelve a procesarlo para activar la vista de lectura.",
+      notReady: "Este documento aún no se ha analizado.",
+      outline: "Esquema",
+      untitledSection: "Sección sin título",
+      page: "p. {page}",
+      figureAlt: "Figura",
+      figureMissing: "Imagen de la figura no disponible",
+      empty: "Todavía no hay nada que mostrar.",
+    },
   },
   chat: {
     referencedHighlights: "Resaltados referenciados",

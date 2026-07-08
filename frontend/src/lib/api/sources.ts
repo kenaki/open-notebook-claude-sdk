@@ -14,7 +14,8 @@ import {
   UpdateAnnotationRequest,
   Block,
   PageBlocksResponse,
-  ParseStatusResponse
+  ParseStatusResponse,
+  BlockSpanResponse
 } from '@/lib/types/api'
 
 export const sourcesApi = {
@@ -137,6 +138,15 @@ export const sourcesApi = {
   // One full block (point-get) including text/latex/section_path/table_data.
   getBlock: async (id: string, seq: number) => {
     return get<Block>(`/sources/${id}/blocks/${seq}`)
+  },
+
+  // pdf-block-ingestion Track D6: a page-span of blocks with full text, for
+  // the markdown reader. The server clamps to at most 10 pages and echoes the
+  // clamped bounds back — see BlockSpanResponse.
+  getBlockSpan: async (id: string, startPage: number, endPage: number) => {
+    return get<BlockSpanResponse>(`/sources/${id}/blocks/span`, {
+      params: { start_page: startPage, end_page: endPage },
+    })
   },
 
   // pdf-block-ingestion Track C2 (Decision #8): explicitly rebuild the block

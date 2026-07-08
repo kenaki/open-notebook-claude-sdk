@@ -513,6 +513,17 @@ export const enUS = {
       groupBySection: "Group by section",
       unsectioned: "Unsectioned",
     },
+    reader: {
+      tab: "Reader",
+      disabledTooltip: "This document hasn't been parsed into blocks yet. Re-process to enable the reader view.",
+      notReady: "This document hasn't been parsed yet.",
+      outline: "Outline",
+      untitledSection: "Untitled section",
+      page: "p. {page}",
+      figureAlt: "Figure",
+      figureMissing: "Figure image unavailable",
+      empty: "Nothing to show yet.",
+    },
   },
   chat: {
     referencedHighlights: "Referenced highlights",
