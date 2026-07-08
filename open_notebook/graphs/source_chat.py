@@ -1,13 +1,14 @@
+import json
 import sqlite3
-from typing import Annotated, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional, Tuple
 
 from ai_prompter import Prompter
 from langchain_core.messages import AIMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
-from loguru import logger
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
+from loguru import logger
 from typing_extensions import TypedDict
 
 from open_notebook.ai.claude_agent import (
@@ -70,6 +71,96 @@ def build_source_agent_context(source) -> str:
     return f"{_SOURCE_AGENT_INDEX_HEADER}\n\n{line}\n\n{_SOURCE_AGENT_INDEX_HINT}"
 
 
+# --- Structured chat references (Chunk D2) -----------------------------------
+# A source-chat message can carry N annotation references. The API router
+# (which owns the send-message endpoint + DB access) resolves each id into a
+# structured context section + a compact ``annotation_refs`` list, then piggybacks
+# both onto the submitted message content through the ``ANNOTATION_CTX_SENTINEL``
+# codec below. That is the ONLY router->worker channel available: the source
+# branch of ``commands/chat_commands.py`` (out of this track's ownership) forwards
+# only ``message`` / ``source_id`` / ``model_override`` into the graph state, so
+# the resolved refs ride inside ``message`` and this node lifts them back out
+# BEFORE the LLM turn — injecting the context into both prompt paths and stamping
+# ``annotation_refs`` onto the (checkpointed) human message so the session-GET
+# response can render pills. If a cleaner channel is later added to the command
+# (an ``annotation_ids`` field on ChatCompletionInput), this codec can be dropped.
+
+# Symbol-for-record-separator x2 — vanishingly unlikely to occur in user prose,
+# so partitioning the message content on it is unambiguous.
+ANNOTATION_CTX_SENTINEL = "\n␞␞ANNOTATION_CONTEXT␞␞\n"
+
+
+def annotation_block_content(block: Dict[str, Any], quote_fallback: Optional[str]) -> str:
+    """Render one anchored block into its AI-context string (db-design §3b).
+
+    ``equation`` -> latex; ``figure``/``table`` -> ``figure: <caption>``; every
+    other type -> its text. Falls back to the annotation's stored quote (then a
+    typed placeholder) when the block carries no usable text. Pure."""
+    btype = (block or {}).get("type")
+    if btype == "equation":
+        return (
+            (block.get("latex") or block.get("text") or quote_fallback or "").strip()
+            or "(equation)"
+        )
+    if btype in ("figure", "table"):
+        caption = (block.get("text") or "").strip()
+        return f"figure: {caption}" if caption else "figure: (image)"
+    return (block.get("text") or quote_fallback or "").strip() or "(no text)"
+
+
+def build_annotation_context_section(resolved: List[Dict[str, Any]]) -> str:
+    """Build the ``REFERENCED ANNOTATION n`` context block from resolved refs.
+
+    ``resolved`` is a list of ``{section_path, content, note}`` dicts (already
+    fetched from the block substrate / quote fallback by the router). Returns ""
+    for an empty list so the no-refs path stays byte-identical. Pure."""
+    if not resolved:
+        return ""
+    lines = [
+        "REFERENCED ANNOTATIONS — the user is explicitly pointing you at these "
+        "passages of this source. Ground your answer in them and cite them when "
+        "relevant:"
+    ]
+    for i, ref in enumerate(resolved, 1):
+        section_path = ref.get("section_path") or []
+        crumb = " > ".join(str(s) for s in section_path) if section_path else "unsectioned"
+        content = (ref.get("content") or "").strip() or "(no text)"
+        lines.append(f"\nREFERENCED ANNOTATION {i}: [{crumb}] {content}")
+        note = ref.get("note")
+        if note:
+            lines.append(f"  User note: {note}")
+    return "\n".join(lines)
+
+
+def encode_annotation_payload(context: str, refs: List[Dict[str, Any]]) -> str:
+    """Encode the resolved section + refs into a sentinel-delimited trailer.
+
+    Appended to the user's message content by the router; :func:`extract_annotation_payload`
+    reverses it in the graph node. Returns "" when there is nothing to carry."""
+    if not context and not refs:
+        return ""
+    return ANNOTATION_CTX_SENTINEL + json.dumps(
+        {"context": context, "refs": refs}, ensure_ascii=False
+    )
+
+
+def extract_annotation_payload(
+    content: Any,
+) -> Tuple[Any, str, Optional[List[Dict[str, Any]]]]:
+    """Split a message content string into (clean_content, context, refs).
+
+    Inverse of :func:`encode_annotation_payload`. Non-string content or content
+    without the sentinel returns ``(content, "", None)`` unchanged. Pure."""
+    if not isinstance(content, str) or ANNOTATION_CTX_SENTINEL not in content:
+        return content, "", None
+    head, _, tail = content.partition(ANNOTATION_CTX_SENTINEL)
+    try:
+        data = json.loads(tail)
+    except Exception:
+        return head, "", None
+    return head, (data.get("context") or ""), (data.get("refs") or None)
+
+
 def _slim_source_agent_payload(payload: list, prompt_data: Optional[dict]) -> list:
     """Swap the ContextBuilder blob in ``payload[0]`` for the slim source index.
 
@@ -90,7 +181,14 @@ def _slim_source_agent_payload(payload: list, prompt_data: Optional[dict]) -> li
         ):
             return payload
         slim_data = dict(prompt_data)  # type: ignore[arg-type]
-        slim_data["context"] = build_source_agent_context(source)
+        # Referenced-annotation context is NOT retrievable via the agent's MCP
+        # tools (the anchor lives only in this turn), so it must survive the blob
+        # swap — append it to the slim source index (Chunk D2).
+        annotation_ctx = (prompt_data or {}).get("annotation_context") or ""
+        slim_context = build_source_agent_context(source)
+        if annotation_ctx:
+            slim_context = f"{slim_context}\n\n{annotation_ctx}"
+        slim_data["context"] = slim_context
         slim_prompt = Prompter(prompt_template="source_chat/system").render(
             data=slim_data
         )
@@ -211,14 +309,49 @@ def _call_model_with_source_context_inner(
             insights.append(insight)
             context_indicators["insights"].append(insight.id)
 
+    # Lift any structured annotation references the router piggybacked onto the
+    # latest human message (Chunk D2). ``annotation_ctx`` is injected into BOTH
+    # prompt paths; ``annotation_refs`` is stamped back onto the human message so
+    # the checkpoint (and session-GET) can render reference pills. The turn sent
+    # to the LLM uses the CLEAN content (sentinel stripped).
+    messages = state.get("messages", [])
+    annotation_ctx = ""
+    updated_human = None
+    payload_messages = messages
+    if messages:
+        last = messages[-1]
+        clean_content, annotation_ctx, annotation_refs = extract_annotation_payload(
+            getattr(last, "content", "")
+        )
+        if annotation_ctx or annotation_refs:
+            cleaned_human = last.model_copy(
+                update={
+                    "content": clean_content,
+                    "additional_kwargs": {
+                        **(getattr(last, "additional_kwargs", None) or {}),
+                        "annotation_refs": annotation_refs or [],
+                    },
+                }
+            )
+            # The LLM turn ALWAYS sees the sentinel-stripped content.
+            payload_messages = messages[:-1] + [cleaned_human]
+            # Re-emit for the checkpoint (add_messages replace-by-id) only when the
+            # message already has a stable id — otherwise a re-emit would append a
+            # duplicate instead of replacing.
+            if getattr(last, "id", None):
+                updated_human = cleaned_human
+
     # Format context for the prompt
     formatted_context = _format_source_context(context_data)
+    if annotation_ctx:
+        formatted_context = f"{formatted_context}\n\n{annotation_ctx}"
 
     # Build prompt data for the template
     prompt_data = {
         "source": source.model_dump() if source else None,
         "insights": [insight.model_dump() for insight in insights] if insights else [],
         "context": formatted_context,
+        "annotation_context": annotation_ctx,
         "context_indicators": context_indicators,
     }
 
@@ -226,7 +359,7 @@ def _call_model_with_source_context_inner(
     system_prompt = Prompter(prompt_template="source_chat/system").render(
         data=prompt_data
     )
-    payload = [SystemMessage(content=system_prompt)] + state.get("messages", [])
+    payload = [SystemMessage(content=system_prompt)] + payload_messages
 
     # Resolve the selected/default model id. Provisioning + invocation happen
     # inside _generate_source_chat_message so the ``claude_agent`` sentinel routes
@@ -248,9 +381,14 @@ def _call_model_with_source_context_inner(
     cleaned_content = clean_thinking_content(content)
     cleaned_message = ai_message.model_copy(update={"content": cleaned_content})
 
-    # Update state with context information
+    # Update state with context information. When the turn carried annotation
+    # references, re-emit the (same-id) human message so add_messages replaces it
+    # with the sentinel-stripped content + persisted ``annotation_refs``.
+    messages_update = (
+        [updated_human, cleaned_message] if updated_human else cleaned_message
+    )
     return {
-        "messages": cleaned_message,
+        "messages": messages_update,
         "source": source,
         "insights": insights,
         "context": formatted_context,

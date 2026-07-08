@@ -8,9 +8,22 @@ from pydantic import BaseModel, Field
 
 from api.command_service import CommandService
 from api.routers._helpers import ensure_prefix, get_or_404
-from open_notebook.database.repository import ensure_record_id, repo_query
-from open_notebook.domain.notebook import ChatSession, Source
-from open_notebook.graphs.source_chat import source_chat_graph as source_chat_graph
+from open_notebook.database.repository import (
+    ensure_record_id,
+    repo_query,
+    repo_relate,
+)
+from open_notebook.domain import blocks
+from open_notebook.domain.notebook import ChatSession, Source, SourceAnnotation
+from open_notebook.exceptions import NotFoundError
+from open_notebook.graphs.source_chat import (
+    annotation_block_content,
+    build_annotation_context_section,
+    encode_annotation_payload,
+)
+from open_notebook.graphs.source_chat import (
+    source_chat_graph as source_chat_graph,
+)
 from open_notebook.utils.graph_utils import get_session_message_count
 
 router = APIRouter()
@@ -30,11 +43,25 @@ class UpdateSourceChatSessionRequest(BaseModel):
         None, description="Model override for this session"
     )
 
+class AnnotationRef(BaseModel):
+    """A structured annotation reference attached to a chat message (Chunk D2).
+
+    Surfaced on the session-GET payload so the UI can render reference pills."""
+
+    id: str = Field(..., description="Annotation ID")
+    quote: Optional[str] = Field(None, description="Highlighted quote text")
+    block_seq: Optional[int] = Field(None, description="Anchored block seq (None if legacy)")
+    page: Optional[int] = Field(None, description="1-indexed page of the annotation")
+
+
 class ChatMessage(BaseModel):
     id: str = Field(..., description="Message ID")
     type: str = Field(..., description="Message type (human|ai)")
     content: str = Field(..., description="Message content")
     timestamp: Optional[str] = Field(None, description="Message timestamp")
+    annotation_refs: Optional[List[AnnotationRef]] = Field(
+        None, description="Structured annotation references carried by this message"
+    )
 
 
 class ContextIndicator(BaseModel):
@@ -74,6 +101,13 @@ class SendMessageRequest(BaseModel):
     model_override: Optional[str] = Field(
         None, description="Optional model override for this message"
     )
+    annotation_ids: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Annotation IDs the user is referencing; each is resolved into the "
+            "AI context and recorded as a cites_annotation edge (Chunk D2)."
+        ),
+    )
 
 class SuccessResponse(BaseModel):
     success: bool = Field(True, description="Operation success status")
@@ -83,6 +117,86 @@ class SuccessResponse(BaseModel):
 class SendSourceChatJobResponse(BaseModel):
     job_id: str = Field(..., description="Background job ID")
     session_id: str = Field(..., description="Chat session ID")
+
+
+# Cap referenced annotations per message so a tag-ask over a large tag can't blow
+# the agent context (Track D Open Question Q-tag-ask-limit; default 10).
+_MAX_ANNOTATION_REFS = 10
+
+
+async def _relate_citation(full_session_id: str, annotation_id: str) -> None:
+    """Record a ``chat_session->cites_annotation->source_annotation`` edge once.
+
+    SELECT-checks first so re-referencing the same annotation across turns does
+    not pile up duplicate edges (db-design §2.4 / §3b)."""
+    existing = await repo_query(
+        "SELECT id FROM cites_annotation WHERE in = $s AND out = $a LIMIT 1",
+        {"s": ensure_record_id(full_session_id), "a": ensure_record_id(annotation_id)},
+    )
+    if not existing:
+        await repo_relate(full_session_id, "cites_annotation", annotation_id)
+
+
+async def _resolve_annotations_for_chat(
+    source: Source, full_session_id: str, annotation_ids: List[str]
+) -> tuple[str, List[dict]]:
+    """Resolve referenced annotations into (context_section, annotation_refs).
+
+    For each annotation that belongs to ``source`` (invalid/foreign ids are
+    skipped, not fatal): records the ``cites_annotation`` edge, then — if the
+    annotation is block-anchored — fetches its block window (radius 3, one round
+    trip, db-design §3b) and renders the anchored block's content; otherwise falls
+    back to the stored quote + page. Returns the structured context block for the
+    prompt and a compact refs list for the UI pills.
+    """
+    src_id = str(source.id)
+    src_key = src_id.split(":", 1)[1] if ":" in src_id else src_id
+    parse_gen = source.parse_generation
+
+    resolved: List[dict] = []
+    refs: List[dict] = []
+    for raw_id in annotation_ids[:_MAX_ANNOTATION_REFS]:
+        annotation_id = ensure_prefix(raw_id, "source_annotation")
+        try:
+            annotation = await SourceAnnotation.get(annotation_id)
+        except NotFoundError:
+            logger.warning(f"Skipping unknown annotation ref {annotation_id}")
+            continue
+        if str(annotation.source) != src_id:
+            logger.warning(
+                f"Skipping annotation {annotation_id}: not part of source {src_id}"
+            )
+            continue
+
+        await _relate_citation(full_session_id, annotation_id)
+
+        item = {
+            "section_path": [],
+            "content": annotation.quote or "",
+            "note": annotation.note,
+        }
+        if annotation.block_seq is not None and parse_gen is not None:
+            gen = annotation.anchor_gen if annotation.anchor_gen is not None else parse_gen
+            window = await blocks.get_window(
+                src_key, gen, annotation.block_seq, radius=3
+            )
+            block = next(
+                (b for b in window if b.get("seq") == annotation.block_seq), None
+            )
+            if block:
+                item["section_path"] = block.get("section_path") or []
+                item["content"] = annotation_block_content(block, annotation.quote)
+        resolved.append(item)
+        refs.append(
+            {
+                "id": annotation.id,
+                "quote": annotation.quote,
+                "block_seq": annotation.block_seq,
+                "page": annotation.page,
+            }
+        )
+
+    return build_annotation_context_section(resolved), refs
 
 
 @router.post(
@@ -134,36 +248,38 @@ async def get_source_chat_sessions(source_id: str = Path(..., description="Sourc
         full_source_id = ensure_prefix(source_id, "source")
         source = await get_or_404(Source, full_source_id, "Source")
 
-        # Get sessions that refer to this source - first get relations, then sessions
+        # Get sessions that refer to this source - first get relations, then
+        # fetch ALL session rows in ONE query (was an N+1 SELECT-per-session).
+        # The per-session checkpoint reads below stay (cheap local SQLite).
         session_ids = await ChatSession.get_ids_for_source(full_source_id)
+        rid_list = [ensure_record_id(str(sid)) for sid in session_ids if sid]
+
+        session_rows = []
+        if rid_list:
+            session_rows = await repo_query(
+                "SELECT * FROM chat_session WHERE id IN $ids", {"ids": rid_list}
+            )
 
         sessions = []
-        for session_id_raw in session_ids:
-            if session_id_raw:
-                session_id = str(session_id_raw)
+        for session_data in session_rows:
+            session_id = str(session_data.get("id"))
 
-                session_result = await repo_query(
-                    "SELECT * FROM $id", {"id": ensure_record_id(session_id)}
+            # Get message count from LangGraph state (per-session checkpoint load)
+            msg_count = await get_session_message_count(
+                source_chat_graph, session_id
+            )
+
+            sessions.append(
+                SourceChatSessionResponse(
+                    id=session_data.get("id") or "",
+                    title=session_data.get("title") or "Untitled Session",
+                    source_id=source_id,
+                    model_override=session_data.get("model_override"),
+                    created=str(session_data.get("created")),
+                    updated=str(session_data.get("updated")),
+                    message_count=msg_count,
                 )
-                if session_result and len(session_result) > 0:
-                    session_data = session_result[0]
-
-                    # Get message count from LangGraph state
-                    msg_count = await get_session_message_count(
-                        source_chat_graph, session_id
-                    )
-
-                    sessions.append(
-                        SourceChatSessionResponse(
-                            id=session_data.get("id") or "",
-                            title=session_data.get("title") or "Untitled Session",
-                            source_id=source_id,
-                            model_override=session_data.get("model_override"),
-                            created=str(session_data.get("created")),
-                            updated=str(session_data.get("updated")),
-                            message_count=msg_count,
-                        )
-                    )
+            )
 
         # Sort sessions by created date (newest first)
         sessions.sort(key=lambda x: x.created, reverse=True)
@@ -215,6 +331,16 @@ async def get_source_chat_session(
             # Extract messages
             if "messages" in thread_state.values:
                 for msg in thread_state.values["messages"]:
+                    # Structured annotation references (Chunk D2) ride in the
+                    # human message's additional_kwargs; surface them for pills.
+                    raw_refs = (
+                        getattr(msg, "additional_kwargs", None) or {}
+                    ).get("annotation_refs")
+                    annotation_refs = (
+                        [AnnotationRef(**ref) for ref in raw_refs]
+                        if raw_refs
+                        else None
+                    )
                     messages.append(
                         ChatMessage(
                             id=getattr(msg, "id", f"msg_{len(messages)}"),
@@ -223,6 +349,7 @@ async def get_source_chat_session(
                             if hasattr(msg, "content")
                             else str(msg),
                             timestamp=None,  # LangChain messages don't have timestamps by default
+                            annotation_refs=annotation_refs,
                         )
                     )
 
@@ -354,9 +481,9 @@ async def send_message_to_source_chat(
 ):
     """Submit a source-chat message to the background worker; returns job_id + session_id."""
     try:
-        # Verify source exists
+        # Verify source exists (need the full record for parse_generation below)
         full_source_id = ensure_prefix(source_id, "source")
-        await get_or_404(Source, full_source_id, "Source")
+        source = await get_or_404(Source, full_source_id, "Source")
 
         # Verify session exists and is related to source
         full_session_id = ensure_prefix(session_id, "chat_session")
@@ -377,12 +504,25 @@ async def send_message_to_source_chat(
             session, "model_override", None
         )
 
+        # Resolve any structured annotation references (Chunk D2): records the
+        # cites_annotation edges and builds the AI-context section + refs, then
+        # piggybacks both onto the message content (the only router->worker
+        # channel — the chat_completion source branch forwards only `message`).
+        message_payload = request.message
+        if request.annotation_ids:
+            annotation_ctx, annotation_refs = await _resolve_annotations_for_chat(
+                source, full_session_id, request.annotation_ids
+            )
+            message_payload = request.message + encode_annotation_payload(
+                annotation_ctx, annotation_refs
+            )
+
         job_id = await CommandService.submit_command_job(
             "open_notebook",
             "chat_completion",
             {
                 "session_id": full_session_id,
-                "message": request.message,
+                "message": message_payload,
                 "model_override": model_override,
                 "kind": "source",
                 "source_id": full_source_id,
