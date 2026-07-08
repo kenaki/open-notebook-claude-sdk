@@ -236,6 +236,29 @@ async def download_source_file(source_id: str):
         raise HTTPException(status_code=500, detail="Failed to download source file")
 
 
+@router.get("/sources/{source_id}/full-text")
+async def get_source_full_text(source_id: str):
+    """Return only the source's full_text (regenerated whole-book markdown).
+
+    Kept off the GET /sources/{id} payload (E3) — the content tab fetches this
+    lazily only when a source has no chapter sections. Targeted SELECT so we
+    never load asset/embeddings/status just to read the text.
+    """
+    try:
+        rows = await repo_query(
+            "SELECT full_text FROM $sid",
+            {"sid": ensure_record_id(source_id)},
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail="Source not found")
+        return {"full_text": rows[0].get("full_text")}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching full_text for source {source_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error fetching source full text")
+
+
 @router.get("/sources/{source_id}/status", response_model=SourceStatusResponse)
 async def get_source_status(source_id: str):
     """Get processing status for a source."""

@@ -3,6 +3,8 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
 import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Link as LinkIcon, ExternalLink, Youtube } from 'lucide-react'
@@ -12,7 +14,10 @@ import { SourceDetailResponse, SourceSectionNode } from '@/lib/types/api'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { SourceTOC, getSectionPageRangeLabel, type SectionActionKind } from './SourceTOC'
 import { useSourceChat } from '@/lib/hooks/useSourceChat'
+import { getApiUrl } from '@/lib/config'
 import { cn } from '@/lib/utils'
+
+const BLOCK_URL_PREFIX = 'block://'
 
 function getYouTubeVideoId(url: string): string | null {
   const patterns = [
@@ -92,7 +97,7 @@ export const SourceContentTab = memo(function SourceContentTab({
   // Document Foundation Track C (C3): chapter tree for chaptered sources (PDFs /
   // long documents — Decision #12). Outline-only fetch first (summary inline,
   // no content) — lightweight, drives the TOC and the has_sections gate.
-  const { data: sectionsData } = useQuery({
+  const { data: sectionsData, isFetched: sectionsFetched } = useQuery({
     queryKey: ['sections', source.id],
     queryFn: () => sourcesApi.getSections(source.id),
     enabled: Boolean(source.id),
@@ -100,6 +105,28 @@ export const SourceContentTab = memo(function SourceContentTab({
 
   const hasSections = Boolean(sectionsData?.has_sections)
   const outlineSections = useMemo(() => sectionsData?.sections ?? [], [sectionsData])
+
+  // E3: full_text is no longer on the source payload. For non-chaptered sources
+  // the content tab lazy-loads the regenerated markdown from the dedicated
+  // endpoint — only once we know there are no sections (avoids fetching a
+  // whole book for chaptered PDFs that render via the section tree instead).
+  const { data: fullTextData, isLoading: fullTextLoading } = useQuery({
+    queryKey: ['sources', source.id, 'full-text'],
+    queryFn: () => sourcesApi.getFullText(source.id),
+    enabled: Boolean(source.id) && sectionsFetched && !hasSections,
+  })
+
+  // Resolved API base for rewriting block:// figure refs to their crop URL.
+  const [apiBase, setApiBase] = useState('')
+  useEffect(() => {
+    let active = true
+    getApiUrl()
+      .then((u) => active && setApiBase(u))
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [])
 
   // Full (cleaned) content is fetched only once we know sections exist
   // (Q-section-content-payload default: summary inline, content on demand) —
@@ -121,7 +148,9 @@ export const SourceContentTab = memo(function SourceContentTab({
 
   const activeSection = activeSectionId ? findSectionById(contentSections, activeSectionId) : undefined
   const activeSectionRange = activeSection ? getSectionPageRangeLabel(activeSection) : null
-  const isLoadingActiveContent = hasSections && contentLoading && !activeSection?.content
+  const isLoadingActiveContent = hasSections
+    ? contentLoading && !activeSection?.content
+    : fullTextLoading
 
   return (
     <Card>
@@ -209,8 +238,26 @@ export const SourceContentTab = memo(function SourceContentTab({
             ) : (
               <div className="prose prose-sm prose-neutral dark:prose-invert max-w-none prose-headings:font-semibold prose-a:text-blue-600 prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-p:mb-4 prose-p:leading-7 prose-li:mb-2">
                 <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
+                  remarkPlugins={[remarkGfm, remarkMath]}
+                  rehypePlugins={[rehypeKatex]}
                   components={{
+                    // block://<seq> figure refs resolve to the crop endpoint
+                    // (same base convention as chat/reader). Plain http(s) image
+                    // URLs pass through unchanged.
+                    img: ({ src, alt }) => {
+                      const resolved =
+                        typeof src === 'string' && src.startsWith(BLOCK_URL_PREFIX)
+                          ? `${apiBase}/api/sources/${source.id}/blocks/${src.slice(BLOCK_URL_PREFIX.length)}/image`
+                          : src
+                      return (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={resolved}
+                          alt={alt ?? ''}
+                          className="my-4 h-auto max-w-full rounded border border-border"
+                        />
+                      )
+                    },
                     p: ({ children }) => <p className="mb-4">{children}</p>,
                     h1: ({ children }) => <h1 className="text-2xl font-bold mt-6 mb-4">{children}</h1>,
                     h2: ({ children }) => <h2 className="text-xl font-bold mt-5 mb-3">{children}</h2>,
@@ -230,7 +277,7 @@ export const SourceContentTab = memo(function SourceContentTab({
                     td: ({ children }) => <td className="border border-border px-3 py-2">{children}</td>,
                   }}
                 >
-                  {(hasSections ? activeSection?.content : source.full_text) || t('sources.noContent')}
+                  {(hasSections ? activeSection?.content : fullTextData?.full_text) || t('sources.noContent')}
                 </ReactMarkdown>
               </div>
             )}

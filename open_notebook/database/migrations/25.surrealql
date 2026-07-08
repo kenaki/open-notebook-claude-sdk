@@ -1,0 +1,74 @@
+-- Migration 25: fn::text_search without search::highlight (db-design 6, waste 6/7).
+-- The final projection returns only id/parent_id/title/relevance, so highlight
+-- content was always discarded. Computing search::highlight over whole books is
+-- pure waste AND overflows on long full_text (position int overflow -> crash ->
+-- silent vector fallback). Dropping it keeps search::score (the relevance) and
+-- leaves the response shape IDENTICAL to migration 4.
+-- Comments live on full lines ONLY (the runner strips whole-line -- comments but
+-- flattens everything else to one line).
+
+DEFINE FUNCTION OVERWRITE fn::text_search($query_text: string, $match_count: int, $sources:bool, $show_notes:bool) {
+
+    let $source_title_search =
+        IF $sources {(
+            SELECT id, title,
+            id as parent_id,
+            math::max(search::score(1)) AS relevance
+            FROM source
+            WHERE title @1@ $query_text
+            GROUP BY id)}
+        ELSE { [] };
+
+    let $source_embedding_search =
+         IF $sources {(
+            SELECT source.id as id, source.title as title, source.id as parent_id, math::max(search::score(1)) AS relevance
+            FROM source_embedding
+            WHERE content @1@ $query_text
+            GROUP BY id)}
+        ELSE { [] };
+
+    let $source_full_search =
+         IF $sources {(
+            SELECT id, title, id as parent_id, math::max(search::score(1)) AS relevance
+            FROM source
+            WHERE full_text @1@ $query_text
+            GROUP BY id)}
+        ELSE { [] };
+
+    let $source_insight_search =
+         IF $sources {(
+             SELECT id, insight_type + " - " + (source.title OR '') as title, id as parent_id,  math::max(search::score(1)) AS relevance
+            FROM source_insight
+            WHERE content @1@ $query_text
+            GROUP BY id)}
+        ELSE { [] };
+
+    let $note_title_search =
+         IF $show_notes {(
+             SELECT id, title,  id as parent_id, math::max(search::score(1)) AS relevance
+            FROM note
+            WHERE title @1@ $query_text
+            GROUP BY id)}
+        ELSE { [] };
+
+     let $note_content_search =
+         IF $show_notes {(
+             SELECT id, title,  id as parent_id, math::max(search::score(1)) AS relevance
+            FROM note
+            WHERE content @1@ $query_text
+            GROUP BY id)}
+        ELSE { [] };
+
+    let $source_chunk_results = array::union($source_embedding_search, $source_full_search);
+
+    let $source_asset_results = array::union($source_title_search, $source_insight_search);
+
+    let $source_results = array::union($source_chunk_results, $source_asset_results );
+    let $note_results = array::union($note_title_search, $note_content_search );
+    let $final_results = array::union($source_results, $note_results );
+
+        RETURN (select id, parent_id, title, math::max(relevance) as relevance
+        from $final_results where id is not None
+        group by id, parent_id, title ORDER BY relevance DESC LIMIT $match_count);
+
+};

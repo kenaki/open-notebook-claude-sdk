@@ -397,7 +397,9 @@ class SourceResponse(BaseModel):
     title: Optional[str]
     topics: Optional[List[str]]
     asset: Optional[AssetModel]
-    full_text: Optional[str]
+    # E3: full_text is excluded from the serialized payload (regenerated whole-book
+    # markdown fetched lazily via GET /sources/{id}/full-text instead).
+    full_text: Optional[str] = Field(default=None, exclude=True)
     embedded: bool
     embedded_chunks: int
     file_available: Optional[bool] = None

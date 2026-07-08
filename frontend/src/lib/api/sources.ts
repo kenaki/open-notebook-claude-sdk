@@ -33,6 +33,13 @@ export const sourcesApi = {
     return get<SourceDetailResponse>(`/sources/${id}`)
   },
 
+  // E3: full_text is kept off the detail GET payload; the content tab lazy-loads
+  // the (potentially whole-book) markdown via this dedicated endpoint only when
+  // a source has no chapter sections.
+  getFullText: async (id: string) => {
+    return get<{ full_text: string | null }>(`/sources/${id}/full-text`)
+  },
+
   create: async (data: CreateSourceRequest & { file?: File }) => {
     // Always use FormData to match backend expectations
     const formData = new FormData()

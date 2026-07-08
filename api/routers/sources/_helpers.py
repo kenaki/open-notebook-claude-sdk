@@ -34,7 +34,10 @@ def source_to_response(
         title=source.title,
         topics=source.topics or [],
         asset=asset,
-        full_text=source.full_text if include_asset else None,
+        # full_text is intentionally never shipped on the source payload (E3):
+        # it is regenerated whole-book markdown and is fetched lazily via
+        # GET /sources/{id}/full-text only when the content tab needs it.
+        full_text=None,
         embedded=embedded_chunks > 0,
         embedded_chunks=embedded_chunks,
         created=str(source.created),

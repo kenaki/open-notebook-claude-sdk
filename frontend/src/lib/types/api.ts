@@ -46,7 +46,9 @@ export interface SourceListResponse {
 }
 
 export interface SourceDetailResponse extends SourceListResponse {
-  full_text: string
+  // E3: full_text is no longer shipped on GET /sources/{id}; fetch it lazily via
+  // sourcesApi.getFullText (GET /sources/{id}/full-text) only when needed.
+  full_text?: string
   notebooks?: string[]  // List of notebook IDs this source is linked to
   // Document Foundation Track C (C2): chapter-tree presence/count, mirrors
   // backend SourceResponse.has_sections/sections_count exactly.
