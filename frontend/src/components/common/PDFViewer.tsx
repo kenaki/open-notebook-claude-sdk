@@ -26,6 +26,11 @@ import {
   useDeleteAnnotation,
   useUpdateAnnotation,
 } from '@/lib/hooks/use-source-annotations'
+import {
+  useParseStatus,
+  usePageBlocks,
+  selectedBlockSeq,
+} from '@/lib/hooks/use-source-blocks'
 import { AnnotationsSidebar } from '@/components/source/detail/AnnotationsSidebar'
 import {
   AnnotationHighlightPopover,
@@ -110,6 +115,21 @@ export const PDFViewer = memo(function PDFViewer({
     left: number
     noteMode?: boolean
   } | null>(null)
+
+  // Anchor awareness (pdf-block-ingestion D3): once the source is parsed, load
+  // the active highlight's page overlay so clicking a highlight can select the
+  // block it anchors to (for the popover's section breadcrumb). Overlay is
+  // light (bbox only) and only fetched while a popover is open on a parsed page.
+  const parseStatus = useParseStatus(sourceId)
+  const isParsed = parseStatus.isSuccess
+  const activePage = activeAnnotation?.annotation.page
+  const { data: pageBlocks } = usePageBlocks(sourceId, activePage, {
+    enabled: isParsed && activePage != null,
+  })
+  const activeBlockSeq = selectedBlockSeq(
+    activeAnnotation?.annotation,
+    pageBlocks?.blocks
+  )
 
   // Sticky highlighter pen: new highlights use the color picked last.
   const [lastColor, setLastColor] = useState(readLastColor)
@@ -303,6 +323,7 @@ export const PDFViewer = memo(function PDFViewer({
 
       <AnnotationsSidebar
         annotations={annotations}
+        sourceId={sourceId}
         onJumpTo={(annotation) => {
           const area = annotation.rect[0]
           if (area) highlightPluginInstance.jumpToHighlightArea(area)
@@ -325,6 +346,8 @@ export const PDFViewer = memo(function PDFViewer({
           annotation={activeAnnotation.annotation}
           top={activeAnnotation.top}
           left={activeAnnotation.left}
+          sourceId={sourceId}
+          blockSeq={activeBlockSeq}
           onClose={() => setActiveAnnotation(null)}
           startInNoteMode={activeAnnotation.noteMode}
           onSaveNote={(note) => {

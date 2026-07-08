@@ -99,8 +99,72 @@ export interface Annotation {
   note?: string | null
   quote?: string | null
   tags: string[]
+  // Block-substrate anchor (pdf-block-ingestion Track D1/D3, Decision #13).
+  // Mirrors the backend AnnotationResponse exactly: the anchor is server-resolved
+  // from rect+quote at create time. `block_seq..block_end_seq` is the block RANGE
+  // (equal for a single-block highlight); `anchor_start`/`anchor_end` are char
+  // offsets (null for a geometric span or an atomic figure/table/equation).
+  // `anchor_state` is DERIVED server-side (never stored): no block_seq → legacy;
+  // anchor_gen !== source.parse_generation → stale; else anchored. Absent on
+  // optimistic/mocked annotations → treated as legacy.
+  block_seq?: number | null
+  block_end_seq?: number | null
+  anchor_start?: number | null
+  anchor_end?: number | null
+  anchor_gen?: number | null
+  anchor_state?: AnchorState
   created: string
   updated: string
+}
+
+// Derived anchor lifecycle for a highlight (mirrors AnnotationResponse.anchor_state).
+export type AnchorState = 'anchored' | 'stale' | 'legacy'
+
+// Parse lifecycle of a source's current generation. `pending`/`parsing`/
+// `embedding` are transient (poll); `ready`/`failed` are terminal. Mirrors the
+// `parse_status` column written by commands/block_commands.py.
+export type ParseStatus = 'pending' | 'parsing' | 'embedding' | 'ready' | 'failed'
+
+// One typed block (pdf-block-ingestion Track C — db-design §2.1). Mirrors the
+// backend `BlockResponse`: the overlay projection fills only seq/type/page/bbox/
+// parent_seq/level; text/latex/section_path/table_data and the derived
+// `image_url` appear only on text/full/window projections (omitted fields are
+// absent, not null, because the API serializes with response_model_exclude_none).
+export interface Block {
+  seq: number
+  type: string
+  page?: number
+  // Normalized page-fraction box [x0, y0, x1, y1] in 0..1 (overlay projection).
+  bbox?: number[]
+  parent_seq?: number
+  level?: number
+  section_path?: string[]
+  text?: string
+  latex?: string
+  // Path to the crop PNG, e.g. "/api/sources/{id}/blocks/{seq}/image".
+  image_url?: string
+  table_data?: Record<string, unknown>
+}
+
+// One page's blocks in reading (seq) order (GET /sources/{id}/blocks).
+export interface PageBlocksResponse {
+  page: number
+  gen: number
+  blocks: Block[]
+}
+
+// Parse status header for a source's current generation (GET /sources/{id}/parse).
+// Mirrors the backend `ParseStatusResponse`. 404 when the source was never
+// parsed — the frontend hook surfaces that as an error (→ legacy/unparsed UI).
+export interface ParseStatusResponse {
+  parse_status?: ParseStatus | string
+  gen: number
+  parser_name?: string
+  parser_version?: string
+  block_count?: number
+  page_count?: number
+  section_index?: unknown[]
+  error?: string
 }
 
 export interface CreateAnnotationRequest {

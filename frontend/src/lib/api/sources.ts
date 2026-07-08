@@ -11,7 +11,10 @@ import {
   UpdateSourceRequest,
   Annotation,
   CreateAnnotationRequest,
-  UpdateAnnotationRequest
+  UpdateAnnotationRequest,
+  Block,
+  PageBlocksResponse,
+  ParseStatusResponse
 } from '@/lib/types/api'
 
 export const sourcesApi = {
@@ -111,6 +114,29 @@ export const sourcesApi = {
     return apiClient.get(`/sources/${id}/download`, {
       responseType: 'blob',
     })
+  },
+
+  // pdf-block-ingestion Track C (C1): typed-block read endpoints. Every read
+  // targets the source's CURRENT parse generation and 404s on an un-parsed
+  // source (the frontend surfaces that as legacy/unparsed, not an error toast).
+
+  // Parse status header for the current generation (poll target). 404 = never
+  // parsed — the caller (useParseStatus) treats the error as "unparsed".
+  getParseStatus: async (id: string) => {
+    return get<ParseStatusResponse>(`/sources/${id}/parse`)
+  },
+
+  // One page's blocks in reading (seq) order. Overlay projection by default
+  // (seq/type/page/bbox); `includeText` adds text/latex/section_path/table_data.
+  getPageBlocks: async (id: string, page: number, includeText = false) => {
+    return get<PageBlocksResponse>(`/sources/${id}/blocks`, {
+      params: { page, include_text: includeText },
+    })
+  },
+
+  // One full block (point-get) including text/latex/section_path/table_data.
+  getBlock: async (id: string, seq: number) => {
+    return get<Block>(`/sources/${id}/blocks/${seq}`)
   },
 }
 

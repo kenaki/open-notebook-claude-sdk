@@ -2,11 +2,13 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Plus, Sparkles, StickyNote, Tag as TagIcon, Trash2, X } from 'lucide-react'
+import { Check, Clock, Plus, Sparkles, StickyNote, Tag as TagIcon, Trash2, Unlink, X } from 'lucide-react'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { cn } from '@/lib/utils'
 import { resolveTagColorKey, tagColorStyle } from '@/lib/utils/tag-colors'
-import type { Annotation } from '@/lib/types/api'
+import { useBlock } from '@/lib/hooks/use-source-blocks'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import type { AnchorState, Annotation } from '@/lib/types/api'
 
 /**
  * Fixed starter tags offered as one-click quick-adds (hybrid model: freeform
@@ -66,10 +68,68 @@ export function ColorDots({
   )
 }
 
+/**
+ * Small badge describing a highlight's anchor lifecycle (pdf-block-ingestion
+ * D3): anchored ✓ / stale / legacy, each with tooltip copy. The state is
+ * DERIVED server-side (AnnotationResponse.anchor_state) — this only renders it.
+ */
+const ANCHOR_CHIP: Record<
+  AnchorState,
+  { icon: typeof Check; className: string; labelKey: string; tipKey: string }
+> = {
+  anchored: {
+    icon: Check,
+    className: 'text-emerald-600 dark:text-emerald-400',
+    labelKey: 'sources.annotations.anchorAnchored',
+    tipKey: 'sources.annotations.anchorAnchoredTip',
+  },
+  stale: {
+    icon: Clock,
+    className: 'text-amber-600 dark:text-amber-400',
+    labelKey: 'sources.annotations.anchorStale',
+    tipKey: 'sources.annotations.anchorStaleTip',
+  },
+  legacy: {
+    icon: Unlink,
+    className: 'text-muted-foreground',
+    labelKey: 'sources.annotations.anchorLegacy',
+    tipKey: 'sources.annotations.anchorLegacyTip',
+  },
+}
+
+function AnchorStateChip({ state }: { state: AnchorState }) {
+  const { t } = useTranslation()
+  const { icon: Icon, className, labelKey, tipKey } = ANCHOR_CHIP[state]
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className={cn(
+            'inline-flex items-center gap-1 rounded-full border border-border px-1.5 py-0.5 text-[10px] font-medium',
+            className
+          )}
+        >
+          <Icon className="h-3 w-3" aria-hidden="true" />
+          {t(labelKey)}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-56">{t(tipKey)}</TooltipContent>
+    </Tooltip>
+  )
+}
+
 interface AnnotationHighlightPopoverProps {
   annotation: Annotation
   top: number
   left: number
+  /** Source id — enables fetching the anchored block's section path. */
+  sourceId?: string
+  /**
+   * The block seq this highlight is anchored to (server-resolved `block_seq`,
+   * or a geometric bbox match from the page-blocks overlay). Drives the section
+   * breadcrumb. Null/undefined for a legacy highlight → no breadcrumb.
+   */
+  blockSeq?: number | null
   onClose: () => void
   onSaveNote: (note: string) => void
   onChangeColor: (color: string) => void
@@ -100,6 +160,8 @@ export function AnnotationHighlightPopover({
   annotation,
   top,
   left,
+  sourceId,
+  blockSeq,
   onClose,
   onSaveNote,
   onChangeColor,
@@ -112,6 +174,14 @@ export function AnnotationHighlightPopover({
   const { t } = useTranslation()
   const [note, setNote] = useState(annotation.note ?? '')
   const [tagDraft, setTagDraft] = useState('')
+
+  const anchorState: AnchorState = annotation.anchor_state ?? 'legacy'
+  // Section breadcrumb comes from the anchored block's section_path. Only fetch
+  // for a real anchor (not a legacy highlight, which has no block context).
+  const { data: block } = useBlock(sourceId, blockSeq, {
+    enabled: !!sourceId && blockSeq != null && anchorState !== 'legacy',
+  })
+  const sectionPath = block?.section_path?.filter(Boolean) ?? []
 
   const addTag = (raw: string) => {
     const value = raw.trim()
@@ -184,6 +254,20 @@ export function AnnotationHighlightPopover({
         >
           <X className="h-3.5 w-3.5" />
         </button>
+      </div>
+
+      {/* Anchor lifecycle chip + (for anchored/stale) the block's section path. */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <AnchorStateChip state={anchorState} />
+        {sectionPath.length > 0 && (
+          <span
+            aria-label={t('sources.annotations.sectionLabel')}
+            className="min-w-0 flex-1 truncate text-[10px] text-muted-foreground"
+            title={sectionPath.join(' › ')}
+          >
+            {sectionPath.join(' › ')}
+          </span>
+        )}
       </div>
 
       <ColorDots selected={annotation.color} onPick={onChangeColor} />

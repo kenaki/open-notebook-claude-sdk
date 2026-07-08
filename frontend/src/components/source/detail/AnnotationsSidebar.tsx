@@ -1,22 +1,42 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { Sparkles } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
+import { Layers, Sparkles } from 'lucide-react'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { cn } from '@/lib/utils'
 import { resolveTagColorKey, tagColorStyle } from '@/lib/utils/tag-colors'
+import { sourcesApi } from '@/lib/api/sources'
 import { HIGHLIGHT_PALETTE } from './AnnotationHighlightPopover'
-import type { Annotation } from '@/lib/types/api'
+import type { Annotation, SourceSectionNode } from '@/lib/types/api'
 
 interface AnnotationsSidebarProps {
   annotations: Annotation[]
   onJumpTo: (annotation: Annotation) => void
+  /**
+   * Source id — enables the optional group-by-section view (fetches the
+   * chapter tree lazily, only while grouping is on). Omitted → no grouping.
+   */
+  sourceId?: string
   /**
    * "Ask AI about <tag>": called with the active tag. The caller gathers the
    * quotes and sends them to the chat. Omitted where no chat is wired — the
    * button hides.
    */
   onAskAiAboutTag?: (tag: string) => void
+}
+
+/** Top-level chapter (≈ section_path[0]) whose page range contains `page`.
+ *  Null when no top-level section matches → grouped under "Unsectioned". */
+function chapterTitleForPage(topLevel: SourceSectionNode[], page: number): string | null {
+  for (const node of topLevel) {
+    const start = node.page_start
+    const end = node.page_end
+    if (start != null && page >= start && (end == null || page <= end)) {
+      return node.title?.trim() || null
+    }
+  }
+  return null
 }
 
 /**
@@ -26,20 +46,79 @@ interface AnnotationsSidebarProps {
  * Header offers a per-color filter and a per-tag filter; colors/tags with no
  * highlights are hidden or dimmed.
  */
+/** One highlight row — shared by the flat list and the grouped view. */
+function AnnotationRow({
+  annotation,
+  onJumpTo,
+}: {
+  annotation: Annotation
+  onJumpTo: (annotation: Annotation) => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <button
+      type="button"
+      onClick={() => onJumpTo(annotation)}
+      className="flex w-full items-start gap-1.5 rounded-sm p-1.5 text-left text-xs hover:bg-muted"
+    >
+      <span
+        className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full"
+        style={{ backgroundColor: annotation.color }}
+      />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-muted-foreground">
+          {t('sources.annotations.pageLabel').replace('{page}', String(annotation.page))}
+        </span>
+        <span className="line-clamp-2 block">{annotation.note || annotation.quote || ''}</span>
+        {annotation.tags?.length > 0 && (
+          <span className="mt-1 flex flex-wrap gap-1">
+            {annotation.tags.map((tag) => {
+              const style = tagColorStyle(resolveTagColorKey(tag, {}))
+              return (
+                <span
+                  key={tag}
+                  className={cn(
+                    'inline-block max-w-full truncate rounded-full px-1.5 py-0 text-[10px]',
+                    style.chip
+                  )}
+                >
+                  {tag}
+                </span>
+              )
+            })}
+          </span>
+        )}
+      </span>
+    </button>
+  )
+}
+
 export function AnnotationsSidebar({
   annotations,
   onJumpTo,
+  sourceId,
   onAskAiAboutTag,
 }: AnnotationsSidebarProps) {
   const { t } = useTranslation()
   const [colorFilter, setColorFilter] = useState<string | null>(null)
   const [tagFilter, setTagFilter] = useState<string | null>(null)
+  const [groupBySection, setGroupBySection] = useState(false)
 
   // All tags currently in use, in first-seen order.
   const allTags = useMemo(
     () => [...new Set(annotations.flatMap((a) => a.tags ?? []))],
     [annotations]
   )
+
+  // Chapter tree — fetched lazily, only while group-by-section is on. Under the
+  // ['sources', id, …] tree so a broad source invalidation refreshes it.
+  const { data: sectionData } = useQuery({
+    queryKey: ['sources', sourceId ?? '', 'sections', 'annotations-group'],
+    queryFn: () => sourcesApi.getSections(sourceId as string),
+    enabled: !!sourceId && groupBySection,
+    staleTime: 5 * 60 * 1000,
+    meta: { silent: true },
+  })
 
   // If the last highlight of the filtered color is deleted, fall back to All.
   useEffect(() => {
@@ -61,12 +140,47 @@ export function AnnotationsSidebar({
       (!tagFilter || (a.tags ?? []).includes(tagFilter))
   )
 
+  // Group the visible highlights by top-level chapter (section_path[0]),
+  // preserving first-seen order; unmatched pages fall under "Unsectioned".
+  const grouped = useMemo(() => {
+    if (!groupBySection) return null
+    const topLevel = sectionData?.sections ?? []
+    const unsectioned = t('sources.annotations.unsectioned')
+    const map = new Map<string, Annotation[]>()
+    for (const a of visible) {
+      const title = chapterTitleForPage(topLevel, a.page) || unsectioned
+      const bucket = map.get(title)
+      if (bucket) bucket.push(a)
+      else map.set(title, [a])
+    }
+    return [...map.entries()]
+  }, [groupBySection, visible, sectionData, t])
+
   return (
     <div className="flex w-56 shrink-0 flex-col overflow-hidden rounded-md border border-border">
       <div className="border-b border-border px-2 py-1.5">
-        <div className="text-xs font-semibold text-muted-foreground">
-          {t('sources.annotations.title')}
-          {annotations.length > 0 && ` (${annotations.length})`}
+        <div className="flex items-center justify-between gap-1">
+          <div className="text-xs font-semibold text-muted-foreground">
+            {t('sources.annotations.title')}
+            {annotations.length > 0 && ` (${annotations.length})`}
+          </div>
+          {sourceId && annotations.length > 0 && (
+            <button
+              type="button"
+              aria-pressed={groupBySection}
+              title={t('sources.annotations.groupBySection')}
+              aria-label={t('sources.annotations.groupBySection')}
+              onClick={() => setGroupBySection((prev) => !prev)}
+              className={cn(
+                'rounded-sm p-0.5 transition-colors',
+                groupBySection
+                  ? 'text-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              <Layers className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          )}
         </div>
         {annotations.length > 0 && (
           <div className="mt-1.5 flex items-center gap-1.5">
@@ -145,43 +259,20 @@ export function AnnotationsSidebar({
       <div className="min-h-0 flex-1 overflow-y-auto p-1">
         {annotations.length === 0 ? (
           <p className="p-2 text-xs text-muted-foreground">{t('sources.annotations.emptyState')}</p>
+        ) : grouped ? (
+          grouped.map(([title, group]) => (
+            <div key={title} className="mb-1">
+              <div className="sticky top-0 truncate bg-background/95 px-1.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                {title}
+              </div>
+              {group.map((annotation) => (
+                <AnnotationRow key={annotation.id} annotation={annotation} onJumpTo={onJumpTo} />
+              ))}
+            </div>
+          ))
         ) : (
           visible.map((annotation) => (
-            <button
-              key={annotation.id}
-              type="button"
-              onClick={() => onJumpTo(annotation)}
-              className="flex w-full items-start gap-1.5 rounded-sm p-1.5 text-left text-xs hover:bg-muted"
-            >
-              <span
-                className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full"
-                style={{ backgroundColor: annotation.color }}
-              />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-muted-foreground">
-                  {t('sources.annotations.pageLabel').replace('{page}', String(annotation.page))}
-                </span>
-                <span className="line-clamp-2 block">{annotation.note || annotation.quote || ''}</span>
-                {annotation.tags?.length > 0 && (
-                  <span className="mt-1 flex flex-wrap gap-1">
-                    {annotation.tags.map((tag) => {
-                      const style = tagColorStyle(resolveTagColorKey(tag, {}))
-                      return (
-                        <span
-                          key={tag}
-                          className={cn(
-                            'inline-block max-w-full truncate rounded-full px-1.5 py-0 text-[10px]',
-                            style.chip
-                          )}
-                        >
-                          {tag}
-                        </span>
-                      )
-                    })}
-                  </span>
-                )}
-              </span>
-            </button>
+            <AnnotationRow key={annotation.id} annotation={annotation} onJumpTo={onJumpTo} />
           ))
         )}
       </div>
