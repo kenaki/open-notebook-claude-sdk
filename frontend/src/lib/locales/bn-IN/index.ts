@@ -512,6 +512,7 @@ export const bnIN = {
       sectionLabel: "বিভাগ",
       groupBySection: "বিভাগ অনুযায়ী গোষ্ঠীবদ্ধ করুন",
       unsectioned: "বিভাগহীন",
+      jumpLegacyPdf: "এই হাইলাইটটি দেখাতে PDF খোলা হয়েছে।",
     },
     reader: {
       tab: "পাঠক",
@@ -524,6 +525,8 @@ export const bnIN = {
       figureMissing: "চিত্রের ছবি অনুপলব্ধ",
       empty: "এখনও দেখানোর মতো কিছু নেই।",
       highlightLabel: "হাইলাইট",
+      staleChip: "{count}টি পুরোনো",
+      staleTip: "কিছু হাইলাইট পুরোনো পার্সে যুক্ত। পুনরায় অ্যাঙ্কর করতে পুনঃপ্রক্রিয়া করুন।",
     },
   },
   chat: {
@@ -532,6 +535,9 @@ export const bnIN = {
     annotationRefPage: "পৃ. {page}",
     annotationRefFigure: "চিত্র",
     jumpToHighlight: "হাইলাইটে যান",
+    askAboutHighlight: "এই হাইলাইট করা অংশ সম্পর্কে আমাকে বলুন।",
+    askAboutTag: "\"{tag}\" ট্যাগ করা আমার হাইলাইটগুলো বুঝতে সাহায্য করুন।",
+    tagAskTruncated: "\"{tag}\" ট্যাগ করা প্রথম ১০টি হাইলাইট পাঠানো হয়েছে।",
     chatSettings: "Chat settings",
     sideChatDefault: "Side-chat default model",
     sideChatDefaultHelper: "New side chats spawned from a passage start on this model.",

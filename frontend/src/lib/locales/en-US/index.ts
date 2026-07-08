@@ -512,6 +512,7 @@ export const enUS = {
       sectionLabel: "Section",
       groupBySection: "Group by section",
       unsectioned: "Unsectioned",
+      jumpLegacyPdf: "Opened the PDF to show this highlight.",
     },
     reader: {
       tab: "Reader",
@@ -524,6 +525,8 @@ export const enUS = {
       figureMissing: "Figure image unavailable",
       empty: "Nothing to show yet.",
       highlightLabel: "Highlight",
+      staleChip: "{count} stale",
+      staleTip: "Some highlights are anchored to an older parse. Re-process to re-anchor them.",
     },
   },
   chat: {
@@ -532,6 +535,9 @@ export const enUS = {
     annotationRefPage: "p.{page}",
     annotationRefFigure: "Figure",
     jumpToHighlight: "Jump to highlight",
+    askAboutHighlight: "Tell me about this highlighted passage.",
+    askAboutTag: "Help me understand my highlights tagged \"{tag}\".",
+    tagAskTruncated: "Only the first 10 highlights tagged \"{tag}\" were sent.",
     chatAboutThis: "Chat about this",
     explain: "Explain",
     saveNote: "Save note",

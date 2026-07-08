@@ -515,6 +515,7 @@ export const deDE = {
       sectionLabel: "Abschnitt",
       groupBySection: "Nach Abschnitt gruppieren",
       unsectioned: "Ohne Abschnitt",
+      jumpLegacyPdf: "PDF geöffnet, um diese Markierung anzuzeigen.",
     },
     reader: {
       tab: "Leseansicht",
@@ -527,6 +528,8 @@ export const deDE = {
       figureMissing: "Abbildung nicht verfügbar",
       empty: "Noch nichts anzuzeigen.",
       highlightLabel: "Markierung",
+      staleChip: "{count} veraltet",
+      staleTip: "Einige Markierungen sind an eine ältere Analyse gebunden. Erneut verarbeiten, um sie neu zu verankern.",
     },
   },
   chat: {
@@ -535,6 +538,9 @@ export const deDE = {
     annotationRefPage: "S. {page}",
     annotationRefFigure: "Abbildung",
     jumpToHighlight: "Zur Markierung springen",
+    askAboutHighlight: "Erkläre mir diese markierte Passage.",
+    askAboutTag: "Hilf mir, meine mit „{tag}“ markierten Hervorhebungen zu verstehen.",
+    tagAskTruncated: "Es wurden nur die ersten 10 mit „{tag}“ markierten Hervorhebungen gesendet.",
     chatSettings: "Chat settings",
     sideChatDefault: "Side-chat default model",
     sideChatDefaultHelper: "New side chats spawned from a passage start on this model.",

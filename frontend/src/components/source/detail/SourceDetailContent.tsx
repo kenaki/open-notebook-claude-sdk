@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, type ReactNode } from 'react'
+import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import { useMutation, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
@@ -33,6 +33,8 @@ import {
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { useSourceDetail } from '@/lib/hooks/useSourceDetail'
 import { useParseStatus, SOURCE_BLOCK_KEYS } from '@/lib/hooks/use-source-blocks'
+import { useSourceAnnotations } from '@/lib/hooks/use-source-annotations'
+import { useAnnotationJumpStore } from '@/lib/stores/annotation-jump-store'
 import { sourcesApi } from '@/lib/api/sources'
 import { toastApiError } from '@/lib/utils/error-handler'
 import { SourceInsightDialog } from './SourceInsightDialog'
@@ -41,7 +43,12 @@ import { SourceInsightsTab } from './SourceInsightsTab'
 import { SourceDetailsTab } from './SourceDetailsTab'
 import { PDFViewer } from '@/components/common/PDFViewer'
 import { ReaderView } from '@/components/source/reader/ReaderView'
-import type { SourceDetailResponse, ParseStatusResponse } from '@/lib/types/api'
+import type { Annotation, SourceDetailResponse, ParseStatusResponse } from '@/lib/types/api'
+
+// Which tabs the per-source tab preference may restore to (D8). PDF/Reader are
+// added only for a parsed PDF asset. Persisted under this localStorage prefix.
+const TAB_PREF_PREFIX = 'source-detail-tab-'
+const BASE_TABS = new Set(['content', 'insights', 'details'])
 
 /** Returns true when the source's uploaded file is a PDF. */
 const isPdfAsset = (source: SourceDetailResponse): boolean =>
@@ -149,13 +156,17 @@ interface SourceDetailContentProps {
    * Phase4: forwarded to PDFViewer's "Chat about this" highlight action.
    * Omit where no chat is wired to this view (e.g. the source modal) — the
    * button hides itself when this is undefined.
+   *
+   * D8: the optional 2nd arg carries the annotation id (present for an existing
+   * highlight; absent for a fresh selection → quote fallback).
    */
-  onChatAboutHighlight?: (quote: string) => void
+  onChatAboutHighlight?: (quote: string, annotationId?: string) => void
   /**
    * Phase4 batch variant: forwarded to PDFViewer for "Ask AI about <tag>".
-   * Omit where no chat is wired — the sidebar button hides itself.
+   * Omit where no chat is wired — the sidebar button hides itself. D8: 3rd arg
+   * carries the matching annotation ids for the structured `annotation_ids` send.
    */
-  onChatAboutHighlights?: (quotes: string[], tag: string) => void
+  onChatAboutHighlights?: (quotes: string[], tag: string, annotationIds?: string[]) => void
   /**
    * 'stacked' (default) is the modal layout: header block, then a full-width
    * tab bar. 'toolbar' collapses everything into ONE header line — leading
@@ -191,7 +202,13 @@ export function SourceDetailContent({
   const handleTabChange = useCallback((tab: string) => {
     setActiveTab(tab)
     setMountedTabs((prev) => (prev.has(tab) ? prev : new Set(prev).add(tab)))
-  }, [])
+    // D8: remember the active tab per source so it survives reload.
+    try {
+      window.localStorage.setItem(TAB_PREF_PREFIX + sourceId, tab)
+    } catch {
+      // localStorage unavailable (private mode) — non-persistent is fine.
+    }
+  }, [sourceId])
   const {
     source,
     insights,
@@ -245,6 +262,91 @@ export function SourceDetailContent({
       setReparseOpen(false)
     },
   })
+
+  // --- D8: reader ↔ sidebar/chat jump parity -------------------------------- //
+  // Full annotation list (needed to resolve a pill's id → rect/anchor for the
+  // jump). Only PDFs carry annotations; the query is cheap/empty otherwise.
+  const { data: annotations = [] } = useSourceAnnotations(isPdf ? sourceId : undefined)
+  // Imperative handles the child viewers fill in (PDF: jump-to-rect; Reader:
+  // scroll-to-seq). Populated only while the respective tab is mounted.
+  const pdfJumpRef = useRef<((annotation: Annotation) => void) | null>(null)
+  const readerJumpRef = useRef<((seq: number) => void) | null>(null)
+  // A pending jump is applied one frame after a possible tab switch, so a
+  // newly-mounted viewer has committed its imperative handle first.
+  const [pendingJump, setPendingJump] = useState<{
+    annotation: Annotation
+    tab: 'pdf' | 'reader'
+    nonce: number
+  } | null>(null)
+
+  const registerJump = useAnnotationJumpStore((s) => s.register)
+  const unregisterJump = useAnnotationJumpStore((s) => s.unregister)
+
+  // Route a jump by the ACTIVE tab: anchored + reader tab → scroll the reader;
+  // otherwise → the PDF tab (jumpToHighlightArea). A legacy highlight (no block
+  // anchor) can't render in the reader, so it always jumps on the PDF tab,
+  // auto-switching with a toast.
+  const routeJump = useCallback(
+    (annotationId: string) => {
+      const annotation = annotations.find((a) => a.id === annotationId)
+      if (!annotation) return
+      const hasAnchor = annotation.block_seq != null
+      const goReader = hasAnchor && activeTab === 'reader'
+      if (!hasAnchor && activeTab === 'reader') {
+        toast.info(t('sources.annotations.jumpLegacyPdf'))
+      }
+      const tab: 'pdf' | 'reader' = goReader ? 'reader' : 'pdf'
+      if (activeTab !== tab) handleTabChange(tab)
+      setPendingJump({ annotation, tab, nonce: Date.now() })
+    },
+    [annotations, activeTab, handleTabChange, t]
+  )
+
+  useEffect(() => {
+    if (!pendingJump) return
+    const raf = requestAnimationFrame(() => {
+      if (pendingJump.tab === 'reader') {
+        if (pendingJump.annotation.block_seq != null) {
+          readerJumpRef.current?.(pendingJump.annotation.block_seq)
+        }
+      } else {
+        pdfJumpRef.current?.(pendingJump.annotation)
+      }
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [pendingJump])
+
+  // Expose the router to the chat pills (rendered in a sibling subtree).
+  useEffect(() => {
+    if (!sourceId) return
+    registerJump(sourceId, routeJump)
+    return () => unregisterJump(sourceId)
+  }, [sourceId, routeJump, registerJump, unregisterJump])
+
+  // D8: restore the persisted tab once the source (and, for PDFs, its parse
+  // status) has settled — so a reload lands back where the user left off. Runs
+  // once; a `#p=N` citation deep-link (initialPage) wins over the stored tab.
+  const restoredRef = useRef(false)
+  useEffect(() => {
+    if (restoredRef.current || !source) return
+    if (initialPage != null) {
+      restoredRef.current = true
+      return
+    }
+    const parseSettled = !isPdf || parseStatus.isSuccess || parseStatus.isError
+    if (!parseSettled) return
+    restoredRef.current = true
+    try {
+      const stored = window.localStorage.getItem(TAB_PREF_PREFIX + sourceId)
+      if (!stored) return
+      const valid = new Set(BASE_TABS)
+      if (isPdf) valid.add('pdf')
+      if (isPdf && parseStatus.isSuccess) valid.add('reader')
+      if (valid.has(stored)) handleTabChange(stored)
+    } catch {
+      // localStorage unavailable — keep the default tab.
+    }
+  }, [source, isPdf, initialPage, sourceId, parseStatus.isSuccess, parseStatus.isError, handleTabChange])
 
   // Header controls for PDF sources: the parse-lifecycle chip + a Re-process
   // action (confirm-gated). Hidden entirely for non-PDF sources.
@@ -448,6 +550,7 @@ export function SourceDetailContent({
               initialPage={initialPage != null ? Math.max(0, initialPage - 1) : undefined}
               onChatAboutHighlight={onChatAboutHighlight}
               onChatAboutHighlights={onChatAboutHighlights}
+              jumpApiRef={pdfJumpRef}
             />
           )}
         </TabsContent>
@@ -455,7 +558,14 @@ export function SourceDetailContent({
 
       {isPdfAsset(source) && (
         <TabsContent value="reader" forceMount className="mt-3 flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
-          {mountedTabs.has('reader') && readerReady && <ReaderView sourceId={source.id} />}
+          {mountedTabs.has('reader') && readerReady && (
+            <ReaderView
+              sourceId={source.id}
+              onChatAboutHighlight={onChatAboutHighlight}
+              onReprocess={() => setReparseOpen(true)}
+              jumpApiRef={readerJumpRef}
+            />
+          )}
         </TabsContent>
       )}
     </>

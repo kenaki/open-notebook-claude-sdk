@@ -512,6 +512,7 @@ export const trTR = {
       sectionLabel: "Bölüm",
       groupBySection: "Bölüme göre grupla",
       unsectioned: "Bölümsüz",
+      jumpLegacyPdf: "Bu vurguyu göstermek için PDF açıldı.",
     },
     reader: {
       tab: "Okuyucu",
@@ -524,6 +525,8 @@ export const trTR = {
       figureMissing: "Şekil görseli kullanılamıyor",
       empty: "Henüz gösterilecek bir şey yok.",
       highlightLabel: "Vurgu",
+      staleChip: "{count} eski",
+      staleTip: "Bazı vurgular eski bir ayrıştırmaya bağlı. Yeniden bağlamak için yeniden işleyin.",
     },
   },
   chat: {
@@ -532,6 +535,9 @@ export const trTR = {
     annotationRefPage: "s. {page}",
     annotationRefFigure: "Şekil",
     jumpToHighlight: "Vurguya git",
+    askAboutHighlight: "Bu vurgulanan bölüm hakkında bilgi ver.",
+    askAboutTag: "\"{tag}\" etiketli vurgularımı anlamama yardım et.",
+    tagAskTruncated: "Yalnızca \"{tag}\" etiketli ilk 10 vurgu gönderildi.",
     chatSettings: "Chat settings",
     sideChatDefault: "Side-chat default model",
     sideChatDefaultHelper: "New side chats spawned from a passage start on this model.",

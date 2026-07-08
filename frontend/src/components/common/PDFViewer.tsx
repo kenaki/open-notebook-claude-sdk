@@ -73,13 +73,20 @@ interface PDFViewerProps {
    * `data-chat-scope` and doesn't apply inside the PDF text layer. Callers
    * with no wired chat (e.g. the source modal) omit this — the button hides.
    */
-  onChatAboutHighlight?: (quote: string) => void
+  onChatAboutHighlight?: (quote: string, annotationId?: string) => void
   /**
-   * Batch variant: called with every quote carrying a given tag (plus the tag)
-   * when the user clicks "Ask AI about <tag>" in the sidebar. Same wiring as
-   * onChatAboutHighlight — omitted where no chat is wired, hiding the button.
+   * Batch variant: called with every quote carrying a given tag (plus the tag
+   * and the matching annotation ids) when the user clicks "Ask AI about <tag>"
+   * in the sidebar. Same wiring as onChatAboutHighlight — omitted where no chat
+   * is wired, hiding the button.
    */
-  onChatAboutHighlights?: (quotes: string[], tag: string) => void
+  onChatAboutHighlights?: (quotes: string[], tag: string, annotationIds?: string[]) => void
+  /**
+   * D8 jump bridge: SourceDetailContent hands down a mutable ref; the viewer
+   * fills it with a `(annotation) => jumpToHighlightArea(...)` fn so a chat
+   * reference pill can scroll the PDF to a highlight while the PDF tab is active.
+   */
+  jumpApiRef?: React.MutableRefObject<((annotation: Annotation) => void) | null>
 }
 
 // memo: the parent's tab-switch state changes must not re-render the viewer —
@@ -91,6 +98,7 @@ export const PDFViewer = memo(function PDFViewer({
   initialPage = 0,
   onChatAboutHighlight,
   onChatAboutHighlights,
+  jumpApiRef,
 }: PDFViewerProps) {
   const { t } = useTranslation()
   const layoutPlugin = defaultLayoutPlugin()
@@ -270,6 +278,20 @@ export const PDFViewer = memo(function PDFViewer({
     renderHighlights,
   })
 
+  // D8: expose a jump fn to the parent so a chat pill / sidebar row can scroll
+  // the PDF to a highlight. `highlightPluginInstance` is recreated every render
+  // (see the memo note above), so refill the ref each render to capture it.
+  useEffect(() => {
+    if (!jumpApiRef) return
+    jumpApiRef.current = (annotation: Annotation) => {
+      const area = annotation.rect?.[0]
+      if (area) highlightPluginInstance.jumpToHighlightArea(area)
+    }
+    return () => {
+      if (jumpApiRef) jumpApiRef.current = null
+    }
+  })
+
   // The blob lives in the TanStack cache under a root key deliberately OUTSIDE
   // the ['sources'] tree: source mutations broadly invalidate ['sources'], and
   // that must never re-download a multi-MB file. The uploaded asset is
@@ -331,11 +353,12 @@ export const PDFViewer = memo(function PDFViewer({
         onAskAiAboutTag={
           onChatAboutHighlights
             ? (tag) => {
-                const quotes = annotations
-                  .filter((a) => a.tags?.includes(tag))
+                const tagged = annotations.filter((a) => a.tags?.includes(tag))
+                const quotes = tagged
                   .map((a) => a.quote)
                   .filter((q): q is string => !!q)
-                onChatAboutHighlights(quotes, tag)
+                const ids = tagged.map((a) => a.id)
+                onChatAboutHighlights(quotes, tag, ids)
               }
             : undefined
         }
@@ -375,8 +398,8 @@ export const PDFViewer = memo(function PDFViewer({
           }}
           onChatAboutHighlight={
             onChatAboutHighlight
-              ? (quote) => {
-                  onChatAboutHighlight(quote)
+              ? (quote, annotationId) => {
+                  onChatAboutHighlight(quote, annotationId)
                   setActiveAnnotation(null)
                 }
               : undefined

@@ -512,6 +512,7 @@ export const ptBR = {
       sectionLabel: "Seção",
       groupBySection: "Agrupar por seção",
       unsectioned: "Sem seção",
+      jumpLegacyPdf: "PDF aberto para mostrar este destaque.",
     },
     reader: {
       tab: "Leitura",
@@ -524,6 +525,8 @@ export const ptBR = {
       figureMissing: "Imagem da figura indisponível",
       empty: "Nada para mostrar ainda.",
       highlightLabel: "Destaque",
+      staleChip: "{count} desatualizados",
+      staleTip: "Alguns destaques estão ancorados a uma análise anterior. Reprocesse para reancorá-los.",
     },
   },
   chat: {
@@ -532,6 +535,9 @@ export const ptBR = {
     annotationRefPage: "p. {page}",
     annotationRefFigure: "Figura",
     jumpToHighlight: "Ir para o destaque",
+    askAboutHighlight: "Fale-me sobre este trecho destacado.",
+    askAboutTag: "Ajude-me a entender meus destaques marcados como «{tag}».",
+    tagAskTruncated: "Apenas os primeiros 10 destaques marcados como «{tag}» foram enviados.",
     chatSettings: "Chat settings",
     sideChatDefault: "Side-chat default model",
     sideChatDefaultHelper: "New side chats spawned from a passage start on this model.",

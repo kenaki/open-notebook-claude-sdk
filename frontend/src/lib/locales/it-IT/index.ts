@@ -512,6 +512,7 @@ export const itIT = {
       sectionLabel: "Sezione",
       groupBySection: "Raggruppa per sezione",
       unsectioned: "Senza sezione",
+      jumpLegacyPdf: "PDF aperto per mostrare questa evidenziazione.",
     },
     reader: {
       tab: "Lettura",
@@ -524,6 +525,8 @@ export const itIT = {
       figureMissing: "Immagine della figura non disponibile",
       empty: "Ancora nulla da mostrare.",
       highlightLabel: "Evidenziazione",
+      staleChip: "{count} obsoleti",
+      staleTip: "Alcune evidenziazioni sono ancorate a un'analisi precedente. Rielabora per riancorarle.",
     },
   },
   chat: {
@@ -532,6 +535,9 @@ export const itIT = {
     annotationRefPage: "p. {page}",
     annotationRefFigure: "Figura",
     jumpToHighlight: "Vai all'evidenziazione",
+    askAboutHighlight: "Parlami di questo passaggio evidenziato.",
+    askAboutTag: "Aiutami a capire le mie evidenziazioni con tag «{tag}».",
+    tagAskTruncated: "Sono state inviate solo le prime 10 evidenziazioni con tag «{tag}».",
     chatSettings: "Chat settings",
     sideChatDefault: "Side-chat default model",
     sideChatDefaultHelper: "New side chats spawned from a passage start on this model.",

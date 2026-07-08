@@ -512,6 +512,7 @@ export const zhCN = {
       sectionLabel: "章节",
       groupBySection: "按章节分组",
       unsectioned: "无章节",
+      jumpLegacyPdf: "已打开 PDF 以显示此高亮。",
     },
     reader: {
       tab: "阅读视图",
@@ -524,6 +525,8 @@ export const zhCN = {
       figureMissing: "图片不可用",
       empty: "暂无内容可显示。",
       highlightLabel: "高亮",
+      staleChip: "{count} 个已过期",
+      staleTip: "部分高亮锚定到较早的解析。重新处理以重新锚定它们。",
     },
   },
   chat: {
@@ -532,6 +535,9 @@ export const zhCN = {
     annotationRefPage: "第 {page} 页",
     annotationRefFigure: "图",
     jumpToHighlight: "跳转到高亮",
+    askAboutHighlight: "请给我讲讲这段高亮的内容。",
+    askAboutTag: "帮我理解我标记为“{tag}”的高亮内容。",
+    tagAskTruncated: "仅发送了标记为“{tag}”的前 10 个高亮。",
     chatSettings: "Chat settings",
     sideChatDefault: "Side-chat default model",
     sideChatDefaultHelper: "New side chats spawned from a passage start on this model.",

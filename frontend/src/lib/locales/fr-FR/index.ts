@@ -512,6 +512,7 @@ export const frFR = {
       sectionLabel: "Section",
       groupBySection: "Grouper par section",
       unsectioned: "Sans section",
+      jumpLegacyPdf: "PDF ouvert pour afficher ce surlignage.",
     },
     reader: {
       tab: "Lecture",
@@ -524,6 +525,8 @@ export const frFR = {
       figureMissing: "Image de la figure indisponible",
       empty: "Rien à afficher pour l'instant.",
       highlightLabel: "Surlignage",
+      staleChip: "{count} obsolètes",
+      staleTip: "Certains surlignages sont ancrés à une analyse antérieure. Retraitez pour les réancrer.",
     },
   },
   chat: {
@@ -532,6 +535,9 @@ export const frFR = {
     annotationRefPage: "p. {page}",
     annotationRefFigure: "Figure",
     jumpToHighlight: "Aller au surlignage",
+    askAboutHighlight: "Parle-moi de ce passage surligné.",
+    askAboutTag: "Aide-moi à comprendre mes surlignages étiquetés « {tag} ».",
+    tagAskTruncated: "Seuls les 10 premiers surlignages étiquetés « {tag} » ont été envoyés.",
     chatSettings: "Chat settings",
     sideChatDefault: "Side-chat default model",
     sideChatDefaultHelper: "New side chats spawned from a passage start on this model.",

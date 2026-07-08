@@ -512,6 +512,7 @@ export const plPL = {
       sectionLabel: "Sekcja",
       groupBySection: "Grupuj według sekcji",
       unsectioned: "Bez sekcji",
+      jumpLegacyPdf: "Otwarto plik PDF, aby pokazać to zaznaczenie.",
     },
     reader: {
       tab: "Czytnik",
@@ -524,6 +525,8 @@ export const plPL = {
       figureMissing: "Obraz rysunku niedostępny",
       empty: "Jeszcze nic do wyświetlenia.",
       highlightLabel: "Podświetlenie",
+      staleChip: "{count} nieaktualne",
+      staleTip: "Niektóre zaznaczenia są powiązane ze starszą analizą. Przetwórz ponownie, aby je ponownie zakotwiczyć.",
     },
   },
   chat: {
@@ -532,6 +535,9 @@ export const plPL = {
     annotationRefPage: "s. {page}",
     annotationRefFigure: "Rysunek",
     jumpToHighlight: "Przejdź do zaznaczenia",
+    askAboutHighlight: "Opowiedz mi o tym zaznaczonym fragmencie.",
+    askAboutTag: "Pomóż mi zrozumieć moje zaznaczenia oznaczone tagiem „{tag}”.",
+    tagAskTruncated: "Wysłano tylko pierwsze 10 zaznaczeń oznaczonych tagiem „{tag}”.",
     chatSettings: "Chat settings",
     sideChatDefault: "Side-chat default model",
     sideChatDefaultHelper: "New side chats spawned from a passage start on this model.",

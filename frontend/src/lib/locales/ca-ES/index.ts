@@ -512,6 +512,7 @@ export const caES = {
       sectionLabel: "Secció",
       groupBySection: "Agrupa per secció",
       unsectioned: "Sense secció",
+      jumpLegacyPdf: "S'ha obert el PDF per mostrar aquest subratllat.",
     },
     reader: {
       tab: "Lectura",
@@ -524,6 +525,8 @@ export const caES = {
       figureMissing: "Imatge de la figura no disponible",
       empty: "Encara no hi ha res a mostrar.",
       highlightLabel: "Ressaltat",
+      staleChip: "{count} obsolets",
+      staleTip: "Alguns subratllats estan ancorats a una anàlisi anterior. Torna a processar per reancorar-los.",
     },
   },
   chat: {
@@ -532,6 +535,9 @@ export const caES = {
     annotationRefPage: "p. {page}",
     annotationRefFigure: "Figura",
     jumpToHighlight: "Vés al subratllat",
+    askAboutHighlight: "Explica'm aquest fragment subratllat.",
+    askAboutTag: "Ajuda'm a entendre els meus subratllats etiquetats com a «{tag}».",
+    tagAskTruncated: "Només s'han enviat els primers 10 subratllats etiquetats com a «{tag}».",
     chatSettings: "Chat settings",
     sideChatDefault: "Side-chat default model",
     sideChatDefaultHelper: "New side chats spawned from a passage start on this model.",

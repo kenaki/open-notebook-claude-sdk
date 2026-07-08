@@ -512,6 +512,7 @@ export const esES = {
       sectionLabel: "Sección",
       groupBySection: "Agrupar por sección",
       unsectioned: "Sin sección",
+      jumpLegacyPdf: "Se abrió el PDF para mostrar este resaltado.",
     },
     reader: {
       tab: "Lectura",
@@ -524,6 +525,8 @@ export const esES = {
       figureMissing: "Imagen de la figura no disponible",
       empty: "Todavía no hay nada que mostrar.",
       highlightLabel: "Resaltado",
+      staleChip: "{count} obsoletos",
+      staleTip: "Algunos resaltados están anclados a un análisis anterior. Vuelve a procesar para reanclarlos.",
     },
   },
   chat: {
@@ -532,6 +535,9 @@ export const esES = {
     annotationRefPage: "p. {page}",
     annotationRefFigure: "Figura",
     jumpToHighlight: "Ir al resaltado",
+    askAboutHighlight: "Háblame de este fragmento resaltado.",
+    askAboutTag: "Ayúdame a entender mis resaltados etiquetados como «{tag}».",
+    tagAskTruncated: "Solo se enviaron los primeros 10 resaltados etiquetados como «{tag}».",
     chatSettings: "Chat settings",
     sideChatDefault: "Side-chat default model",
     sideChatDefaultHelper: "New side chats spawned from a passage start on this model.",

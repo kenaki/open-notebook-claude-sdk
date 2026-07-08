@@ -61,6 +61,9 @@ interface ChatPanelProps {
   emptyStateHelper?: string
   suggestions?: string[]
   chatScopeId?: string
+  // D8: source-chat only — forwarded to MessageList so annotation reference pills
+  // render and route their jump to the active PDF/Reader tab.
+  sourceId?: string
   autoFocus?: boolean
   pending?: MediaItem[]
   onAddPending?: (item: MediaItem) => void
@@ -97,6 +100,7 @@ export function ChatPanel({
   emptyStateHelper,
   suggestions,
   chatScopeId,
+  sourceId,
   autoFocus = false,
   pending,
   onAddPending,
@@ -209,6 +213,7 @@ export function ChatPanel({
       contextType={contextType}
       chatScopeId={chatScopeId}
       notebookId={notebookId}
+      sourceId={sourceId}
       onReferenceClick={handleReferenceClick}
       onSuggestion={handleSuggestion}
       onRetry={onRetry}

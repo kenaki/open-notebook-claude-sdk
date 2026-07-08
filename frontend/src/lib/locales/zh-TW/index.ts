@@ -512,6 +512,7 @@ export const zhTW = {
       sectionLabel: "章節",
       groupBySection: "依章節分組",
       unsectioned: "無章節",
+      jumpLegacyPdf: "已開啟 PDF 以顯示此標註。",
     },
     reader: {
       tab: "閱讀檢視",
@@ -524,6 +525,8 @@ export const zhTW = {
       figureMissing: "圖片無法使用",
       empty: "目前沒有內容可顯示。",
       highlightLabel: "標註",
+      staleChip: "{count} 個已過期",
+      staleTip: "部分標註錨定到較早的解析。重新處理以重新錨定它們。",
     },
   },
   chat: {
@@ -532,6 +535,9 @@ export const zhTW = {
     annotationRefPage: "第 {page} 頁",
     annotationRefFigure: "圖",
     jumpToHighlight: "跳至標註",
+    askAboutHighlight: "請跟我說說這段標註的內容。",
+    askAboutTag: "幫我理解我標記為「{tag}」的標註內容。",
+    tagAskTruncated: "僅傳送了標記為「{tag}」的前 10 個標註。",
     chatSettings: "Chat settings",
     sideChatDefault: "Side-chat default model",
     sideChatDefaultHelper: "New side chats spawned from a passage start on this model.",

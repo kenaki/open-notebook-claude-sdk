@@ -130,7 +130,14 @@ export function useSourceChat(sourceId: string) {
   // Send message — submits to the background worker (202), inserts optimistic
   // user message + pending assistant placeholder into the TanStack cache.
   // The Track-B poller delivers the answer by invalidating sourceChatSession.
-  const sendMessage = useCallback(async (message: string, modelOverride?: string): Promise<{ ok: boolean }> => {
+  const sendMessage = useCallback(async (
+    message: string,
+    modelOverride?: string,
+    // D8: structured annotation references (highlight ids the user is asking
+    // about). Resolved server-side into the AI context; the resolved refs come
+    // back on the human message as `annotation_refs` (rendered as pills).
+    options?: { annotationIds?: string[] }
+  ): Promise<{ ok: boolean }> => {
     let sessionId = currentSessionId
 
     // Auto-create session if none exists
@@ -162,7 +169,8 @@ export function useSourceChat(sourceId: string) {
       // the answer arrives later via the Track-B poller invalidating this session.
       const { job_id } = await sourceChatApi.sendMessage(sourceId, sessionId, {
         message,
-        model_override: modelOverride
+        model_override: modelOverride,
+        annotation_ids: options?.annotationIds,
       })
 
       // Register in the global jobs store so isStreaming + the tray track this.

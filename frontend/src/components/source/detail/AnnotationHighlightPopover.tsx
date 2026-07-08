@@ -140,8 +140,11 @@ interface AnnotationHighlightPopoverProps {
    * itself, which is scoped to `data-chat-scope` chat bubbles and doesn't
    * apply inside the PDF viewer. Undefined where no chat is wired (e.g. the
    * source modal) — the button is hidden there.
+   *
+   * D8: also carries the annotation id so the send path can reference it as a
+   * structured `annotation_ids` entry (falls back to the quote when absent).
    */
-  onChatAboutHighlight?: (quote: string) => void
+  onChatAboutHighlight?: (quote: string, annotationId?: string) => void
   /** Replace this highlight's whole tag list (whole-list replacement). */
   onSaveTags: (tags: string[]) => void
   /** Tags already used on other highlights in this doc — quick-add suggestions. */
@@ -368,7 +371,7 @@ export function AnnotationHighlightPopover({
         {onChatAboutHighlight && annotation.quote ? (
           <button
             type="button"
-            onClick={() => onChatAboutHighlight(annotation.quote as string)}
+            onClick={() => onChatAboutHighlight(annotation.quote as string, annotation.id)}
             className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-primary transition-colors hover:bg-accent-soft"
           >
             <Sparkles className="h-3.5 w-3.5" />

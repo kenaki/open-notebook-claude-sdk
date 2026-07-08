@@ -2,6 +2,7 @@
 
 import { useRouter, useParams } from 'next/navigation'
 import { useCallback, useEffect, useState } from 'react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft, MessageSquare } from 'lucide-react'
 import { useSourceChat } from '@/lib/hooks/useSourceChat'
@@ -13,9 +14,13 @@ import { useTranslation } from '@/lib/hooks/use-translation'
 // Remembers whether the chat column was open across visits/reloads.
 const CHAT_OPEN_KEY = 'source-detail-chat-open'
 
-// Builds the batch "ask AI about all highlights tagged X" chat message.
-// Hardcoded English, matching the single-highlight prompt below (neither is
-// localized). Empty quotes are already filtered out by the caller.
+// Cap on annotation ids sent with one tag-ask (Q-tag-ask-limit / agent context).
+const MAX_TAG_ANNOTATION_IDS = 10
+
+// FALLBACK ONLY (D8): quote-paste for highlights that carry no annotation id
+// (a fresh, un-saved selection). The primary path now sends structured
+// `annotation_ids` and a short localized user text. Hardcoded English, matching
+// the single-highlight prompt below (neither is localized).
 function composeTagPrompt(tag: string, quotes: string[]): string {
   if (quotes.length === 0) {
     return `Tell me about my highlights tagged "${tag}".`
@@ -98,13 +103,32 @@ export default function SourceDetailPage() {
           }
           showChatButton={false}
           onClose={handleBack}
-          onChatAboutHighlight={(quote) => {
+          onChatAboutHighlight={(quote, annotationId) => {
             setChatOpen(true)
-            chat.sendMessage(`Tell me about this highlighted passage: "${quote}"`)
+            // D8: an existing highlight → structured annotation ref + short text;
+            // a fresh un-saved selection (no id) → quote-paste fallback.
+            if (annotationId) {
+              chat.sendMessage(t('chat.askAboutHighlight'), undefined, {
+                annotationIds: [annotationId],
+              })
+            } else {
+              chat.sendMessage(`Tell me about this highlighted passage: "${quote}"`)
+            }
           }}
-          onChatAboutHighlights={(quotes, tag) => {
+          onChatAboutHighlights={(quotes, tag, annotationIds) => {
             setChatOpen(true)
-            chat.sendMessage(composeTagPrompt(tag, quotes))
+            const ids = annotationIds ?? []
+            if (ids.length > 0) {
+              const capped = ids.slice(0, MAX_TAG_ANNOTATION_IDS)
+              if (ids.length > MAX_TAG_ANNOTATION_IDS) {
+                toast.info(t('chat.tagAskTruncated').replace('{tag}', tag))
+              }
+              chat.sendMessage(t('chat.askAboutTag').replace('{tag}', tag), undefined, {
+                annotationIds: capped,
+              })
+            } else {
+              chat.sendMessage(composeTagPrompt(tag, quotes))
+            }
           }}
         />
       </div>
@@ -118,6 +142,7 @@ export default function SourceDetailPage() {
         }
       >
         <ChatPanel
+          sourceId={sourceId}
           messages={chat.messages}
           isStreaming={chat.isStreaming}
           contextIndicators={chat.contextIndicators}

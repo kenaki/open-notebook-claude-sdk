@@ -512,6 +512,7 @@ export const ruRU = {
       sectionLabel: "Раздел",
       groupBySection: "Группировать по разделам",
       unsectioned: "Без раздела",
+      jumpLegacyPdf: "PDF открыт, чтобы показать это выделение.",
     },
     reader: {
       tab: "Читалка",
@@ -524,6 +525,8 @@ export const ruRU = {
       figureMissing: "Изображение рисунка недоступно",
       empty: "Пока нечего показать.",
       highlightLabel: "Выделение",
+      staleChip: "{count} устарело",
+      staleTip: "Некоторые выделения привязаны к более старому разбору. Переобработайте, чтобы привязать их заново.",
     },
   },
   chat: {
@@ -532,6 +535,9 @@ export const ruRU = {
     annotationRefPage: "с. {page}",
     annotationRefFigure: "Рисунок",
     jumpToHighlight: "Перейти к выделению",
+    askAboutHighlight: "Расскажи об этом выделенном фрагменте.",
+    askAboutTag: "Помоги мне разобраться в моих выделениях с тегом «{tag}».",
+    tagAskTruncated: "Отправлены только первые 10 выделений с тегом «{tag}».",
     chatSettings: "Chat settings",
     sideChatDefault: "Side-chat default model",
     sideChatDefaultHelper: "New side chats spawned from a passage start on this model.",

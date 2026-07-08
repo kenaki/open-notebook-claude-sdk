@@ -11,8 +11,9 @@ import rehypeKatex from 'rehype-katex'
 import rehypeHighlight from 'rehype-highlight'
 import { MarkdownCodeBlock } from './MarkdownCodeBlock'
 import { MessageActions } from './MessageActions'
-import { MessageReferences } from './MessageReferences'
+import { MessageReferences, AnnotationReferences } from './MessageReferences'
 import { MessageMedia } from './MessageMedia'
+import { useAnnotationJumpStore } from '@/lib/stores/annotation-jump-store'
 import { ToolUseDisclosure, describeTool, detailFor } from './ToolUseDisclosure'
 import { convertReferencesToCompactMarkdown, createCompactReferenceLinkComponent } from '@/lib/utils/source-references'
 import { useTranslation } from '@/lib/hooks/use-translation'
@@ -40,6 +41,10 @@ interface MessageListProps {
   contextType?: 'source' | 'notebook'
   chatScopeId?: string
   notebookId?: string
+  // D8: source-chat only — enables annotation reference pills on human turns and
+  // routes their "jump to highlight" click to the active PDF/Reader tab. Absent
+  // for notebook chat (which never carries annotation refs).
+  sourceId?: string
   onReferenceClick: (type: string, id: string) => void
   onSuggestion: (prompt: string) => void
   onRetry?: (messageId: string) => void
@@ -56,11 +61,13 @@ export function MessageList({
   contextType = 'source',
   chatScopeId,
   notebookId,
+  sourceId,
   onReferenceClick,
   onSuggestion,
   onRetry,
 }: MessageListProps) {
   const { t } = useTranslation()
+  const requestJump = useAnnotationJumpStore((s) => s.requestJump)
   const scrollAreaRef = useRef<HTMLDivElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const { tailSpacer } = useChatScrollAnchor({ isDock, messages, scrollAreaRef, messagesEndRef })
@@ -185,6 +192,13 @@ export function MessageList({
                       />
                     )}
                   </div>
+                  {isHuman && sourceId && message.annotation_refs && message.annotation_refs.length > 0 && (
+                    <AnnotationReferences
+                      refs={message.annotation_refs}
+                      sourceId={sourceId}
+                      onJumpTo={(ref) => requestJump(sourceId, ref.id)}
+                    />
+                  )}
                   {message.type === 'ai' && message.media && message.media.length > 0 && (
                     <MessageMedia media={message.media} className="mt-[12px]" />
                   )}

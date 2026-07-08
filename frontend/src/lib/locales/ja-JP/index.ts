@@ -512,6 +512,7 @@ export const jaJP = {
       sectionLabel: "セクション",
       groupBySection: "セクションでグループ化",
       unsectioned: "セクションなし",
+      jumpLegacyPdf: "このハイライトを表示するためにPDFを開きました。",
     },
     reader: {
       tab: "リーダー",
@@ -524,6 +525,8 @@ export const jaJP = {
       figureMissing: "図の画像は利用できません",
       empty: "表示する内容がまだありません。",
       highlightLabel: "ハイライト",
+      staleChip: "{count} 件が古い",
+      staleTip: "一部のハイライトは古い解析に紐付いています。再処理して再アンカーしてください。",
     },
   },
   chat: {
@@ -532,6 +535,9 @@ export const jaJP = {
     annotationRefPage: "p.{page}",
     annotationRefFigure: "図",
     jumpToHighlight: "ハイライトへ移動",
+    askAboutHighlight: "このハイライトした箇所について教えてください。",
+    askAboutTag: "「{tag}」でタグ付けしたハイライトを理解する手助けをしてください。",
+    tagAskTruncated: "「{tag}」でタグ付けされた最初の10件のハイライトのみ送信されました。",
     chatSettings: "Chat settings",
     sideChatDefault: "Side-chat default model",
     sideChatDefaultHelper: "New side chats spawned from a passage start on this model.",

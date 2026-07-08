@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQueries } from '@tanstack/react-query'
+import { Clock, RotateCw } from 'lucide-react'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { useParseStatus, SOURCE_BLOCK_KEYS } from '@/lib/hooks/use-source-blocks'
 import {
@@ -92,14 +94,30 @@ interface ChunkRange {
 export function ReaderView({
   sourceId,
   onChatAboutHighlight,
+  onReprocess,
+  jumpApiRef,
 }: {
   sourceId: string
   /**
    * Optional "Ask AI about this passage" action (D8 wires it for reader↔chat
    * parity). Threaded into the selection toolbar + highlight popover; when
    * undefined the Ask-AI button hides itself, exactly like the PDF viewer.
+   * The optional 2nd arg carries the annotation id (present for an existing
+   * highlight's popover; absent for a fresh selection → quote fallback).
    */
-  onChatAboutHighlight?: (quote: string) => void
+  onChatAboutHighlight?: (quote: string, annotationId?: string) => void
+  /**
+   * D8: opens the same Re-process confirm dialog the header chip uses, so a
+   * stale-highlight CTA inside the reader can trigger a re-anchor. Hidden when
+   * undefined.
+   */
+  onReprocess?: () => void
+  /**
+   * D8 jump bridge: SourceDetailContent fills this ref with `handleJump` so a
+   * chat reference pill can scroll the reader to a block while it's the active
+   * tab.
+   */
+  jumpApiRef?: React.MutableRefObject<((seq: number) => void) | null>
 }) {
   const { t } = useTranslation()
   const parseStatus = useParseStatus(sourceId)
@@ -327,6 +345,26 @@ export function ReaderView({
     }
   }, [pendingScrollSeq, blocks])
 
+  // D8: hand `handleJump` to the parent so a chat pill can scroll the reader to
+  // a block while the Reader tab is active.
+  useEffect(() => {
+    if (!jumpApiRef) return
+    jumpApiRef.current = (seq: number) => {
+      void handleJump(seq)
+    }
+    return () => {
+      if (jumpApiRef) jumpApiRef.current = null
+    }
+  }, [jumpApiRef, handleJump])
+
+  // D8 stale-highlight CTA: highlights anchored to an older parse generation
+  // (§2.3) don't render inline; surface a count + a re-process action so the
+  // user can re-anchor them (B5 re-anchors on reparse).
+  const staleCount = useMemo(
+    () => annotations.filter((a) => a.anchor_state === 'stale').length,
+    [annotations]
+  )
+
   const minLoaded = Math.min(...loadedChunks)
   const maxLoaded = Math.max(...loadedChunks)
   const topLoading = ranges[0]?.index === minLoaded && spanQueries[0]?.isLoading
@@ -356,6 +394,22 @@ export function ReaderView({
     <div className="flex h-full min-h-0 flex-1 flex-col">
       <div className="mb-2 flex flex-shrink-0 items-center gap-2">
         <ReaderOutline sections={sectionIndex} onJump={handleJump} />
+        {staleCount > 0 && onReprocess && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={onReprocess}
+                className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 transition-colors hover:bg-amber-500/10 dark:text-amber-400"
+              >
+                <Clock className="h-3 w-3" aria-hidden="true" />
+                {t('sources.reader.staleChip').replace('{count}', String(staleCount))}
+                <RotateCw className="h-3 w-3" aria-hidden="true" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-56">{t('sources.reader.staleTip')}</TooltipContent>
+          </Tooltip>
+        )}
       </div>
       <div ref={containerRef} className="min-h-0 flex-1 overflow-y-auto pr-1">
         <div ref={topSentinelRef} className="h-1" />
@@ -479,8 +533,8 @@ export function ReaderView({
           }}
           onChatAboutHighlight={
             onChatAboutHighlight
-              ? (quote) => {
-                  onChatAboutHighlight(quote)
+              ? (quote, annotationId) => {
+                  onChatAboutHighlight(quote, annotationId)
                   setActivePopover(null)
                 }
               : undefined
