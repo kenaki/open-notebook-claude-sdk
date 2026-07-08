@@ -19,7 +19,6 @@ from open_notebook.exceptions import NotFoundError
 from open_notebook.graphs.source_chat import (
     annotation_block_content,
     build_annotation_context_section,
-    encode_annotation_payload,
 )
 from open_notebook.graphs.source_chat import (
     source_chat_graph as source_chat_graph,
@@ -505,16 +504,15 @@ async def send_message_to_source_chat(
         )
 
         # Resolve any structured annotation references (Chunk D2): records the
-        # cites_annotation edges and builds the AI-context section + refs, then
-        # piggybacks both onto the message content (the only router->worker
-        # channel — the chat_completion source branch forwards only `message`).
-        message_payload = request.message
+        # cites_annotation edges and builds the AI-context section + refs. Both
+        # travel to the worker as typed fields on the command input (not embedded
+        # in message content), which the chat_completion source branch forwards
+        # into graph state / the human message's additional_kwargs.
+        annotation_ctx = ""
+        annotation_refs: List[dict] = []
         if request.annotation_ids:
             annotation_ctx, annotation_refs = await _resolve_annotations_for_chat(
                 source, full_session_id, request.annotation_ids
-            )
-            message_payload = request.message + encode_annotation_payload(
-                annotation_ctx, annotation_refs
             )
 
         job_id = await CommandService.submit_command_job(
@@ -522,11 +520,13 @@ async def send_message_to_source_chat(
             "chat_completion",
             {
                 "session_id": full_session_id,
-                "message": message_payload,
+                "message": request.message,
                 "model_override": model_override,
                 "kind": "source",
                 "source_id": full_source_id,
                 "label": request.message[:60],
+                "annotation_context": annotation_ctx,
+                "annotation_refs": annotation_refs,
             },
         )
 

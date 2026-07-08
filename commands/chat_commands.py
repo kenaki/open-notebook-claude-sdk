@@ -44,6 +44,12 @@ class ChatCompletionInput(CommandInput):
     source_id: Optional[str] = None
     notebook_id: Optional[str] = None
     label: str = ""  # short display label for the background-jobs tray
+    # Structured source-chat annotation refs (Chunk D2), resolved by the router
+    # and forwarded as typed fields instead of piggybacked on message content:
+    # ``annotation_context`` is the REFERENCED-ANNOTATION prompt section,
+    # ``annotation_refs`` the compact list rendered as pills by the session-GET.
+    annotation_context: Optional[str] = None
+    annotation_refs: list[dict] = []
 
 
 class ChatCompletionOutput(CommandOutput):
@@ -178,7 +184,21 @@ async def chat_completion_command(
             state_values["messages"] = state_values.get("messages", [])
             state_values["source_id"] = _prefixed(input_data.source_id or "", "source")
             state_values["model_override"] = model_override
-            state_values["messages"].append(HumanMessage(content=input_data.message))
+            # Structured annotation refs (Chunk D2) travel as typed state, not in
+            # message content: the resolved REFERENCED-ANNOTATION section goes into
+            # graph state and the compact refs list rides on the human message's
+            # additional_kwargs so the checkpoint (and session-GET) render pills.
+            state_values["annotation_context"] = input_data.annotation_context or ""
+            additional_kwargs = (
+                {"annotation_refs": input_data.annotation_refs}
+                if input_data.annotation_refs
+                else {}
+            )
+            state_values["messages"].append(
+                HumanMessage(
+                    content=input_data.message, additional_kwargs=additional_kwargs
+                )
+            )
         else:
             graph = chat_graph
             notebook = None

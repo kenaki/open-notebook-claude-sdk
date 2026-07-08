@@ -6,16 +6,16 @@ no LLM, no checkpoint:
 
 - ``annotation_block_content``: per-type rendering of an anchored block.
 - ``build_annotation_context_section``: the ``REFERENCED ANNOTATION n`` block.
-- ``encode_annotation_payload`` / ``extract_annotation_payload``: the
-  sentinel-delimited router->worker codec (round trip + degrade paths).
+
+The router->worker transport is now typed fields on ``ChatCompletionInput``
+(``annotation_context`` + ``annotation_refs``) rather than a message-content
+codec; ``test_chat_input_carries_annotation_fields`` pins that channel.
 """
 
+from commands.chat_commands import ChatCompletionInput
 from open_notebook.graphs.source_chat import (
-    ANNOTATION_CTX_SENTINEL,
     annotation_block_content,
     build_annotation_context_section,
-    encode_annotation_payload,
-    extract_annotation_payload,
 )
 
 # --- annotation_block_content -------------------------------------------------
@@ -81,38 +81,30 @@ def test_section_blank_content_gets_placeholder():
     assert "[unsectioned] (no text)" in out
 
 
-# --- encode / extract round trip ----------------------------------------------
+# --- router->worker transport (typed command fields) --------------------------
 
 
-def test_encode_extract_round_trip():
+def test_chat_input_carries_annotation_fields():
+    """The resolved context + refs ride as typed fields on the command input,
+    NOT embedded in ``message`` (which stays the clean user prose)."""
     context = "REFERENCED ANNOTATION 1: [Intro] hello"
     refs = [{"id": "source_annotation:a", "quote": "hello", "block_seq": 5, "page": 2}]
-    encoded = encode_annotation_payload(context, refs)
-    assert encoded.startswith(ANNOTATION_CTX_SENTINEL)
-
-    message = "What does this mean?" + encoded
-    clean, out_ctx, out_refs = extract_annotation_payload(message)
-    assert clean == "What does this mean?"
-    assert out_ctx == context
-    assert out_refs == refs
-
-
-def test_encode_empty_returns_empty_string():
-    assert encode_annotation_payload("", []) == ""
-
-
-def test_extract_without_sentinel_is_unchanged():
-    assert extract_annotation_payload("plain message") == ("plain message", "", None)
+    inp = ChatCompletionInput(
+        session_id="chat_session:x",
+        message="What does this mean?",
+        kind="source",
+        source_id="source:s",
+        annotation_context=context,
+        annotation_refs=refs,
+    )
+    assert inp.message == "What does this mean?"
+    assert inp.annotation_context == context
+    assert inp.annotation_refs == refs
 
 
-def test_extract_non_string_is_unchanged():
-    payload = [{"type": "text", "text": "hi"}]
-    assert extract_annotation_payload(payload) == (payload, "", None)
-
-
-def test_extract_malformed_json_degrades_to_clean_head():
-    message = "hi" + ANNOTATION_CTX_SENTINEL + "{not valid json"
-    clean, ctx, refs = extract_annotation_payload(message)
-    assert clean == "hi"
-    assert ctx == ""
-    assert refs is None
+def test_chat_input_annotation_fields_default_to_empty():
+    """The no-refs path leaves the fields at their empty defaults so the source
+    branch of chat_commands builds a clean human message with no extra kwargs."""
+    inp = ChatCompletionInput(session_id="chat_session:x", message="hello")
+    assert inp.annotation_context is None
+    assert inp.annotation_refs == []

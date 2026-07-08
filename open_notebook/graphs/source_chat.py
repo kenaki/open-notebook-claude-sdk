@@ -1,6 +1,5 @@
-import json
 import sqlite3
-from typing import Annotated, Any, Dict, List, Optional, Tuple
+from typing import Annotated, Any, Dict, List, Optional
 
 from ai_prompter import Prompter
 from langchain_core.messages import AIMessage, SystemMessage
@@ -36,6 +35,9 @@ class SourceChatState(TypedDict):
     context: Optional[str]
     model_override: Optional[str]
     context_indicators: Optional[Dict[str, List[str]]]
+    # Resolved REFERENCED-ANNOTATION prompt section forwarded by chat_commands
+    # (Chunk D2); the compact refs list rides on the human message's kwargs.
+    annotation_context: Optional[str]
 
 
 # --- Claude-agent slim context (AGENT-CTX N1) --------------------------------
@@ -74,20 +76,13 @@ def build_source_agent_context(source) -> str:
 # --- Structured chat references (Chunk D2) -----------------------------------
 # A source-chat message can carry N annotation references. The API router
 # (which owns the send-message endpoint + DB access) resolves each id into a
-# structured context section + a compact ``annotation_refs`` list, then piggybacks
-# both onto the submitted message content through the ``ANNOTATION_CTX_SENTINEL``
-# codec below. That is the ONLY router->worker channel available: the source
-# branch of ``commands/chat_commands.py`` (out of this track's ownership) forwards
-# only ``message`` / ``source_id`` / ``model_override`` into the graph state, so
-# the resolved refs ride inside ``message`` and this node lifts them back out
-# BEFORE the LLM turn — injecting the context into both prompt paths and stamping
-# ``annotation_refs`` onto the (checkpointed) human message so the session-GET
-# response can render pills. If a cleaner channel is later added to the command
-# (an ``annotation_ids`` field on ChatCompletionInput), this codec can be dropped.
-
-# Symbol-for-record-separator x2 — vanishingly unlikely to occur in user prose,
-# so partitioning the message content on it is unambiguous.
-ANNOTATION_CTX_SENTINEL = "\n␞␞ANNOTATION_CONTEXT␞␞\n"
+# structured context section + a compact ``annotation_refs`` list. Both reach the
+# worker as typed fields on ``ChatCompletionInput``: the source branch of
+# ``commands/chat_commands.py`` puts the context into graph state
+# (``annotation_context``) and the refs onto the human message's
+# ``additional_kwargs``. This node reads the context from state and injects it
+# into both prompt paths; the refs already ride on the checkpointed human
+# message, so the session-GET response can render pills without any re-emit.
 
 
 def annotation_block_content(block: Dict[str, Any], quote_fallback: Optional[str]) -> str:
@@ -130,35 +125,6 @@ def build_annotation_context_section(resolved: List[Dict[str, Any]]) -> str:
         if note:
             lines.append(f"  User note: {note}")
     return "\n".join(lines)
-
-
-def encode_annotation_payload(context: str, refs: List[Dict[str, Any]]) -> str:
-    """Encode the resolved section + refs into a sentinel-delimited trailer.
-
-    Appended to the user's message content by the router; :func:`extract_annotation_payload`
-    reverses it in the graph node. Returns "" when there is nothing to carry."""
-    if not context and not refs:
-        return ""
-    return ANNOTATION_CTX_SENTINEL + json.dumps(
-        {"context": context, "refs": refs}, ensure_ascii=False
-    )
-
-
-def extract_annotation_payload(
-    content: Any,
-) -> Tuple[Any, str, Optional[List[Dict[str, Any]]]]:
-    """Split a message content string into (clean_content, context, refs).
-
-    Inverse of :func:`encode_annotation_payload`. Non-string content or content
-    without the sentinel returns ``(content, "", None)`` unchanged. Pure."""
-    if not isinstance(content, str) or ANNOTATION_CTX_SENTINEL not in content:
-        return content, "", None
-    head, _, tail = content.partition(ANNOTATION_CTX_SENTINEL)
-    try:
-        data = json.loads(tail)
-    except Exception:
-        return head, "", None
-    return head, (data.get("context") or ""), (data.get("refs") or None)
 
 
 def _slim_source_agent_payload(payload: list, prompt_data: Optional[dict]) -> list:
@@ -309,37 +275,14 @@ def _call_model_with_source_context_inner(
             insights.append(insight)
             context_indicators["insights"].append(insight.id)
 
-    # Lift any structured annotation references the router piggybacked onto the
-    # latest human message (Chunk D2). ``annotation_ctx`` is injected into BOTH
-    # prompt paths; ``annotation_refs`` is stamped back onto the human message so
-    # the checkpoint (and session-GET) can render reference pills. The turn sent
-    # to the LLM uses the CLEAN content (sentinel stripped).
+    # Structured annotation references (Chunk D2): the router resolved the ids and
+    # ``chat_commands`` forwarded the context as typed state and the compact refs
+    # on the human message's ``additional_kwargs`` (already checkpointed there, so
+    # the session-GET renders pills without a re-emit). Here we only read the
+    # context and inject it into BOTH prompt paths.
     messages = state.get("messages", [])
-    annotation_ctx = ""
-    updated_human = None
+    annotation_ctx = state.get("annotation_context", "") or ""
     payload_messages = messages
-    if messages:
-        last = messages[-1]
-        clean_content, annotation_ctx, annotation_refs = extract_annotation_payload(
-            getattr(last, "content", "")
-        )
-        if annotation_ctx or annotation_refs:
-            cleaned_human = last.model_copy(
-                update={
-                    "content": clean_content,
-                    "additional_kwargs": {
-                        **(getattr(last, "additional_kwargs", None) or {}),
-                        "annotation_refs": annotation_refs or [],
-                    },
-                }
-            )
-            # The LLM turn ALWAYS sees the sentinel-stripped content.
-            payload_messages = messages[:-1] + [cleaned_human]
-            # Re-emit for the checkpoint (add_messages replace-by-id) only when the
-            # message already has a stable id — otherwise a re-emit would append a
-            # duplicate instead of replacing.
-            if getattr(last, "id", None):
-                updated_human = cleaned_human
 
     # Format context for the prompt
     formatted_context = _format_source_context(context_data)
@@ -381,14 +324,11 @@ def _call_model_with_source_context_inner(
     cleaned_content = clean_thinking_content(content)
     cleaned_message = ai_message.model_copy(update={"content": cleaned_content})
 
-    # Update state with context information. When the turn carried annotation
-    # references, re-emit the (same-id) human message so add_messages replaces it
-    # with the sentinel-stripped content + persisted ``annotation_refs``.
-    messages_update = (
-        [updated_human, cleaned_message] if updated_human else cleaned_message
-    )
+    # Update state with context information. Only the AI message is emitted — the
+    # human message (with its ``annotation_refs`` kwargs) was already checkpointed
+    # verbatim when chat_commands appended it, so no re-emit is needed.
     return {
-        "messages": messages_update,
+        "messages": cleaned_message,
         "source": source,
         "insights": insights,
         "context": formatted_context,
