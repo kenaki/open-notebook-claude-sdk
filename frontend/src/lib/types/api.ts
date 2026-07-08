@@ -413,6 +413,10 @@ export interface SourceChatMessage {
   // Never present on messages fetched from the backend.
   pending?: boolean
   error?: boolean
+  // Persisted reasoning trace for this AI turn (agent-console track A/B10).
+  // Optional/absent on old messages and non-thinking-capable models — the UI
+  // renders nothing when unset.
+  thinking?: string
 }
 
 export interface SourceChatContextIndicator {
@@ -494,6 +498,10 @@ export interface NotebookChatMessage {
   // Never present on messages fetched from the backend.
   pending?: boolean
   error?: boolean
+  // Persisted reasoning trace for this AI turn (agent-console track A/B10).
+  // Optional/absent on old messages and non-thinking-capable models — the UI
+  // renders nothing when unset.
+  thinking?: string
 }
 
 export interface NotebookChatSessionWithMessages extends NotebookChatSession {
@@ -584,6 +592,28 @@ export interface CommandJobSummary {
    * instead of the raw English `phase` string.
    */
   progress?: { phase?: string; tool_name?: string; tool_input?: Record<string, unknown> } | null
+}
+
+// Agent console (agent-console B1): one entry of `progress.events[]` — mirrors
+// the backend event contract exactly (see .claude/plans/agent-console/
+// coordinator.md "Event contract"). JSON primitives only; append-only, capped
+// server-side at 200 (thinking additionally capped at 150 + a truncation marker).
+export type JobEvent = { t: string } & (
+  | { type: 'phase'; label: string }
+  | { type: 'tool_call'; tool_name: string; tool_input?: Record<string, unknown> }
+  | { type: 'tool_result'; tool_name: string; preview?: string; is_error?: boolean }
+  | { type: 'thinking'; text: string }
+  | { type: 'context'; chars?: number; preview?: string }
+)
+
+// Detail payload from GET /commands/jobs/{job_id} (agent-console B1). The
+// console reads this query directly rather than through jobs-store, which
+// only ever holds today's snapshot progress (coordinator Decision #9). List
+// endpoints (`/commands/active`, `/commands/jobs`) strip `progress.events`
+// server-side; only this detail shape carries the full event log.
+export type CommandJobDetail = CommandJobSummary & {
+  args?: Record<string, unknown>
+  progress?: (CommandJobSummary['progress'] & { events?: JobEvent[] }) | null
 }
 
 // Notebook Multi-Chat Workspace (Plan C) — client-only per-chat workspace state.

@@ -1,5 +1,5 @@
 import { get } from './client'
-import { CommandJobSummary } from '@/lib/types/api'
+import { CommandJobDetail, CommandJobSummary } from '@/lib/types/api'
 
 export const commandsApi = {
   /**
@@ -14,10 +14,12 @@ export const commandsApi = {
 
   /**
    * Fetch a single job by its full SurrealDB record id
-   * (e.g. "command:abc123" as returned by listActive / submit).
+   * (e.g. "command:abc123" as returned by listActive / submit). Returns the
+   * detail shape (agent-console B1) — full `progress.events[]` + `args` — the
+   * job tray poller ignores the extra fields; the agent console consumes them.
    */
-  getJob: async (id: string): Promise<CommandJobSummary> => {
-    return get<CommandJobSummary>(`/commands/jobs/${encodeURIComponent(id)}`)
+  getJob: async (id: string): Promise<CommandJobDetail> => {
+    return get<CommandJobDetail>(`/commands/jobs/${encodeURIComponent(id)}`)
   },
 }
 

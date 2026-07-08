@@ -46,4 +46,7 @@ export const QUERY_KEYS = {
   speakerProfiles: ['podcasts', 'speaker-profiles'] as const,
   languages: ['languages'] as const,
   sourceAnnotations: (sourceId: string) => ['sources', sourceId, 'annotations'] as const,
+  // Agent console (agent-console B1): detail query for a single command job's
+  // full progress (events + args), polled while the console is open.
+  commandJob: (jobId: string) => ['commands', 'job', jobId] as const,
 }
