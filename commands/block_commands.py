@@ -56,6 +56,7 @@ from open_notebook.parsers.docling_parser import (
     DoclingBlockParser,
     page_map_from_blocks,
 )
+from open_notebook.utils.block_images import extract_block_images
 from open_notebook.utils.job_progress import report_job_progress
 
 
@@ -285,6 +286,13 @@ async def build_blocks_command(input_data: BuildBlocksInput) -> BuildBlocksOutpu
         await report_job_progress(job_id, "Parsing blocks", gen=gen)
         result = await asyncio.to_thread(parser.parse, Path(file_path))
         finalized = finalize(result)
+
+        # ---- 3b. RASTERIZE figure/table crops (B3, db-design §4 step 3) ---
+        # Sets image_ref on figure/table blocks (relative to UPLOADS_FOLDER);
+        # per-block failures degrade to image_ref=None and never abort the parse.
+        await asyncio.to_thread(
+            extract_block_images, Path(file_path), finalized.blocks, src_key, gen
+        )
 
         # ---- 4. INSERT blocks (invisible until the flip) -----------------
         await report_job_progress(

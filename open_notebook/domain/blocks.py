@@ -233,16 +233,22 @@ async def bulk_insert_blocks(
 
 
 async def delete_generation(src_key: str, gen: int) -> None:
-    """Range-DELETE every block of one generation.
+    """Range-DELETE every block of one generation + its rasterized crops.
 
     The generation is its own contiguous key band ``[src_key, gen, *]``; delete
     it with wide, arity-uniform 3-element seq bounds (a 2-element prefix band
-    does not cover 3-element ids on 2.6.5). No index, one range op.
+    does not cover 3-element ids on 2.6.5). No index, one range op. The matching
+    figure/table crop dir (B3, ``{UPLOADS_FOLDER}/blocks/<src_key>/<gen>``) is
+    ``rmtree``'d too (ignore-missing) so crops never outlive their blocks.
     """
     await repo_query(
         f"DELETE {BLOCK_TABLE}:[$k, $g, $lo]..=[$k, $g, $hi];",
         {"k": src_key, "g": gen, "lo": _SEQ_MIN, "hi": _SEQ_MAX},
     )
+    # Local import avoids a domain→utils import cycle at module load.
+    from open_notebook.utils.block_images import remove_crop_dir
+
+    remove_crop_dir(src_key, gen)
 
 
 async def delete_all_for_source(src_key: str) -> None:
@@ -259,6 +265,11 @@ async def delete_all_for_source(src_key: str) -> None:
         f"DELETE {PARSE_TABLE} WHERE source = $sid;",
         {"sid": sid},
     )
+    # Reclaim the whole source's crop tree (catches any stray gen dir the header
+    # loop above didn't cover). Local import avoids a domain→utils cycle.
+    from open_notebook.utils.block_images import remove_crop_dir
+
+    remove_crop_dir(src_key)
 
 
 async def sweep_orphan_generations(src_key: str, keep_gen: int) -> List[int]:
