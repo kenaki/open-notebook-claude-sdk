@@ -526,6 +526,18 @@ class ParseStatusResponse(BaseModel):
     error: Optional[str] = None
 
 
+class BlockSpanResponse(BaseModel):
+    """A windowed span of pages' blocks with full text for the markdown reader
+    view (db-design §3a, Decision #12). Blocks arrive in reading (seq) order with
+    text/latex/section_path/image_url populated. `start_page`/`end_page` reflect
+    the CLAMPED bounds actually served (max 10 pages per request)."""
+
+    gen: int
+    start_page: int
+    end_page: int
+    blocks: List[BlockResponse] = Field(default_factory=list)
+
+
 # Context API models
 class ContextConfig(BaseModel):
     sources: Dict[str, str] = Field(

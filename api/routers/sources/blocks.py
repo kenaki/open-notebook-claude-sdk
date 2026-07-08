@@ -16,7 +16,12 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 from loguru import logger
 
-from api.models import BlockResponse, PageBlocksResponse, ParseStatusResponse
+from api.models import (
+    BlockResponse,
+    BlockSpanResponse,
+    PageBlocksResponse,
+    ParseStatusResponse,
+)
 from open_notebook.config import UPLOADS_FOLDER
 from open_notebook.domain import blocks as block_helpers
 from open_notebook.domain.notebook import Source
@@ -143,6 +148,61 @@ async def get_page_blocks(
     except Exception as e:
         logger.error(f"Error fetching blocks for source {source_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error fetching blocks: {str(e)}")
+
+
+_MAX_SPAN_PAGES = 10  # reader paginates; cap the payload per request (db-design §3a)
+
+
+@router.get(
+    "/sources/{source_id}/blocks/span",
+    response_model=BlockSpanResponse,
+    response_model_exclude_none=True,
+)
+async def get_block_span(
+    source_id: str,
+    start_page: int = Query(..., ge=1, description="1-based first page (inclusive)"),
+    end_page: int = Query(..., ge=1, description="1-based last page (inclusive)"),
+):
+    """A span of pages' blocks with full text, for the markdown reader (db-design §3a).
+
+    Clamps ``end_page`` to at most ``start_page + 9`` (10 pages max) AND to the
+    document's last page, then does ONE range scan across the span's whole seq
+    band. The response echoes the clamped bounds so the client knows what it got.
+    404 if the source was never parsed; 422 on an invalid range.
+
+    Registered BEFORE the bare ``/blocks/{seq}`` route so the literal ``span`` is
+    not captured by that int path-param.
+    """
+    try:
+        source = await _get_source_meta(source_id)
+        gen = _require_current_gen(source)
+        src_key = _src_key(source.id)
+        header = await block_helpers.get_parse_header(src_key, gen)
+        if header is None or header.page_index is None:
+            raise HTTPException(status_code=404, detail="Parse header not found")
+        page_index = header.page_index
+        page_count = len(page_index)
+        if end_page < start_page or start_page > page_count:
+            raise HTTPException(
+                status_code=422,
+                detail="Invalid page range for this source",
+            )
+        # Clamp: at most 10 pages, and never past the last page.
+        clamped_end = min(end_page, start_page + _MAX_SPAN_PAGES - 1, page_count)
+        lo = page_index[start_page - 1][0]
+        hi = page_index[clamped_end - 1][1]
+        rows = await block_helpers.get_range(src_key, gen, lo, hi)
+        return BlockSpanResponse(
+            gen=gen,
+            start_page=start_page,
+            end_page=clamped_end,
+            blocks=[_block_to_response(r, source_id) for r in rows],
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching block span for source {source_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error fetching block span: {str(e)}")
 
 
 @router.get(
