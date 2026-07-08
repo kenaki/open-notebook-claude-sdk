@@ -3,8 +3,13 @@
 -- source_annotation is SCHEMAFULL, so a new field must be DEFINEd here (a
 -- Pydantic-only field would be dropped on save). Mirrors migration 17's
 -- pattern for adding a collection field to a SCHEMAFULL table
--- (chat_tag_colors ON notebook). Rows created before this migration read back
--- as [] via the DEFAULT.
+-- (chat_tag_colors ON notebook).
+--
+-- CORRECTION (live-verified): a DEFINE FIELD with DEFAULT does NOT backfill
+-- existing rows. Rows created before this migration keep `tags` as NONE (not
+-- []), which then breaks any UPDATE of that row (the SCHEMAFULL field has no
+-- value to satisfy). Migration 24 fixes this with an explicit backfill
+-- (`UPDATE source_annotation SET tags = [] WHERE tags IS NONE`).
 --
 -- tags: a plain array of strings the user attaches to a highlight (e.g.
 -- "Important", "Question", chapter names). Auto-colored on the frontend from
