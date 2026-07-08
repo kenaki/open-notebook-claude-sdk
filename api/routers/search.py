@@ -1,24 +1,65 @@
 import json
-from typing import AsyncGenerator
+from typing import AsyncGenerator, List, Literal, Optional
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from loguru import logger
+from pydantic import BaseModel, Field
 
-from api.models import AskRequest, AskResponse, SearchRequest, SearchResponse
+from api.models import AskRequest, AskResponse, SearchResponse
 from open_notebook.ai.models import Model, model_manager
 from open_notebook.domain.notebook import text_search, vector_search
 from open_notebook.exceptions import DatabaseOperationError, InvalidInputError
 from open_notebook.graphs.ask import graph as ask_graph
+from open_notebook.utils.hybrid_search import hybrid_search
 
 router = APIRouter()
 
 
+class SearchRequest(BaseModel):
+    """POST /search body.
+
+    Superset of the base schema in api.models: adds the ``hybrid`` search type
+    (dense + sparse RRF, db-design 3e) and an optional ``source_ids`` scope.
+    Defined locally (not in api/models.py) so the "text"/"vector" contract is
+    untouched; hybrid is purely additive.
+    """
+
+    query: str = Field(..., description="Search query")
+    type: Literal["text", "vector", "hybrid"] = Field(
+        "text", description="Search type"
+    )
+    limit: int = Field(100, description="Maximum number of results", ge=1, le=1000)
+    search_sources: bool = Field(True, description="Include sources in search")
+    search_notes: bool = Field(True, description="Include notes in search")
+    minimum_score: float = Field(
+        0.2, description="Minimum score for vector/hybrid search", ge=0, le=1
+    )
+    source_ids: Optional[List[str]] = Field(
+        None, description="Restrict hybrid/vector scope to these source ids"
+    )
+
+
 @router.post("/search", response_model=SearchResponse)
 async def search_knowledge_base(search_request: SearchRequest):
-    """Search the knowledge base using text or vector search."""
+    """Search the knowledge base using text, vector, or hybrid search."""
     try:
-        if search_request.type == "vector":
+        if search_request.type == "hybrid":
+            # Hybrid (dense + sparse RRF) needs the embedding model for the
+            # dense arm, same precondition as vector search.
+            if not await model_manager.get_embedding_model():
+                raise HTTPException(
+                    status_code=400,
+                    detail="Hybrid search requires an embedding model. Please configure one in the Models section.",
+                )
+
+            results = await hybrid_search(
+                keyword=search_request.query,
+                source_ids=search_request.source_ids,
+                k=search_request.limit,
+                min_score=search_request.minimum_score,
+            )
+        elif search_request.type == "vector":
             # Check if embedding model is available for vector search
             if not await model_manager.get_embedding_model():
                 raise HTTPException(

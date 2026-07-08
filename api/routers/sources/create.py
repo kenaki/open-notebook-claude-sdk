@@ -391,3 +391,51 @@ async def retry_source_processing(source_id: str):
         raise HTTPException(
             status_code=500, detail=f"Error retrying source processing: {str(e)}"
         )
+
+
+@router.post("/sources/{source_id}/reparse")
+async def reparse_source(source_id: str):
+    """Explicitly rebuild the block substrate for a source (Decision #8).
+
+    Submits ``build_blocks`` with ``force=true`` — bypassing the content-hash
+    gate — so the user can re-run the parser (e.g. after a parser upgrade). No
+    auto-on-open: this is the deliberate trigger. Returns the queued command id
+    and the generation the new parse will write. 409 while a parse is already
+    building (its header is ``status='building'``) so we never race two builds
+    into the same generation.
+    """
+    # Existence check without shipping the textbook-sized full_text/page_map.
+    await Source.get_meta(source_id)
+
+    sid = ensure_record_id(source_id)
+    headers = await repo_query(
+        "SELECT gen, status FROM source_parse WHERE source = $sid",
+        {"sid": sid},
+    )
+
+    if any(h.get("status") == "building" for h in (headers or [])):
+        raise HTTPException(
+            status_code=409,
+            detail="A parse is already building for this source. Wait for it to finish before re-parsing.",
+        )
+
+    max_gen = max((h.get("gen") or 0 for h in (headers or [])), default=0)
+    gen_expected = max_gen + 1
+
+    try:
+        command_id = await CommandService.submit_command_job(
+            "open_notebook",
+            "build_blocks",
+            {"source_id": str(sid), "force": True},
+        )
+    except Exception as e:
+        logger.error(f"Failed to submit reparse command for source {source_id}: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to queue re-parse: {str(e)}"
+        )
+
+    logger.info(
+        f"Submitted reparse (build_blocks force) command {command_id} "
+        f"for source {source_id} (gen_expected={gen_expected})"
+    )
+    return {"command_id": command_id, "gen_expected": gen_expected}
