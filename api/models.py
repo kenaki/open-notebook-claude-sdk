@@ -478,6 +478,54 @@ class UpdateAnnotationRequest(BaseModel):
     tags: Optional[List[str]] = None
 
 
+# ---------------------------------------------------------------------------
+# Block / parse schemas (pdf-block-ingestion Track C — db-design §2–§3)
+# Payload-hygienic by construction: optional fields are OMITTED by projection
+# (routes serialize with response_model_exclude_none), so a page overlay ships
+# no text and a window ships no bbox. Composite block ids read back as strings
+# but the API surfaces only the plain `seq`.
+# ---------------------------------------------------------------------------
+class BlockResponse(BaseModel):
+    """One typed block (db-design §2.1). The overlay projection fills only
+    seq/type/page/bbox/parent_seq/level; text/latex/section_path/table_data and
+    the derived `image_url` appear only on text/full/window projections."""
+
+    seq: int
+    type: str
+    page: Optional[int] = None
+    bbox: Optional[List[float]] = None
+    parent_seq: Optional[int] = None
+    level: Optional[int] = None
+    section_path: Optional[List[str]] = None
+    text: Optional[str] = None
+    latex: Optional[str] = None
+    # /api/sources/{id}/blocks/{seq}/image — set only when the block carries a crop
+    image_url: Optional[str] = None
+    table_data: Optional[Dict[str, Any]] = None
+
+
+class PageBlocksResponse(BaseModel):
+    """One page's blocks in reading (seq) order (db-design §3a)."""
+
+    page: int
+    gen: int
+    blocks: List[BlockResponse] = Field(default_factory=list)
+
+
+class ParseStatusResponse(BaseModel):
+    """Parse status header for the source's current generation (db-design §2.2).
+    Polled by the frontend to track a re-parse."""
+
+    parse_status: Optional[str] = None
+    gen: int
+    parser_name: Optional[str] = None
+    parser_version: Optional[str] = None
+    block_count: Optional[int] = None
+    page_count: Optional[int] = None
+    section_index: Optional[List[Any]] = None
+    error: Optional[str] = None
+
+
 # Context API models
 class ContextConfig(BaseModel):
     sources: Dict[str, str] = Field(
