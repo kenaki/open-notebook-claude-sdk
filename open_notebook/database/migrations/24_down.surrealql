@@ -1,0 +1,106 @@
+-- Migration 24 DOWN: reverse the block substrate. Restores fn::vector_search
+-- (inlined migration-21 body) and source_delete (inlined migration-1 body).
+-- Comments on full lines only. The tags backfill is data, not reverted.
+
+REMOVE TABLE IF EXISTS document_block;
+REMOVE TABLE IF EXISTS source_parse;
+REMOVE TABLE IF EXISTS cites_annotation;
+
+REMOVE FIELD IF EXISTS parse_status ON source;
+REMOVE FIELD IF EXISTS parse_generation ON source;
+REMOVE FIELD IF EXISTS parser_name ON source;
+REMOVE FIELD IF EXISTS parser_version ON source;
+
+REMOVE FIELD IF EXISTS block_seq ON source_annotation;
+REMOVE FIELD IF EXISTS block_end_seq ON source_annotation;
+REMOVE FIELD IF EXISTS anchor_start ON source_annotation;
+REMOVE FIELD IF EXISTS anchor_end ON source_annotation;
+REMOVE FIELD IF EXISTS anchor_gen ON source_annotation;
+REMOVE FIELD IF EXISTS quote_hash ON source_annotation;
+
+REMOVE FIELD IF EXISTS block_start ON source_embedding;
+REMOVE FIELD IF EXISTS block_end ON source_embedding;
+REMOVE FIELD IF EXISTS gen ON source_embedding;
+
+REMOVE INDEX IF EXISTS idx_source_section_source ON source_section;
+
+REMOVE FUNCTION IF EXISTS fn::vector_search_scoped;
+
+DEFINE FUNCTION OVERWRITE fn::vector_search($query: array<float>, $match_count: int, $sources: bool, $show_notes: bool, $min_similarity: float) {
+    let $source_embedding_search =
+        IF $sources {(
+            SELECT
+                source.id as id,
+                source.id as parent_id,
+                source.title as title,
+                array::flatten([content]) as matches,
+                page_number,
+                bbox,
+                vector::similarity::cosine(embedding, $query) as similarity
+            FROM source_embedding
+            WHERE vector::similarity::cosine(embedding, $query) >= $min_similarity
+            ORDER BY similarity DESC
+            LIMIT $match_count
+        )}
+        ELSE { [] };
+
+    let $source_insight_search =
+        IF $sources {(
+            SELECT
+                id,
+                insight_type + ' - ' + (source.title OR '') as title,
+                content,
+                source.id as parent_id,
+                vector::similarity::cosine(embedding, $query) as similarity
+            FROM source_insight
+            WHERE vector::similarity::cosine(embedding, $query) >= $min_similarity
+            ORDER BY similarity DESC
+            LIMIT $match_count
+        )}
+        ELSE { [] };
+
+    let $note_content_search =
+        IF $show_notes {(
+            SELECT
+                id,
+                title,
+                content,
+                id as parent_id,
+                vector::similarity::cosine(embedding, $query) as similarity
+            FROM note
+            WHERE vector::similarity::cosine(embedding, $query) >= $min_similarity
+            ORDER BY similarity DESC
+            LIMIT $match_count
+        )}
+        ELSE { [] };
+
+    let $insight_note_union = array::union($source_insight_search, $note_content_search);
+    let $insight_note_grouped = (
+        SELECT
+            id,
+            parent_id,
+            title,
+            math::max(similarity) as similarity,
+            array::flatten(content) as matches,
+            NONE as page_number,
+            NONE as bbox
+        FROM $insight_note_union
+        WHERE id IS NOT NONE
+        GROUP BY id, parent_id, title
+    );
+
+    let $all_results = array::union($source_embedding_search, $insight_note_grouped);
+
+    RETURN (
+        SELECT id, parent_id, title, similarity, matches, page_number, bbox
+        FROM $all_results
+        WHERE id IS NOT NONE
+        ORDER BY similarity DESC
+        LIMIT $match_count
+    );
+};
+
+DEFINE EVENT OVERWRITE source_delete ON TABLE source WHEN ($after == NONE) THEN {
+    delete source_embedding where source == $before.id;
+    delete source_insight where source == $before.id;
+};

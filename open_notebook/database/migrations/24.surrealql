@@ -1,0 +1,189 @@
+-- Migration 24: PDF block substrate (db-design.md 2). DDL-only + one backfill.
+-- Instant, idempotent (IF NOT EXISTS / OVERWRITE everywhere). No data rewrite
+-- except the migration-23 tags backfill. Comments live on full lines ONLY: the
+-- migration runner strips whole-line -- comments but flattens everything else to
+-- one line, so an inline -- would comment out the rest of the statement.
+--
+-- document_block: composite record ids document_block:[src_key, gen, seq]. ZERO indexes.
+
+DEFINE TABLE IF NOT EXISTS document_block SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS source       ON document_block TYPE record<source>;
+DEFINE FIELD IF NOT EXISTS gen          ON document_block TYPE int;
+DEFINE FIELD IF NOT EXISTS seq          ON document_block TYPE int;
+DEFINE FIELD IF NOT EXISTS page         ON document_block TYPE int;
+DEFINE FIELD IF NOT EXISTS type         ON document_block TYPE string;
+DEFINE FIELD IF NOT EXISTS text         ON document_block TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS latex        ON document_block TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS image_ref    ON document_block TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS bbox         ON document_block TYPE option<array<float>>;
+DEFINE FIELD IF NOT EXISTS parent_seq   ON document_block TYPE option<int>;
+DEFINE FIELD IF NOT EXISTS level        ON document_block TYPE option<int>;
+DEFINE FIELD IF NOT EXISTS subtree_end  ON document_block TYPE option<int>;
+DEFINE FIELD IF NOT EXISTS section_path ON document_block TYPE array<string> DEFAULT [];
+DEFINE FIELD IF NOT EXISTS confidence   ON document_block TYPE option<float>;
+DEFINE FIELD IF NOT EXISTS table_data   ON document_block FLEXIBLE TYPE option<object>;
+
+-- source_parse: one header row per parse generation. id source_parse:[src_key, gen].
+
+DEFINE TABLE IF NOT EXISTS source_parse SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS source         ON source_parse TYPE record<source>;
+DEFINE FIELD IF NOT EXISTS gen            ON source_parse TYPE int;
+DEFINE FIELD IF NOT EXISTS parser_name    ON source_parse TYPE string;
+DEFINE FIELD IF NOT EXISTS parser_version ON source_parse TYPE string;
+DEFINE FIELD IF NOT EXISTS status         ON source_parse TYPE string ASSERT $value IN ['building', 'ready', 'superseded', 'failed'];
+DEFINE FIELD IF NOT EXISTS content_hash   ON source_parse TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS block_count    ON source_parse TYPE option<int>;
+DEFINE FIELD IF NOT EXISTS page_count     ON source_parse TYPE option<int>;
+DEFINE FIELD IF NOT EXISTS pages          ON source_parse FLEXIBLE TYPE option<array>;
+DEFINE FIELD IF NOT EXISTS page_index     ON source_parse TYPE option<array<array<int>>>;
+DEFINE FIELD IF NOT EXISTS section_index  ON source_parse FLEXIBLE TYPE option<array>;
+DEFINE FIELD IF NOT EXISTS error          ON source_parse TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS created        ON source_parse DEFAULT time::now() VALUE $before OR time::now();
+DEFINE FIELD IF NOT EXISTS updated        ON source_parse DEFAULT time::now() VALUE time::now();
+
+-- source: parse lifecycle fields (all option<>, no ASSERT/DEFAULT — live-verified rule).
+
+DEFINE FIELD IF NOT EXISTS parse_status     ON source TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS parse_generation ON source TYPE option<int>;
+DEFINE FIELD IF NOT EXISTS parser_name      ON source TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS parser_version   ON source TYPE option<string>;
+
+-- source_annotation: multi-block range anchor (Decision #13). rect stays as render cache.
+
+DEFINE FIELD IF NOT EXISTS block_seq     ON source_annotation TYPE option<int>;
+DEFINE FIELD IF NOT EXISTS block_end_seq ON source_annotation TYPE option<int>;
+DEFINE FIELD IF NOT EXISTS anchor_start  ON source_annotation TYPE option<int>;
+DEFINE FIELD IF NOT EXISTS anchor_end    ON source_annotation TYPE option<int>;
+DEFINE FIELD IF NOT EXISTS anchor_gen    ON source_annotation TYPE option<int>;
+DEFINE FIELD IF NOT EXISTS quote_hash    ON source_annotation TYPE option<string>;
+
+-- source_embedding: evolve in place (no new chunk table).
+
+DEFINE FIELD IF NOT EXISTS block_start ON source_embedding TYPE option<int>;
+DEFINE FIELD IF NOT EXISTS block_end   ON source_embedding TYPE option<int>;
+DEFINE FIELD IF NOT EXISTS gen         ON source_embedding TYPE option<int>;
+
+-- Backfill the migration-23 tags bug (old rows read back NONE, breaking UPDATE).
+
+UPDATE source_annotation SET tags = [] WHERE tags IS NONE;
+
+-- Ride-along debt fixes.
+
+DEFINE INDEX IF NOT EXISTS idx_source_section_source ON source_section COLUMNS source;
+DEFINE TABLE IF NOT EXISTS cites_annotation TYPE RELATION FROM chat_session TO source_annotation;
+DEFINE FIELD IF NOT EXISTS created ON cites_annotation DEFAULT time::now();
+
+-- fn::vector_search: migration-21 body, same signature/row shape, plus restored
+-- dimension guards on all three arms and block_start/block_end passthrough.
+
+DEFINE FUNCTION OVERWRITE fn::vector_search($query: array<float>, $match_count: int, $sources: bool, $show_notes: bool, $min_similarity: float) {
+    let $source_embedding_search =
+        IF $sources {(
+            SELECT
+                source.id as id,
+                source.id as parent_id,
+                source.title as title,
+                array::flatten([content]) as matches,
+                page_number,
+                bbox,
+                block_start,
+                block_end,
+                vector::similarity::cosine(embedding, $query) as similarity
+            FROM source_embedding
+            WHERE embedding != NONE AND array::len(embedding) = array::len($query) AND vector::similarity::cosine(embedding, $query) >= $min_similarity
+            ORDER BY similarity DESC
+            LIMIT $match_count
+        )}
+        ELSE { [] };
+
+    let $source_insight_search =
+        IF $sources {(
+            SELECT
+                id,
+                insight_type + ' - ' + (source.title OR '') as title,
+                content,
+                source.id as parent_id,
+                vector::similarity::cosine(embedding, $query) as similarity
+            FROM source_insight
+            WHERE embedding != NONE AND array::len(embedding) = array::len($query) AND vector::similarity::cosine(embedding, $query) >= $min_similarity
+            ORDER BY similarity DESC
+            LIMIT $match_count
+        )}
+        ELSE { [] };
+
+    let $note_content_search =
+        IF $show_notes {(
+            SELECT
+                id,
+                title,
+                content,
+                id as parent_id,
+                vector::similarity::cosine(embedding, $query) as similarity
+            FROM note
+            WHERE embedding != NONE AND array::len(embedding) = array::len($query) AND vector::similarity::cosine(embedding, $query) >= $min_similarity
+            ORDER BY similarity DESC
+            LIMIT $match_count
+        )}
+        ELSE { [] };
+
+    let $insight_note_union = array::union($source_insight_search, $note_content_search);
+    let $insight_note_grouped = (
+        SELECT
+            id,
+            parent_id,
+            title,
+            math::max(similarity) as similarity,
+            array::flatten(content) as matches,
+            NONE as page_number,
+            NONE as bbox,
+            NONE as block_start,
+            NONE as block_end
+        FROM $insight_note_union
+        WHERE id IS NOT NONE
+        GROUP BY id, parent_id, title
+    );
+
+    let $all_results = array::union($source_embedding_search, $insight_note_grouped);
+
+    RETURN (
+        SELECT id, parent_id, title, similarity, matches, page_number, bbox, block_start, block_end
+        FROM $all_results
+        WHERE id IS NOT NONE
+        ORDER BY similarity DESC
+        LIMIT $match_count
+    );
+};
+
+-- fn::vector_search_scoped: source_embedding only, optional source pre-filter
+-- (uses idx_source_embedding_source), same row shape as the embedding arm.
+
+DEFINE FUNCTION OVERWRITE fn::vector_search_scoped($query: array<float>, $match_count: int, $sources: option<array<record<source>>>, $min_similarity: float) {
+    RETURN (
+        SELECT
+            source.id as id,
+            source.id as parent_id,
+            source.title as title,
+            array::flatten([content]) as matches,
+            page_number,
+            bbox,
+            block_start,
+            block_end,
+            vector::similarity::cosine(embedding, $query) as similarity
+        FROM source_embedding
+        WHERE ($sources IS NONE OR source IN $sources) AND embedding != NONE AND array::len(embedding) = array::len($query) AND vector::similarity::cosine(embedding, $query) >= $min_similarity
+        ORDER BY similarity DESC
+        LIMIT $match_count
+    );
+};
+
+-- source_delete event: migration-1 body + block-substrate cleanup arms
+-- (slow-path safety net; primary cleanup is the Python range-delete in A2).
+
+DEFINE EVENT OVERWRITE source_delete ON TABLE source WHEN ($after == NONE) THEN {
+    delete source_embedding where source == $before.id;
+    delete source_insight where source == $before.id;
+    delete source_section where source == $before.id;
+    delete source_annotation where source == $before.id;
+    delete document_block where source == $before.id;
+    delete source_parse where source == $before.id;
+};
