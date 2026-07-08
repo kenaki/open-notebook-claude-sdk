@@ -11,7 +11,11 @@ from surrealdb import RecordID
 
 from open_notebook.database.repository import ensure_record_id, repo_query
 from open_notebook.domain.base import ObjectModel
-from open_notebook.exceptions import DatabaseOperationError, InvalidInputError
+from open_notebook.exceptions import (
+    DatabaseOperationError,
+    InvalidInputError,
+    NotFoundError,
+)
 
 
 def _format_outline_chapters(
@@ -89,7 +93,11 @@ class Notebook(ObjectModel):
 
     async def get_sources(self, include_full_text: bool = False) -> List["Source"]:
         try:
-            source_projection = "" if include_full_text else " omit source.full_text"
+            source_projection = (
+                ""
+                if include_full_text
+                else " omit source.full_text, source.page_map, source.page_labels"
+            )
             srcs = await repo_query(
                 f"""
                 select *{source_projection} from (
@@ -468,7 +476,15 @@ class Source(ObjectModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     table_name: ClassVar[str] = "source"
-    nullable_fields: ClassVar[set[str]] = {"page_offset", "page_labels", "page_map"}
+    nullable_fields: ClassVar[set[str]] = {
+        "page_offset",
+        "page_labels",
+        "page_map",
+        "parse_status",
+        "parse_generation",
+        "parser_name",
+        "parser_version",
+    }
     asset: Optional[Asset] = None
     title: Optional[str] = None
     topics: Optional[List[str]] = Field(default_factory=list)
@@ -479,6 +495,13 @@ class Source(ObjectModel):
     # Null for non-PDF / pre-Docling sources. Read back by embed_source /
     # backfill_page_numbers to stamp page_number on each source_embedding row.
     page_map: Optional[list] = None
+    # PDF block substrate parse lifecycle (migration 24). All option<> in the DB
+    # and None for un-parsed / non-PDF sources. parse_status lifecycle:
+    # pending → parsing → embedding → ready | failed (db-design §4).
+    parse_status: Optional[str] = None
+    parse_generation: Optional[int] = None
+    parser_name: Optional[str] = None
+    parser_version: Optional[str] = None
     command: Optional[Union[str, RecordID]] = Field(
         default=None, description="Link to surreal-commands processing job"
     )
@@ -500,6 +523,26 @@ class Source(ObjectModel):
         if isinstance(value, RecordID):
             return str(value)
         return str(value) if value else None
+
+    @classmethod
+    async def get_meta(cls, id: str) -> "Source":
+        """Fetch a Source with the heavy body fields omitted.
+
+        ``SELECT * OMIT full_text, page_map, page_labels`` — used at the many
+        callsites that only need a Source for an existence/metadata check
+        (annotations, insights, sections, source-chat endpoints), so a 404 check
+        no longer ships a textbook-sized full_text + page_map (db-design §6.3).
+        The omitted fields come back as None on the instance.
+        """
+        if not id:
+            raise InvalidInputError("ID cannot be empty")
+        result = await repo_query(
+            "SELECT * OMIT full_text, page_map, page_labels FROM $id",
+            {"id": ensure_record_id(id)},
+        )
+        if not result:
+            raise NotFoundError(f"source with id {id} not found")
+        return cls(**result[0])
 
     async def get_status(self) -> Optional[str]:
         """Get the processing status of the associated command"""
@@ -939,6 +982,22 @@ class Source(ObjectModel):
                 "Continuing with source deletion."
             )
 
+        # Range-delete every parse generation's blocks + parse headers BEFORE the
+        # record delete — 2.x DELETE ... WHERE ignores secondary indexes, so the
+        # Python key-range delete is the primary cleanup; the source_delete DB
+        # event is only a slow-path safety net (db-design §2.4).
+        try:
+            from open_notebook.domain import blocks
+
+            src_key = str(self.id).split(":", 1)[1] if ":" in str(self.id) else str(self.id)
+            await blocks.delete_all_for_source(src_key)
+            logger.debug(f"Deleted document blocks + parse headers for source {self.id}")
+        except Exception as e:
+            logger.warning(
+                f"Failed to delete blocks/parse headers for source {self.id}: {e}. "
+                "Continuing with source deletion."
+            )
+
         # Call parent delete to remove database record
         return await super().delete()
 
@@ -969,6 +1028,21 @@ class SourceAnnotation(ObjectModel):
     # from the tag text. Defaults to an empty list so highlights created before
     # migration 23 read back cleanly. Mirrors ChatSession.tags.
     tags: List[str] = Field(default_factory=list)
+    # Block-substrate anchoring (migration 24, Decision #13 — MULTI-BLOCK range).
+    # A highlight may span block_seq..block_end_seq (== block_seq for a
+    # single-block highlight; both None for legacy rect/quote-only annotations).
+    # anchor_start is the char offset within block_seq's text; anchor_end the
+    # offset within block_end_seq's text (both None for atomic figure/table/
+    # equation). anchor_gen records which parse generation the anchor resolved
+    # against (staleness is derived: anchor_gen != source.parse_generation →
+    # stale). quote_hash supports re-anchor matching. Pydantic MUST declare
+    # these or model_dump never sends them to the SCHEMAFULL table (db-design §7).
+    block_seq: Optional[int] = None
+    block_end_seq: Optional[int] = None
+    anchor_start: Optional[int] = None
+    anchor_end: Optional[int] = None
+    anchor_gen: Optional[int] = None
+    quote_hash: Optional[str] = None
     created: Optional[datetime] = None
     updated: Optional[datetime] = None
 
@@ -1204,10 +1278,15 @@ async def vector_search(
         # (populated for source_embedding matches; NONE for insight/note rows).
         # Normalise so downstream callers can rely on the keys existing without
         # crashing on older DBs whose function predates the migration-20 redefine.
+        # block_start/block_end (migration 24): the exact inclusive seq range a
+        # source_embedding chunk covers; NONE for insight/note rows and for
+        # legacy chunks embedded before the block substrate.
         for row in search_results or []:
             if isinstance(row, dict):
                 row.setdefault("page_number", None)
                 row.setdefault("bbox", None)
+                row.setdefault("block_start", None)
+                row.setdefault("block_end", None)
         return search_results
     except Exception as e:
         logger.error(f"Error performing vector search: {str(e)}")
