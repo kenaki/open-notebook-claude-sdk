@@ -1,12 +1,15 @@
 'use client'
 
 import { useState, useEffect, useCallback, type ReactNode } from 'react'
+import { useMutation, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { ConfirmDialog } from '@/components/common/ConfirmDialog'
 import { InlineEdit } from '@/components/common/InlineEdit'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -23,19 +26,113 @@ import {
   Trash2,
   Database,
   MessageSquare,
+  RotateCw,
+  CircleCheck,
+  TriangleAlert,
 } from 'lucide-react'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { useSourceDetail } from '@/lib/hooks/useSourceDetail'
+import { useParseStatus, SOURCE_BLOCK_KEYS } from '@/lib/hooks/use-source-blocks'
+import { sourcesApi } from '@/lib/api/sources'
+import { toastApiError } from '@/lib/utils/error-handler'
 import { SourceInsightDialog } from './SourceInsightDialog'
 import { SourceContentTab } from './SourceContentTab'
 import { SourceInsightsTab } from './SourceInsightsTab'
 import { SourceDetailsTab } from './SourceDetailsTab'
 import { PDFViewer } from '@/components/common/PDFViewer'
-import type { SourceDetailResponse } from '@/lib/types/api'
+import type { SourceDetailResponse, ParseStatusResponse } from '@/lib/types/api'
 
 /** Returns true when the source's uploaded file is a PDF. */
 const isPdfAsset = (source: SourceDetailResponse): boolean =>
   source.asset?.file_path?.toLowerCase().endsWith('.pdf') ?? false
+
+// Parse statuses still in-flight (spinner chip). Terminal states are ready/failed.
+const TRANSIENT_PARSE_STATUSES = new Set(['pending', 'parsing', 'embedding'])
+
+/**
+ * Block-parse lifecycle chip for the source header (pdf-block-ingestion D4).
+ * Driven by `useParseStatus`: a transient status shows a spinner; `ready` shows a
+ * tick with a parser/generation tooltip; `failed` shows an alert with the error;
+ * a never-parsed source (404 ⇒ `query.isError`) shows a muted "not parsed" hint.
+ * Renders nothing until the first fetch resolves (avoids a flash on tab open).
+ */
+function ParseStatusChip({
+  query,
+}: {
+  query: UseQueryResult<ParseStatusResponse>
+}) {
+  const { t } = useTranslation()
+
+  const chip = (
+    icon: ReactNode,
+    label: string,
+    tip: string,
+    className: string
+  ) => (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className={`inline-flex items-center gap-1 rounded-full border border-border px-1.5 py-0.5 text-[10px] font-medium ${className}`}
+        >
+          {icon}
+          {label}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-56">{tip}</TooltipContent>
+    </Tooltip>
+  )
+
+  // Never parsed into blocks yet (endpoint 404s) — a muted, actionable hint.
+  if (query.isError) {
+    return chip(
+      null,
+      t('sources.parse.statusNotParsed'),
+      t('sources.parse.notParsedTip'),
+      'text-muted-foreground'
+    )
+  }
+
+  const status = query.data?.parse_status
+  if (!status) return null // first load in flight
+
+  if (TRANSIENT_PARSE_STATUSES.has(status)) {
+    const label =
+      status === 'pending'
+        ? t('sources.parse.statusQueued')
+        : status === 'embedding'
+          ? t('sources.parse.statusEmbedding')
+          : t('sources.parse.statusParsing')
+    return chip(
+      <LoadingSpinner size="sm" />,
+      label,
+      t('sources.parse.workingTip'),
+      'text-muted-foreground'
+    )
+  }
+
+  if (status === 'failed') {
+    return chip(
+      <TriangleAlert className="h-3 w-3" aria-hidden="true" />,
+      t('sources.parse.statusFailed'),
+      query.data?.error || t('sources.parse.failedTip'),
+      'border-destructive/40 text-destructive'
+    )
+  }
+
+  // ready (or any other terminal status) → parsed.
+  const parser = [query.data?.parser_name, query.data?.parser_version]
+    .filter(Boolean)
+    .join(' ')
+  const tip = t('sources.parse.readyTip')
+    .replace('{parser}', parser || t('sources.parse.unknownParser'))
+    .replace('{gen}', String(query.data?.gen ?? ''))
+  return chip(
+    <CircleCheck className="h-3 w-3" aria-hidden="true" />,
+    t('sources.parse.statusReady'),
+    tip,
+    'border-emerald-500/40 text-emerald-600 dark:text-emerald-400'
+  )
+}
 
 interface SourceDetailContentProps {
   sourceId: string
@@ -124,6 +221,49 @@ export function SourceDetailContent({
     handleOpenExternal,
     handleDelete,
   } = useSourceDetail({ sourceId, onClose })
+
+  const queryClient = useQueryClient()
+  const [reparseOpen, setReparseOpen] = useState(false)
+  // Only PDFs carry a block-parse lifecycle; disable the poll for other sources.
+  const isPdf = source ? isPdfAsset(source) : false
+  const parseStatus = useParseStatus(isPdf ? sourceId : undefined)
+  const reparseMutation = useMutation({
+    mutationFn: () => sourcesApi.reparse(sourceId),
+    onSuccess: () => {
+      toast.success(t('sources.parse.reprocessQueued'))
+      // Refetch the status header so the chip flips into its (polling) transient
+      // state as the worker starts writing the new generation.
+      queryClient.invalidateQueries({ queryKey: SOURCE_BLOCK_KEYS.parse(sourceId) })
+      setReparseOpen(false)
+    },
+    onError: (err: unknown) => {
+      toastApiError(err, t, 'sources.parse.reprocessFailed')
+      setReparseOpen(false)
+    },
+  })
+
+  // Header controls for PDF sources: the parse-lifecycle chip + a Re-process
+  // action (confirm-gated). Hidden entirely for non-PDF sources.
+  const parseStatusControls = isPdf ? (
+    <div className="flex items-center gap-1.5">
+      <ParseStatusChip query={parseStatus} />
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={() => setReparseOpen(true)}
+            disabled={reparseMutation.isPending}
+            aria-label={t('sources.parse.reprocess')}
+          >
+            <RotateCw className="h-3.5 w-3.5" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{t('sources.parse.reprocess')}</TooltipContent>
+      </Tooltip>
+    </div>
+  ) : null
 
   // Decision #20: when opened via a `#p=N` citation on a PDF source, jump to the
   // PDF tab (the PDFViewer itself opens at the page). Runs once the source loads.
@@ -320,6 +460,18 @@ export function SourceDetailContent({
         onConfirm={handleDeleteInsight}
         isLoading={deletingInsight}
       />
+
+      <ConfirmDialog
+        open={reparseOpen}
+        onOpenChange={(open) => {
+          if (!open && !reparseMutation.isPending) setReparseOpen(false)
+        }}
+        title={t('sources.parse.reprocessTitle')}
+        description={t('sources.parse.reprocessConfirm')}
+        confirmText={t('sources.parse.reprocess')}
+        onConfirm={() => reparseMutation.mutate()}
+        isLoading={reparseMutation.isPending}
+      />
     </>
   )
 
@@ -343,6 +495,7 @@ export function SourceDetailContent({
             </div>
             <TabsList className="flex-shrink-0">{tabTriggers}</TabsList>
             <div className="flex flex-shrink-0 items-center gap-2">
+              {parseStatusControls}
               <Badge variant="secondary" className="text-xs">
                 {getSourceType()}
               </Badge>
@@ -379,6 +532,7 @@ export function SourceDetailContent({
             </p>
           </div>
           <div className="flex items-center gap-2">
+            {parseStatusControls}
             {getSourceIcon()}
             <Badge variant="secondary" className="text-sm">
               {getSourceType()}

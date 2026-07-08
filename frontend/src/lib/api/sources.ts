@@ -138,6 +138,17 @@ export const sourcesApi = {
   getBlock: async (id: string, seq: number) => {
     return get<Block>(`/sources/${id}/blocks/${seq}`)
   },
+
+  // pdf-block-ingestion Track C2 (Decision #8): explicitly rebuild the block
+  // substrate (build_blocks force=true), bypassing the content-hash gate — the
+  // deliberate re-parse trigger behind the Re-process button. Returns the queued
+  // command id + the generation the new parse will write. 409 while a parse is
+  // already building for this source.
+  reparse: async (id: string) => {
+    return post<{ command_id: string; gen_expected: number }>(
+      `/sources/${id}/reparse`
+    )
+  },
 }
 
 // Document Foundation Phase4: PDF highlight annotations. Note the last two

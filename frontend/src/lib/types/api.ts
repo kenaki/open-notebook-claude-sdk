@@ -336,6 +336,19 @@ export interface SourceChatSession extends BaseChatSession {
   model_override?: string
 }
 
+// One structured annotation reference carried by a chat message (pdf-block-
+// ingestion Track D2). Mirrors the backend `AnnotationRef` (api/routers/
+// source_chat.py) exactly: persisted on the HUMAN message when the user
+// referenced annotations, and surfaced on the session-GET payload so the UI can
+// render reference pills (Track D4). `block_seq` is null for a legacy (un-
+// anchored) highlight; `page` is 1-indexed.
+export interface AnnotationRef {
+  id: string
+  quote?: string | null
+  block_seq?: number | null
+  page?: number | null
+}
+
 export interface SourceChatMessage {
   id: string
   type: 'human' | 'ai'
@@ -345,6 +358,10 @@ export interface SourceChatMessage {
   // absent on old sessions → inline-marker fallback). Plan D / Chunk 9.
   citations?: Citation[]
   followups?: string[]
+  // Structured annotation references (pdf-block-ingestion Track D2/D4). Present
+  // on the HUMAN turn that referenced highlights; the UI renders them as pills
+  // (AnnotationReferences). Absent when no annotations were referenced.
+  annotation_refs?: AnnotationRef[]
   // Claude Agent tool-use disclosure (AI messages; null/absent on the Esperanto
   // path and old sessions). Plan D / Chunk 10.
   tool_uses?: ToolUseDisclosure[]
@@ -383,6 +400,10 @@ export interface UpdateSourceChatSessionRequest {
 export interface SendMessageRequest {
   message: string
   model_override?: string
+  // Annotation IDs the user is referencing (pdf-block-ingestion Track D2/D4).
+  // Each is resolved into the AI context and recorded as a cites_annotation
+  // edge; the resolved refs come back on the human message as `annotation_refs`.
+  annotation_ids?: string[]
 }
 
 export interface SourceChatStreamEvent {

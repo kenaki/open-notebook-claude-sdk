@@ -1,8 +1,16 @@
 'use client'
 
-import { BookMarked, ChevronRight, FileText, StickyNote, Lightbulb, Sparkles } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { BookMarked, ChevronRight, FileText, StickyNote, Lightbulb, Sparkles, Highlighter, CornerUpRight } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { Citation } from '@/lib/types/api'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { LoadingSpinner } from '@/components/common/LoadingSpinner'
+import { useBlock } from '@/lib/hooks/use-source-blocks'
+import { getApiUrl } from '@/lib/config'
+import { AnnotationRef, Citation } from '@/lib/types/api'
 import { useTranslation } from '@/lib/hooks/use-translation'
 
 // The backend Citation.id carries its type prefix (e.g. "source:abc123"); the
@@ -75,6 +83,170 @@ export function MessageReferences({
         </div>
       </CollapsibleContent>
     </Collapsible>
+  )
+}
+
+// Resolve a fetchable src for a backend block-crop url ("/api/sources/.../image"),
+// mirroring MessageMedia: prefix the resolved API base (cached after first call).
+function useApiBase(): string {
+  const [base, setBase] = useState('')
+  useEffect(() => {
+    let active = true
+    getApiUrl()
+      .then((u) => active && setBase(u))
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [])
+  return base
+}
+
+// Popover body for one annotation pill: the anchored block's content. Equation →
+// KaTeX (error-fallback to raw latex via rehype-katex, Decision #7); figure/table
+// → the crop image; otherwise a text excerpt + section breadcrumb. Falls back to
+// the stored quote for a legacy (un-anchored) highlight or while the block loads.
+function AnnotationRefBody({
+  sourceId,
+  refItem,
+}: {
+  sourceId: string
+  refItem: AnnotationRef
+}) {
+  const { t } = useTranslation()
+  const base = useApiBase()
+  const hasAnchor = refItem.block_seq != null
+  const block = useBlock(sourceId, hasAnchor ? refItem.block_seq : null, {
+    enabled: hasAnchor,
+  })
+
+  const breadcrumb = (block.data?.section_path ?? []).filter(Boolean).join(' › ')
+
+  let content: React.ReactNode
+  if (!hasAnchor) {
+    // Legacy highlight — no block anchor, show the raw quote.
+    content = (
+      <p className="text-xs text-foreground whitespace-pre-wrap break-words">
+        {refItem.quote || t('chat.annotationRefEmpty')}
+      </p>
+    )
+  } else if (block.isLoading) {
+    content = (
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <LoadingSpinner size="sm" />
+        {t('common.loading')}
+      </div>
+    )
+  } else if (block.isError || !block.data) {
+    content = (
+      <p className="text-xs text-foreground whitespace-pre-wrap break-words">
+        {refItem.quote || t('chat.annotationRefEmpty')}
+      </p>
+    )
+  } else if (block.data.type === 'equation' && block.data.latex) {
+    content = (
+      <div className="chat-markdown prose prose-sm prose-neutral dark:prose-invert max-w-none overflow-x-auto">
+        <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+          {`$$\n${block.data.latex}\n$$`}
+        </ReactMarkdown>
+      </div>
+    )
+  } else if (
+    (block.data.type === 'figure' || block.data.type === 'table') &&
+    block.data.image_url
+  ) {
+    content = (
+      /* eslint-disable-next-line @next/next/no-img-element */
+      <img
+        src={`${base}${block.data.image_url}`}
+        alt={block.data.text || t('chat.annotationRefFigure')}
+        className="max-h-64 w-auto max-w-full rounded border border-border"
+      />
+    )
+  } else {
+    content = (
+      <p className="text-xs text-foreground whitespace-pre-wrap break-words line-clamp-6">
+        {block.data.text || refItem.quote || t('chat.annotationRefEmpty')}
+      </p>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      {breadcrumb && (
+        <p className="truncate text-[10.5px] font-medium uppercase tracking-[0.06em] text-text-3">
+          {breadcrumb}
+        </p>
+      )}
+      {content}
+    </div>
+  )
+}
+
+/**
+ * Annotation reference pills for a chat message (pdf-block-ingestion Track D4).
+ * Each pill shows the highlighted quote snippet + page; clicking opens a popover
+ * with the anchored block's rendered content (KaTeX equation / figure crop / text
+ * excerpt) and a "jump to highlight" action wired by the caller (`onJumpTo`,
+ * routed per active tab in D8). Renders nothing when a message carries no refs.
+ */
+export function AnnotationReferences({
+  refs,
+  sourceId,
+  onJumpTo,
+}: {
+  refs: AnnotationRef[]
+  sourceId: string
+  onJumpTo?: (ref: AnnotationRef) => void
+}) {
+  const { t } = useTranslation()
+  if (!refs.length) return null
+
+  return (
+    <div className="mt-1.5 w-full">
+      <p className="mb-1 text-[10.5px] font-semibold uppercase tracking-[0.07em] text-text-3">
+        {t('chat.referencedHighlights')}
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {refs.map((refItem) => {
+          const snippet = refItem.quote?.trim() || t('chat.annotationRefEmpty')
+          return (
+            <Popover key={refItem.id}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  data-annotation-id={refItem.id}
+                  className="group/aref flex max-w-full items-center gap-1.5 rounded-full border border-border-2 bg-panel-2 py-1 pl-2 pr-2.5 text-left transition-colors hover:bg-accent-soft"
+                >
+                  <Highlighter className="h-3 w-3 flex-shrink-0 text-primary" aria-hidden="true" />
+                  <span className="max-w-[180px] truncate text-[11px] font-medium text-foreground group-hover/aref:text-primary">
+                    {snippet}
+                  </span>
+                  {refItem.page != null && (
+                    <span className="flex-shrink-0 text-[10px] text-text-3">
+                      {t('chat.annotationRefPage').replace('{page}', String(refItem.page))}
+                    </span>
+                  )}
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-72 max-w-[calc(100vw-2rem)]" align="start">
+                <AnnotationRefBody sourceId={sourceId} refItem={refItem} />
+                {onJumpTo && (
+                  <button
+                    type="button"
+                    onClick={() => onJumpTo(refItem)}
+                    className="mt-2 flex items-center gap-1.5 text-[11px] font-medium text-primary hover:underline"
+                  >
+                    <CornerUpRight className="h-3 w-3" aria-hidden="true" />
+                    {t('chat.jumpToHighlight')}
+                  </button>
+                )}
+              </PopoverContent>
+            </Popover>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 
