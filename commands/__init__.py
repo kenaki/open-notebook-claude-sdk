@@ -1,5 +1,6 @@
 """Surreal-commands integration for Open Notebook"""
 
+from .block_commands import build_blocks_command
 from .chat_commands import chat_completion_command
 from .embedding_commands import (
     embed_insight_command,
@@ -24,6 +25,8 @@ __all__ = [
     # Section / chaptering commands
     "build_sections_command",
     "backfill_sections_command",
+    # PDF block substrate ingestion command
+    "build_blocks_command",
     # Vision verify-clean commands
     "verify_clean_section",
     "verify_clean_source",

@@ -240,6 +240,20 @@ async def save_source(state: SourceState) -> dict:
     if page_map:
         source.page_map = page_map
 
+    # B2: PDF sources go through the block-build pipeline (build_blocks parses a
+    # typed block substrate, regenerates full_text + page_map FROM the blocks —
+    # Decision #14 — rebuilds sections, then chains embed_source). The INITIAL
+    # full_text/page_map written above stay so content is available before the
+    # first parse flip; build_blocks upgrades both afterwards. Mark 'pending' so
+    # the UI shows a parsing state. Non-PDF sources keep the direct embed path.
+    is_pdf = False
+    if content_state is not None and hasattr(content_state, "identified_type"):
+        is_pdf = content_state.identified_type == "application/pdf"
+    if not is_pdf and source.asset and source.asset.file_path:
+        is_pdf = source.asset.file_path.lower().endswith(".pdf")
+    if is_pdf:
+        source.parse_status = "pending"
+
     await source.save()
 
     # NOTE: Notebook associations are created by the API immediately for UI responsiveness
@@ -247,8 +261,29 @@ async def save_source(state: SourceState) -> dict:
 
     if state["embed"]:
         if source.full_text and source.full_text.strip():
-            logger.debug("Embedding content for vector search")
-            await source.vectorize()
+            if is_pdf:
+                # B2: submit build_blocks INSTEAD of embed_source; build_blocks
+                # chains embed_source itself at step 6b (after the markdown regen).
+                try:
+                    cmd_id = submit_command(
+                        "open_notebook",
+                        "build_blocks",
+                        {"source_id": str(source.id)},
+                    )
+                    logger.info(
+                        f"Submitted build_blocks for source {source.id}: {cmd_id}"
+                    )
+                except Exception as exc:
+                    # Safety net: if the block pipeline can't be submitted, fall
+                    # back to direct embedding so the source is still searchable.
+                    logger.warning(
+                        f"Failed to submit build_blocks for {source.id} "
+                        f"({exc}) — falling back to direct embedding"
+                    )
+                    await source.vectorize()
+            else:
+                logger.debug("Embedding content for vector search")
+                await source.vectorize()
         else:
             logger.warning(
                 f"Source {source.id} has no text content to embed, skipping vectorization"
