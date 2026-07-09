@@ -637,6 +637,8 @@ export const deDE = {
     generating: "Generating…",
     generationFailed: "Failed to generate a response",
     retry: "Retry",
+    thinking: "Denkt nach",
+    viewProcess: "Prozess anzeigen",
   },
   jobs: {
     tray: {

@@ -634,6 +634,8 @@ export const ruRU = {
     generating: "Generating…",
     generationFailed: "Failed to generate a response",
     retry: "Retry",
+    thinking: "Думает",
+    viewProcess: "Смотреть процесс",
   },
   jobs: {
     tray: {

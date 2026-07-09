@@ -1,7 +1,7 @@
 'use client'
 
 import { memo, useMemo, useRef } from 'react'
-import { Sparkles } from 'lucide-react'
+import { Activity, Sparkles } from 'lucide-react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import ReactMarkdown from 'react-markdown'
@@ -15,10 +15,13 @@ import { MessageReferences, AnnotationReferences } from './MessageReferences'
 import { MessageMedia } from './MessageMedia'
 import { useAnnotationJumpStore } from '@/lib/stores/annotation-jump-store'
 import { ToolUseDisclosure, describeTool, detailFor } from './ToolUseDisclosure'
+import { ThinkingDisclosure } from './ThinkingDisclosure'
 import { convertReferencesToCompactMarkdown, createCompactReferenceLinkComponent } from '@/lib/utils/source-references'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import type { SourceChatMessage } from '@/lib/types/api'
 import { useChatScrollAnchor } from './useChatScrollAnchor'
+import { useJobsStore, type BackgroundJob } from '@/lib/stores/jobs-store'
+import { useAgentConsoleStore } from '@/lib/stores/agent-console-store'
 
 // Bubble radii: sender-side corner near the tail is sharp (4px), the other three 14px.
 const USER_BUBBLE_RADIUS = '14px 14px 4px 14px'
@@ -71,6 +74,16 @@ export function MessageList({
   const scrollAreaRef = useRef<HTMLDivElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const { tailSpacer } = useChatScrollAnchor({ isDock, messages, scrollAreaRef, messagesEndRef })
+  // agent-console B3: `chatScopeId` doubles as the active session id here (see
+  // ChatDock/PoppedChatPanel, which pass `activeMainId`/`session.id`) — used to
+  // find this session's in-flight job so the pending bubble can offer a
+  // "view process" shortcut into the console. Undefined chatScopeId (source
+  // chat's ChatPanel doesn't forward one today) simply means no button shows.
+  const activeSessionJob = useJobsStore((s) =>
+    chatScopeId
+      ? s.jobs.find((j) => j.sessionId === chatScopeId && (j.status === 'new' || j.status === 'running'))
+      : undefined
+  )
 
   const fallbackEmptyTitle = emptyStateTitle
     ?? t('chat.startConversation').replace('{type}', contextType === 'source' ? t('navigation.sources') : t('common.notebook'))
@@ -116,13 +129,7 @@ export function MessageList({
                   style={MSG_SCROLL_MARGIN}
                   className="flex justify-start"
                 >
-                  <div
-                    className="flex items-center gap-2 px-3.5 py-2.5 bg-muted text-foreground"
-                    style={{ borderRadius: AI_BUBBLE_RADIUS }}
-                  >
-                    <LoadingSpinner size="sm" />
-                    <LiveProgressLabel activeProgress={activeProgress} />
-                  </div>
+                  <PendingBubble activeProgress={activeProgress} activeJob={activeSessionJob} />
                 </div>
               )
             }
@@ -170,6 +177,9 @@ export function MessageList({
                 >
                   {isHuman && message.media && message.media.length > 0 && (
                     <MessageMedia media={message.media} className="justify-end" />
+                  )}
+                  {message.type === 'ai' && message.thinking && (
+                    <ThinkingDisclosure thinking={message.thinking} />
                   )}
                   {message.type === 'ai' && message.tool_uses && message.tool_uses.length > 0 && (
                     <ToolUseDisclosure toolUses={message.tool_uses} />
@@ -222,13 +232,7 @@ export function MessageList({
             job's lifetime — showing both would double up. */}
         {isStreaming && !messages.some((message) => message.pending) && (
           <div className="flex justify-start">
-            <div
-              className="flex items-center gap-2 px-3.5 py-2.5 bg-muted text-foreground"
-              style={{ borderRadius: AI_BUBBLE_RADIUS }}
-            >
-              <LoadingSpinner size="sm" />
-              <LiveProgressLabel activeProgress={activeProgress} />
-            </div>
+            <PendingBubble activeProgress={activeProgress} activeJob={activeSessionJob} />
           </div>
         )}
         <div ref={messagesEndRef} />
@@ -237,6 +241,39 @@ export function MessageList({
         {tailSpacer > 0 && <div aria-hidden="true" style={{ height: tailSpacer }} />}
       </div>
     </ScrollArea>
+  )
+}
+
+// Shared "generating…" bubble: the spinner + live progress label, plus (B3) a
+// ghost "view process" button that opens the agent console straight onto this
+// session's in-flight job. Used both by the persisted `pending` placeholder
+// message and the brief pre-registration fallback bubble below it.
+function PendingBubble({
+  activeProgress,
+  activeJob,
+}: {
+  activeProgress?: { phase?: string; tool_name?: string; tool_input?: Record<string, unknown> }
+  activeJob?: BackgroundJob
+}) {
+  const { t } = useTranslation()
+  return (
+    <div
+      className="flex items-center gap-2 px-3.5 py-2.5 bg-muted text-foreground"
+      style={{ borderRadius: AI_BUBBLE_RADIUS }}
+    >
+      <LoadingSpinner size="sm" />
+      <LiveProgressLabel activeProgress={activeProgress} />
+      {activeJob && (
+        <button
+          type="button"
+          onClick={() => useAgentConsoleStore.getState().open(activeJob.jobId)}
+          className="ml-1 flex flex-shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <Activity className="h-3 w-3" aria-hidden="true" />
+          {t('chat.viewProcess')}
+        </button>
+      )}
+    </div>
   )
 }
 

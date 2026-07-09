@@ -634,6 +634,8 @@ export const bnIN = {
     generating: "Generating…",
     generationFailed: "Failed to generate a response",
     retry: "Retry",
+    thinking: "ভাবছে",
+    viewProcess: "প্রক্রিয়া দেখুন",
   },
   jobs: {
     tray: {

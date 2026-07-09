@@ -635,6 +635,8 @@ export const enUS = {
     generating: "Generating…",
     generationFailed: "Failed to generate a response",
     retry: "Retry",
+    thinking: "Thinking",
+    viewProcess: "View process",
   },
   jobs: {
     tray: {

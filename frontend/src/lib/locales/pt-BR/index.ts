@@ -634,6 +634,8 @@ export const ptBR = {
     generating: "Generating…",
     generationFailed: "Failed to generate a response",
     retry: "Retry",
+    thinking: "Pensando",
+    viewProcess: "Ver processo",
   },
   jobs: {
     tray: {

@@ -634,6 +634,8 @@ export const plPL = {
     generating: "Generating…",
     generationFailed: "Failed to generate a response",
     retry: "Retry",
+    thinking: "Myśli",
+    viewProcess: "Zobacz proces",
   },
   jobs: {
     tray: {

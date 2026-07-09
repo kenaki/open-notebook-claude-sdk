@@ -634,6 +634,8 @@ export const caES = {
     generating: "Generating…",
     generationFailed: "Failed to generate a response",
     retry: "Retry",
+    thinking: "Pensant",
+    viewProcess: "Veure el procés",
   },
   jobs: {
     tray: {

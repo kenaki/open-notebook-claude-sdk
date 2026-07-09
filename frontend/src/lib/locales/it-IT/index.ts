@@ -634,6 +634,8 @@ export const itIT = {
     generating: "Generating…",
     generationFailed: "Failed to generate a response",
     retry: "Retry",
+    thinking: "Sta pensando",
+    viewProcess: "Visualizza processo",
   },
   jobs: {
     tray: {

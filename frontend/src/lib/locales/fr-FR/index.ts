@@ -634,6 +634,8 @@ export const frFR = {
     generating: "Generating…",
     generationFailed: "Failed to generate a response",
     retry: "Retry",
+    thinking: "Réflexion en cours",
+    viewProcess: "Voir le processus",
   },
   jobs: {
     tray: {

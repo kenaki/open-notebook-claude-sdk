@@ -634,6 +634,8 @@ export const jaJP = {
     generating: "Generating…",
     generationFailed: "Failed to generate a response",
     retry: "Retry",
+    thinking: "思考中",
+    viewProcess: "プロセスを見る",
   },
   jobs: {
     tray: {

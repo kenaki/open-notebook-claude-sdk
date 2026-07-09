@@ -1,6 +1,5 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
 import {
   AlignLeft,
   FileText,
@@ -21,7 +20,7 @@ import { JobStatusBadge } from './JobStatusBadge'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import type { BackgroundJob, JobKind } from '@/lib/stores/jobs-store'
 import { KIND_LABEL_KEY } from '@/lib/stores/jobs-store'
-import { jobOrigin } from '@/lib/utils/job-origin'
+import { useAgentConsoleStore } from '@/lib/stores/agent-console-store'
 
 // One glyph per process type so each is distinguishable at a glance.
 export const KIND_ICONS: Record<JobKind, LucideIcon> = {
@@ -43,7 +42,6 @@ interface JobTrayItemProps {
 }
 
 export function JobTrayItem({ job }: JobTrayItemProps) {
-  const router = useRouter()
   const { t } = useTranslation()
   const Icon = KIND_ICONS[job.kind]
 
@@ -59,7 +57,7 @@ export function JobTrayItem({ job }: JobTrayItemProps) {
   return (
     <button
       type="button"
-      onClick={() => router.push(jobOrigin(job))}
+      onClick={() => useAgentConsoleStore.getState().open(job.jobId)}
       className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-muted"
     >
       <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-muted text-muted-foreground">

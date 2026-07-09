@@ -634,6 +634,8 @@ export const zhCN = {
     generating: "Generating…",
     generationFailed: "Failed to generate a response",
     retry: "Retry",
+    thinking: "思考中",
+    viewProcess: "查看进程",
   },
   jobs: {
     tray: {

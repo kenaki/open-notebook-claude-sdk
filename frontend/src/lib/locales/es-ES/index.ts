@@ -634,6 +634,8 @@ export const esES = {
     generating: "Generating…",
     generationFailed: "Failed to generate a response",
     retry: "Retry",
+    thinking: "Pensando",
+    viewProcess: "Ver proceso",
   },
   jobs: {
     tray: {

@@ -634,6 +634,8 @@ export const trTR = {
     generating: "Generating…",
     generationFailed: "Failed to generate a response",
     retry: "Retry",
+    thinking: "Düşünüyor",
+    viewProcess: "Süreci görüntüle",
   },
   jobs: {
     tray: {
