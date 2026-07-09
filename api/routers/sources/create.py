@@ -10,6 +10,7 @@ from api.command_service import CommandService
 from api.models import SourceCreate, SourceResponse
 from api.routers.sources._helpers import source_to_response
 from api.upload_utils import UploadTooLargeError, save_uploaded_file
+from commands._job_guards import command_in_flight
 from commands.source_commands import SourceProcessingInput
 from open_notebook.config import UPLOADS_FOLDER
 from open_notebook.database.repository import ensure_record_id, repo_query
@@ -402,6 +403,57 @@ async def retry_source_processing(source_id: str):
         raise HTTPException(
             status_code=500, detail=f"Error retrying source processing: {str(e)}"
         )
+
+
+@router.post("/sources/{source_id}/verify-clean")
+async def rerun_verify_clean(source_id: str):
+    """Manually re-run the vision proofing pass over a source's sections.
+
+    The ingest path chains this automatically, but a phase can end without
+    finishing: every section's verify job can exhaust its retries, or a stale
+    fan-out can be superseded mid-flight. Nothing observes those cases, so this
+    is the deliberate re-trigger. Coalesced — a pending run wins and returns 409
+    rather than stacking a second orchestrator row.
+
+    Note this also restarts the SUMMARIZE phase when it completes: the last
+    verify job chains ``summarize_source``.
+    """
+    await Source.get_meta(source_id)
+
+    if await command_in_flight(source_id, "verify_clean_source"):
+        raise HTTPException(
+            status_code=409,
+            detail="A verify-clean run is already queued for this source.",
+        )
+
+    command_id = await CommandService.submit_command_job(
+        "open_notebook", "verify_clean_source", {"source_id": source_id}
+    )
+    logger.info(f"Submitted manual verify_clean_source {command_id} for {source_id}")
+    return {"command_id": command_id}
+
+
+@router.post("/sources/{source_id}/summarize")
+async def rerun_summarize(source_id: str):
+    """Manually re-run chapter summaries for a source, skipping the verify phase.
+
+    Use when proofing is already done (or deliberately skipped) and only the
+    summaries need rebuilding. Summaries read ``cleaned_content`` when verify has
+    landed and fall back to the raw parse otherwise.
+    """
+    await Source.get_meta(source_id)
+
+    if await command_in_flight(source_id, "summarize_source"):
+        raise HTTPException(
+            status_code=409,
+            detail="A summarize run is already queued for this source.",
+        )
+
+    command_id = await CommandService.submit_command_job(
+        "open_notebook", "summarize_source", {"source_id": source_id}
+    )
+    logger.info(f"Submitted manual summarize_source {command_id} for {source_id}")
+    return {"command_id": command_id}
 
 
 @router.post("/sources/{source_id}/reparse")

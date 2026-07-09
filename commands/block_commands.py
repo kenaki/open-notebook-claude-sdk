@@ -46,6 +46,7 @@ from typing import List, Optional
 from loguru import logger
 from surreal_commands import CommandInput, CommandOutput, command, submit_command
 
+from commands._job_guards import submit_command_once
 from open_notebook.database.repository import (
     ensure_record_id,
     repo_insert,
@@ -64,7 +65,6 @@ from open_notebook.parsers.docling_parser import (
 from open_notebook.utils.anchor_match import anchor_match, quote_hash
 from open_notebook.utils.block_images import extract_block_images
 from open_notebook.utils.job_progress import report_job_progress
-
 
 # ---------------------------------------------------------------------------
 # Pydantic I/O models
@@ -472,17 +472,16 @@ async def build_blocks_command(input_data: BuildBlocksInput) -> BuildBlocksOutpu
 
         # Rebuild sections from the rich markdown (build_sections is idempotent —
         # it deletes existing source_section rows before rebuilding → REPLACE).
-        try:
-            scmd = submit_command(
-                "open_notebook", "build_sections", {"source_id": str(source.id)}
-            )
-            logger.info(
-                f"build_blocks: resubmitted build_sections for {source.id}: {scmd}"
-            )
-        except Exception as exc:  # non-fatal — sections must not block ingest
-            logger.warning(
-                f"build_blocks: build_sections resubmit failed for {source.id}: {exc}"
-            )
+        # Coalesced: an unconditional resubmit stacked a build_sections row per
+        # reparse, and since the in-flight predicate can't age rows out, those
+        # stuck rows wedged verify_clean_source/summarize_source forever. A
+        # pending build_sections will read this freshly-written full_text anyway.
+        await submit_command_once(
+            "open_notebook",
+            "build_sections",
+            {"source_id": str(source.id)},
+            source_id=str(source.id),
+        )
 
         # Chain embedding (completes parse_status → 'ready' in B4).
         try:

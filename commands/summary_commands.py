@@ -6,11 +6,14 @@ Three commands, layered on top of A3's section tree and B2's verify-clean layer:
     for chaptering to reach a terminal state, then submits one
     ``summarize_section`` job per section. Mirrors ``verify_clean_source``.
   - ``summarize_section``        : summarize one ``source_section`` concisely.
-    Prefers ``cleaned_content`` (B2's vision-verified layer) but falls back to
-    the raw parsed ``content`` when verify-clean hasn't landed yet (or was
-    skipped) — verify and summarize are independent fire-and-forget triggers
-    with no ordering guarantee. The job that writes the LAST missing summary
-    submits ``generate_source_abstract`` (event-driven trigger).
+    Prefers ``cleaned_content`` (B2's vision-verified layer), falling back to the
+    raw parsed ``content`` when verify-clean was skipped. Verify and summarize
+    are SEQUENCED phases: the last ``verify_clean_section`` to finish submits
+    ``summarize_source`` (``verify_commands._chain_summarize_if_last``). They ran
+    concurrently until 2026-07-09, which both starved summaries of the proofed
+    text and thrashed the single local heavy slot between two 35B Ollama models
+    (vision ↔ transformation) on every job swap. The job that writes the LAST
+    missing summary submits ``generate_source_abstract`` (event-driven trigger).
   - ``generate_source_abstract`` : roll up every section summary into one
     document-level abstract, stored as a ``SourceInsight`` (idempotent —
     replaces any prior ``abstract`` insight rather than duplicating).
@@ -41,16 +44,24 @@ from langchain_core.messages import HumanMessage
 from loguru import logger
 from surreal_commands import CommandInput, CommandOutput, command, submit_command
 
+from commands._heavy_lane import heavy_lane, heavy_lane_for
+
 # Shared race-guard + tree-flatten helpers live with the B2 orchestrator; both
 # fan-outs must gate on the same "chaptering reached a terminal state" predicate.
-from commands.verify_commands import (
-    _chaptering_in_flight,
-    _flatten_section_titles,
+from commands._job_guards import (
+    MAX_REQUEUES,
+    blocks_in_flight,
+    chaptering_in_flight,
+    is_resource_busy,
+    requeue_job,
+    section_is_gone,
 )
+from commands.verify_commands import _flatten_section_titles
+from open_notebook.ai.models import model_manager
 from open_notebook.ai.provision import provision_langchain_model
 from open_notebook.database.repository import ensure_record_id, repo_query
 from open_notebook.domain.notebook import Source, SourceSection
-from open_notebook.exceptions import ConfigurationError
+from open_notebook.exceptions import ConfigurationError, NotFoundError
 from open_notebook.utils import clean_thinking_content
 from open_notebook.utils.error_classifier import classify_error
 from open_notebook.utils.job_progress import report_job_progress
@@ -74,6 +85,16 @@ def _job_id(input_data: CommandInput) -> Optional[str]:
 
 class SummarizeSectionInput(CommandInput):
     source_section_id: str
+    # Declared (not just passed) so it PERSISTS into the command row's args —
+    # undeclared keys are dropped, which is why cancel_source_jobs could never
+    # see per-section jobs.
+    source_id: Optional[str] = None
+    # Stamped by summarize_source at fan-out time from source.parse_generation.
+    # A newer generation means the section tree has been rebuilt since and this
+    # id belongs to a dead generation. None = unstamped (manual re-run) → run.
+    parse_generation: Optional[int] = None
+    # Incremented each time the job is requeued for a busy heavy slot.
+    requeue_count: int = 0
 
 
 class SummarizeSectionOutput(CommandOutput):
@@ -216,11 +237,32 @@ async def summarize_section(
     job_id = _job_id(input_data)
     await report_job_progress(job_id, "Loading section")
 
-    section = await SourceSection.get(input_data.source_section_id)
-    if not section:
-        raise ValueError(
-            f"SourceSection '{input_data.source_section_id}' not found"
+    # A missing section is OBSOLETE WORK, not an error — build_sections is
+    # delete-then-rebuild, so a rebuild landing while this job sits in the queue
+    # orphans its section id. Raising marked the job failed and burned retries
+    # per orphan (the same storm that hit verify_clean_section). Skip quietly.
+    try:
+        section = await SourceSection.get(input_data.source_section_id)
+    except NotFoundError:
+        if not await section_is_gone(input_data.source_section_id):
+            raise  # live DB problem, not a deleted row — let the job retry
+        logger.info(
+            f"summarize_section: section {input_data.source_section_id} no "
+            f"longer exists (superseded by a section rebuild); skipping"
         )
+        return SummarizeSectionOutput(summary=None)
+
+    # Same staleness, caught one step earlier: the id resolves but the source has
+    # been re-parsed since fan-out. Only enforced when the job carried a stamp.
+    if input_data.parse_generation is not None:
+        source = await Source.get(str(section.source))
+        if source and source.parse_generation != input_data.parse_generation:
+            logger.info(
+                f"summarize_section: section {section.id} was queued for parse "
+                f"generation {input_data.parse_generation} but source is now at "
+                f"{source.parse_generation}; skipping obsolete summary"
+            )
+            return SummarizeSectionOutput(summary=None)
 
     text = section.cleaned_content or section.content
     if not text or not text.strip():
@@ -237,15 +279,47 @@ async def summarize_section(
         )
         text = text[:_MAX_SUMMARY_INPUT_CHARS] + "\n\n[…truncated for length]"
 
-    await report_job_progress(job_id, "Summarizing section")
     model = await provision_langchain_model(
         text, None, "transformation", max_tokens=8192
     )
+
+    # Shares the Ollama gate's single heavy slot with vision verify — see the
+    # lane comment in `verify_commands.verify_clean_section`. `provision_*` may
+    # swap the transformation model for `large_context_model` on long sections;
+    # both defaults resolve to the same local provider, so either is heavy.
+    defaults = await model_manager.get_defaults()
+    lane = await heavy_lane_for(defaults.default_transformation_model)
+    if lane is heavy_lane and heavy_lane.locked():
+        await report_job_progress(job_id, "Waiting for the local model")
+
     try:
-        response = await model.ainvoke(
-            [HumanMessage(content=f"Summarize this document section concisely:\n\n{text}")]
-        )
+        async with lane:
+            await report_job_progress(job_id, "Summarizing section")
+            response = await model.ainvoke(
+                [HumanMessage(content=f"Summarize this document section concisely:\n\n{text}")]
+            )
     except Exception as e:
+        # BLOCKED, not BROKEN: the heavy slot was busy. This command's retry
+        # budget is 3 attempts × 5s fixed — it cannot outlast a single 35B model
+        # load, so a swap used to march it straight to `failed`. Requeue instead.
+        if is_resource_busy(e) and input_data.requeue_count < MAX_REQUEUES:
+            await report_job_progress(job_id, "Waiting for the local model")
+            await requeue_job(
+                "open_notebook",
+                "summarize_section",
+                {
+                    "source_section_id": input_data.source_section_id,
+                    "source_id": input_data.source_id,
+                    "parse_generation": input_data.parse_generation,
+                    "requeue_count": input_data.requeue_count + 1,
+                },
+            )
+            logger.info(
+                f"summarize_section: section {section.id} requeued "
+                f"(heavy slot busy, attempt {input_data.requeue_count + 1})"
+            )
+            return SummarizeSectionOutput(summary=None)
+
         # Classify raw provider errors (502s, timeouts, auth…) into typed
         # exceptions with user-friendly messages. Transient classes
         # (ExternalServiceError/NetworkError/RateLimitError) are still retried
@@ -341,7 +415,23 @@ async def summarize_source(
     if not source:
         raise ValueError(f"Source '{input_data.source_id}' not found")
 
-    if await _chaptering_in_flight(input_data.source_id):
+    if await blocks_in_flight(input_data.source_id):
+        # Defer, don't retry — build_blocks resubmits us after it rebuilds the
+        # tree. See commands/verify_commands.py::blocks_in_flight.
+        note = (
+            f"Deferred: block parse (build_blocks) still in flight for source "
+            f"{input_data.source_id}; it will resubmit summarize_source once "
+            f"the final section tree exists."
+        )
+        logger.info(f"summarize_source: {note}")
+        return SummarizeSourceOutput(
+            success=True,
+            source_id=input_data.source_id,
+            jobs_submitted=0,
+            error_message=note,
+        )
+
+    if await chaptering_in_flight(input_data.source_id):
         raise RuntimeError(
             f"Chaptering (build_sections) still in flight for source "
             f"{input_data.source_id} — section tree incomplete; will retry"
@@ -370,6 +460,9 @@ async def summarize_source(
                 "summarize_section",
                 {
                     "source_section_id": section_id,
+                    # Staleness stamp: if the source is re-parsed before this job
+                    # runs, its section id is dead and the job self-skips.
+                    "parse_generation": source.parse_generation,
                     # Job-tray metadata (ignored by the Pydantic input model):
                     # label → row title, source_id → click-to-origin route.
                     "source_id": input_data.source_id,

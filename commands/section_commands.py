@@ -13,10 +13,10 @@ from typing import Dict, List, Optional, Tuple
 from loguru import logger
 from surreal_commands import CommandInput, CommandOutput, command, submit_command
 
+from commands._job_guards import submit_command_once
 from open_notebook.database.repository import ensure_record_id, repo_query
 from open_notebook.domain.notebook import Source, SourceSection
 from open_notebook.exceptions import ConfigurationError
-
 
 # ---------------------------------------------------------------------------
 # Pydantic I/O models
@@ -495,6 +495,25 @@ async def build_sections_command(input_data: BuildSectionsInput) -> BuildSection
             raise ValueError(f"Source '{input_data.source_id}' not found")
 
         sections_created = await _build_sections_for_source(source)
+
+        # The tree is final as of this moment, so this is the only safe place to
+        # start the fan-out that captures section ids. verify_clean_source DEFERS
+        # when build_blocks is still in flight (its ids would be orphaned by the
+        # rebuild it queues), which means the fan-out submitted back at ingest
+        # time may have already bailed — we are its retrigger. Coalesced, so the
+        # common case (no reparse) doesn't double-submit.
+        #
+        # Only the VERIFY phase starts here. summarize_source is chained by the
+        # last verify job to finish (verify_commands._chain_summarize_if_last),
+        # so the two heavy Ollama models never contend for the single local slot
+        # — and summaries get to read verify's `cleaned_content`.
+        if sections_created:
+            await submit_command_once(
+                "open_notebook",
+                "verify_clean_source",
+                {"source_id": str(source.id)},
+                source_id=str(source.id),
+            )
 
         processing_time = time.time() - start_time
         logger.info(

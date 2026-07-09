@@ -34,11 +34,22 @@ from typing import Dict, List, Optional, Tuple
 from loguru import logger
 from surreal_commands import CommandInput, CommandOutput, command, submit_command
 
+from commands._heavy_lane import heavy_lane, heavy_lane_for
+from commands._job_guards import (
+    MAX_REQUEUES,
+    blocks_in_flight,
+    chaptering_in_flight,
+    is_resource_busy,
+    requeue_job,
+    section_is_gone,
+    siblings_in_flight,
+    submit_command_once,
+)
 from open_notebook.ai.models import model_manager
 from open_notebook.ai.vision_utils import provision_vision_message
-from open_notebook.database.repository import repo_query
+from open_notebook.database.repository import ensure_record_id, repo_query
 from open_notebook.domain.notebook import Source, SourceSection
-from open_notebook.exceptions import ConfigurationError
+from open_notebook.exceptions import ConfigurationError, NotFoundError
 from open_notebook.utils import clean_thinking_content
 from open_notebook.utils.error_classifier import classify_error
 from open_notebook.utils.job_progress import report_job_progress
@@ -88,6 +99,18 @@ _VERIFY_INSTRUCTION = (
 
 class VerifyCleanSectionInput(CommandInput):
     source_section_id: str
+    # Declared (not just passed) so it PERSISTS into the command row's args.
+    # Undeclared keys are dropped, which is why cancel_source_jobs could never
+    # see per-section jobs, and why the phase chain below can't count siblings
+    # without it.
+    source_id: Optional[str] = None
+    # Stamped by verify_clean_source at fan-out time from source.parse_generation.
+    # A newer generation means build_blocks has since rebuilt the section tree
+    # and this job's section id belongs to a dead generation. None = unstamped
+    # (manual re-run, or a source that never went through build_blocks) → run.
+    parse_generation: Optional[int] = None
+    # Incremented each time the job is requeued for a busy heavy slot.
+    requeue_count: int = 0
 
 
 class VerifyCleanSectionOutput(CommandOutput):
@@ -218,28 +241,6 @@ def _flatten_section_titles(nodes: List[dict]) -> Dict[str, str]:
     return titles
 
 
-async def _chaptering_in_flight(source_id: str) -> bool:
-    """True while a ``build_sections`` job for this source is queued or running.
-
-    ``build_sections`` is delete-then-rebuild (idempotent), so any fan-out that
-    samples the section tree mid-build sees a PARTIAL tree, not an empty one —
-    observed live on the Hands-on-ML book: ``verify_clean_source`` ran 6s into
-    a 54s rebuild and fanned out over 117 of the eventual 472 sections. An
-    empty-tree check alone therefore cannot close the race; orchestrators must
-    also wait for chaptering to reach a terminal state. Command rows carry no
-    timestamps, so "any non-terminal build_sections row for this source" is the
-    whole predicate. Shared by ``verify_clean_source`` and
-    ``summarize_source`` (commands/summary_commands.py).
-    """
-    rows = await repo_query(
-        "SELECT count() AS n FROM command "
-        "WHERE name = 'build_sections' AND args.source_id = $sid "
-        "AND status IN ['new', 'running'] GROUP ALL",
-        {"sid": source_id},
-    )
-    return bool(rows and rows[0].get("n", 0) > 0)
-
-
 async def _run_render(
     file_path: str, page_start: int, page_end: Optional[int]
 ) -> List[bytes]:
@@ -277,6 +278,50 @@ async def _run_render(
 async def verify_clean_section(
     input_data: VerifyCleanSectionInput,
 ) -> VerifyCleanSectionOutput:
+    """Run the verify pass, then chain the summarize phase if this was the last one.
+
+    The chain lives out here so it fires on EVERY non-raising path — a skipped
+    section (no page range, stale generation, oversized span) still has to count
+    as "done" or the last skip would strand the summarize phase forever.
+
+    A job that raises is left to retry, and stays `running` in the meantime, so a
+    concurrent sibling won't mistake itself for the last. The one case the chain
+    can't cover is a section whose final retry fails terminally — nothing is left
+    to observe it. That's what the manual re-run endpoint is for.
+    """
+    out = await _verify_clean_section_impl(input_data)
+    await _chain_summarize_if_last(input_data)
+    return out
+
+
+async def _chain_summarize_if_last(input_data: VerifyCleanSectionInput) -> None:
+    """Start the summarize phase once no verify job for this source is pending.
+
+    Phases are SEQUENCED, not concurrent, for two reasons. (1) verify uses the
+    vision model and summarize uses the transformation model; both are heavy
+    Ollama, and the single heavy slot holds one at a time, so interleaving them
+    forces a 35B evict+load between jobs. (2) summarize_section prefers
+    `cleaned_content` — verify's output — so running it first means summaries are
+    built from unproofed text.
+    """
+    source_id = input_data.source_id
+    job_id = _job_id(input_data)
+    if not source_id or not job_id:
+        return  # untracked / unstamped job (tests, manual single-section run)
+    if await siblings_in_flight(source_id, "verify_clean_section", job_id):
+        return
+    logger.info(
+        f"verify_clean_section: last verify job for {source_id} finished; "
+        f"starting the summarize phase"
+    )
+    await submit_command_once(
+        "open_notebook", "summarize_source", {"source_id": source_id}, source_id
+    )
+
+
+async def _verify_clean_section_impl(
+    input_data: VerifyCleanSectionInput,
+) -> VerifyCleanSectionOutput:
     """Vision verify-clean a single ``source_section``.
 
     Renders the section's physical pages, sends them + the parsed ``content`` to
@@ -291,15 +336,39 @@ async def verify_clean_section(
     job_id = _job_id(input_data)
     await report_job_progress(job_id, "Loading section")
 
-    section = await SourceSection.get(input_data.source_section_id)
-    if not section:
-        raise ValueError(
-            f"SourceSection '{input_data.source_section_id}' not found"
+    # A missing section is OBSOLETE WORK, not an error. build_sections is
+    # delete-then-rebuild, so any rebuild that lands while this job sits in the
+    # queue mints new section ids and orphans this one. Raising here marked the
+    # job failed AND burned 5 retries per orphan (observed: 89 failed + 377
+    # queued orphans on one book, saturating the worker). Skip quietly instead.
+    try:
+        section = await SourceSection.get(input_data.source_section_id)
+    except NotFoundError:
+        if not await section_is_gone(input_data.source_section_id):
+            raise  # live DB problem, not a deleted row — let the job retry
+        logger.info(
+            f"verify_clean_section: section {input_data.source_section_id} no "
+            f"longer exists (superseded by a section rebuild); skipping"
         )
+        return VerifyCleanSectionOutput(cleaned_content=None, discrepancies=None)
 
     source = await Source.get(str(section.source))
     if not source:
         raise ValueError(f"Source '{section.source}' not found")
+
+    # Same staleness, caught one step earlier: the section id still resolves but
+    # the source has been re-parsed since fan-out, so this tree is on its way
+    # out. Only enforce when the job carried a stamp (see the input model).
+    if (
+        input_data.parse_generation is not None
+        and source.parse_generation != input_data.parse_generation
+    ):
+        logger.info(
+            f"verify_clean_section: section {section.id} was queued for parse "
+            f"generation {input_data.parse_generation} but source is now at "
+            f"{source.parse_generation}; skipping obsolete verify"
+        )
+        return VerifyCleanSectionOutput(cleaned_content=None, discrepancies=None)
 
     # --- Resolve the source PDF ---
     file_path = _resolve_pdf_path(source)
@@ -387,11 +456,45 @@ async def verify_clean_section(
         return VerifyCleanSectionOutput(cleaned_content=None, discrepancies=note)
 
     # --- Invoke ---
-    await report_job_progress(job_id, "Running vision verify")
     lc_model = vision_model.to_langchain()
+
+    # The gate admits ONE heavy generation at a time and refuses the rest with a
+    # 503 after a 30s lock timeout. A 35B vision pass over page images runs for
+    # minutes, so concurrent verify jobs used to 503 each other out and exhaust
+    # their retry budget (the hardened retry below could never outlast a lock it
+    # was itself contending for). Serialize in-process instead: only one job
+    # reaches the gate, the rest wait here.
+    defaults = await model_manager.get_defaults()
+    lane = await heavy_lane_for(defaults.default_vision_model)
+    if lane is heavy_lane and heavy_lane.locked():
+        await report_job_progress(job_id, "Waiting for the local model")
+
     try:
-        response = await lc_model.ainvoke([message])
+        async with lane:
+            await report_job_progress(job_id, "Running vision verify")
+            response = await lc_model.ainvoke([message])
     except Exception as e:
+        # BLOCKED, not BROKEN: the heavy slot was busy (gate 503 / rate limit),
+        # typically because the slot is mid-swap to another 35B model. Requeue
+        # rather than burn a retry attempt and eventually surface as `failed`.
+        if is_resource_busy(e) and input_data.requeue_count < MAX_REQUEUES:
+            await report_job_progress(job_id, "Waiting for the local model")
+            await requeue_job(
+                "open_notebook",
+                "verify_clean_section",
+                {
+                    "source_section_id": input_data.source_section_id,
+                    "source_id": input_data.source_id,
+                    "parse_generation": input_data.parse_generation,
+                    "requeue_count": input_data.requeue_count + 1,
+                },
+            )
+            logger.info(
+                f"verify_clean_section: section {section.id} requeued "
+                f"(heavy slot busy, attempt {input_data.requeue_count + 1})"
+            )
+            return VerifyCleanSectionOutput(cleaned_content=None, discrepancies=None)
+
         # Classify raw provider errors into typed, user-friendly exceptions.
         # Transient classes still retry (5× exp-jitter above); ConfigurationError
         # stays permanent via stop_on.
@@ -468,7 +571,24 @@ async def verify_clean_source(
     if not source:
         raise ValueError(f"Source '{input_data.source_id}' not found")
 
-    if await _chaptering_in_flight(input_data.source_id):
+    if await blocks_in_flight(input_data.source_id):
+        # Defer, don't retry: build_blocks can run for minutes and will resubmit
+        # us once it has rebuilt the tree. Retrying here would exhaust the budget
+        # and surface a red job for what is a normal ordering wait.
+        note = (
+            f"Deferred: block parse (build_blocks) still in flight for source "
+            f"{input_data.source_id}; it will resubmit verify_clean_source once "
+            f"the final section tree exists."
+        )
+        logger.info(f"verify_clean_source: {note}")
+        return VerifyCleanSourceOutput(
+            success=True,
+            source_id=input_data.source_id,
+            jobs_submitted=0,
+            error_message=note,
+        )
+
+    if await chaptering_in_flight(input_data.source_id):
         # build_sections deletes + rebuilds the tree; sampling it now would fan
         # out over a partial tree (observed: 117/472). Raise so surreal_commands
         # retries with backoff until chaptering reaches a terminal state.
@@ -493,11 +613,32 @@ async def verify_clean_source(
     # skip note lives only in each job's result payload) — observed live as
     # 117 completed jobs, 0 cleaned_content, 0 insights, nothing visible in the
     # UI. Skip the fan-out entirely and leave ONE visible verify_flag insight.
-    try:
-        vision_model = await model_manager.get_vision_model()
-    except ConfigurationError as exc:
+    #
+    # "Unconfigured" and "configured but unresolvable" are NOT the same. Model.get
+    # funnels every exception into NotFoundError (open_notebook/domain/base.py),
+    # so a transient DB timeout used to surface here as "no vision model
+    # configured" and skip the entire document — observed live: a 'timed out
+    # during opening handshake' under queue load silently skipped a 472-section
+    # book and left a misleading verify_flag. Only an unset default is a real
+    # skip; a resolution failure raises so the job retries.
+    defaults = await model_manager.get_defaults()
+    if defaults.default_vision_model:
+        try:
+            vision_model = await model_manager.get_vision_model()
+        except Exception as exc:
+            raise RuntimeError(
+                f"Vision model {defaults.default_vision_model} is configured but "
+                f"could not be resolved ({exc}); will retry rather than skip "
+                f"verify-clean for source {input_data.source_id}"
+            ) from exc
+        if vision_model is None:
+            raise RuntimeError(
+                f"Vision model {defaults.default_vision_model} resolved to None "
+                f"for source {input_data.source_id}; will retry"
+            )
+    else:
         vision_model = None
-        logger.warning(f"verify_clean_source: vision model misconfigured: {exc}")
+
     if vision_model is None:
         note = (
             "Verify-clean skipped for this document: no default vision model "
@@ -508,6 +649,15 @@ async def verify_clean_source(
             f"verify_clean_source: source {input_data.source_id}: {note}"
         )
         await source.add_insight("verify_flag", note)
+        # No verify jobs will exist, so nothing will chain the next phase — start
+        # it here. Summaries fall back to raw `content` when there's no
+        # `cleaned_content`, so the document still gets summarized.
+        await submit_command_once(
+            "open_notebook",
+            "summarize_source",
+            {"source_id": input_data.source_id},
+            input_data.source_id,
+        )
         return VerifyCleanSourceOutput(
             success=False,
             source_id=input_data.source_id,
@@ -528,6 +678,9 @@ async def verify_clean_source(
                 "verify_clean_section",
                 {
                     "source_section_id": section_id,
+                    # Staleness stamp: if the source is re-parsed before this job
+                    # runs, its section id is dead and the job self-skips.
+                    "parse_generation": source.parse_generation,
                     # Job-tray metadata (ignored by the Pydantic input model):
                     # label → row title, source_id → click-to-origin route.
                     "source_id": input_data.source_id,
