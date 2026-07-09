@@ -10,10 +10,13 @@ from claude_agent_sdk import (
     AssistantMessage,
     ResultMessage,
     TextBlock,
+    ThinkingBlock,
     ToolResultBlock,
     ToolUseBlock,
     UserMessage,
 )
+
+from langchain_core.messages import HumanMessage, SystemMessage
 
 import open_notebook.ai.claude_agent as ca
 from api.routers.models import _claude_agent_response
@@ -166,11 +169,12 @@ async def test_run_captures_tool_uses_and_matches_results(monkeypatch):
     ]
     monkeypatch.setattr(ca, "query", _fake_query(messages))
 
-    text, tool_uses, usage, model = await ca._run("prompt", options=None)
+    text, tool_uses, usage, model, thinking_texts = await ca._run("prompt", options=None)
 
     assert text == "Found 2 results."
     assert usage == {}  # no usage on the ResultMessage
     assert model == "claude"
+    assert thinking_texts == []
     assert len(tool_uses) == 1
     disclosure = tool_uses[0]
     assert disclosure == {
@@ -190,7 +194,7 @@ async def test_run_no_tools_returns_empty_list(monkeypatch):
     ]
     monkeypatch.setattr(ca, "query", _fake_query(messages))
 
-    text, tool_uses, _usage, _model = await ca._run("prompt", options=None)
+    text, tool_uses, _usage, _model, _thinking = await ca._run("prompt", options=None)
 
     assert text == "Hi there."
     assert tool_uses == []
@@ -211,12 +215,144 @@ async def test_run_captures_usage_and_last_model_wins(monkeypatch):
     ]
     monkeypatch.setattr(ca, "query", _fake_query(messages))
 
-    text, _tool_uses, got_usage, model = await ca._run("prompt", options=None)
+    text, _tool_uses, got_usage, model, _thinking = await ca._run("prompt", options=None)
 
     assert text == "Done."
     assert got_usage == usage
     # The LAST AssistantMessage's model id wins.
     assert model == "claude-opus-4-8"
+
+
+# --- Chunk A4: tool_call/tool_result live events + ThinkingBlock capture -----
+
+
+@pytest.mark.asyncio
+async def test_run_emits_tool_call_and_result_events_when_job_id_given(monkeypatch):
+    messages = [
+        AssistantMessage(
+            content=[
+                ToolUseBlock(
+                    id="tu_1",
+                    name="mcp__open_notebook__search",
+                    input={"query": "x"},
+                ),
+            ],
+            model="claude",
+        ),
+        UserMessage(
+            content=[
+                ToolResultBlock(
+                    tool_use_id="tu_1",
+                    content=[{"type": "text", "text": "ok"}],
+                    is_error=False,
+                ),
+            ],
+        ),
+        AssistantMessage(content=[TextBlock(text="Done.")], model="claude"),
+        _result_message("Done."),
+    ]
+    monkeypatch.setattr(ca, "query", _fake_query(messages))
+
+    events = []
+
+    async def fake_append_job_event(job_id, event_type, **payload):
+        events.append((job_id, event_type, payload))
+
+    monkeypatch.setattr(ca, "append_job_event", fake_append_job_event)
+
+    text, _tool_uses, _usage, _model, _thinking = await ca._run(
+        "prompt", options=None, job_id="command:test1"
+    )
+
+    assert text == "Done."
+    assert [e[1] for e in events] == ["tool_call", "tool_result"]
+    assert all(e[0] == "command:test1" for e in events)
+    call_payload = events[0][2]
+    assert call_payload == {
+        "tool_name": "mcp__open_notebook__search",
+        "tool_input": {"query": "x"},
+    }
+    result_payload = events[1][2]
+    assert result_payload == {
+        "tool_name": "mcp__open_notebook__search",
+        "preview": "ok",
+        "is_error": False,
+    }
+
+
+@pytest.mark.asyncio
+async def test_run_without_job_id_emits_no_events(monkeypatch):
+    messages = [
+        AssistantMessage(
+            content=[
+                ToolUseBlock(id="tu_1", name="search", input={}),
+            ],
+            model="claude",
+        ),
+        UserMessage(
+            content=[
+                ToolResultBlock(tool_use_id="tu_1", content="ok", is_error=False),
+            ],
+        ),
+        _result_message("Done."),
+    ]
+    monkeypatch.setattr(ca, "query", _fake_query(messages))
+
+    events = []
+
+    async def fake_append_job_event(job_id, event_type, **payload):
+        events.append((job_id, event_type, payload))
+
+    monkeypatch.setattr(ca, "append_job_event", fake_append_job_event)
+
+    await ca._run("prompt", options=None)  # job_id defaults to None
+
+    # append_job_event is still called (best-effort no-op inside), but with
+    # job_id=None so the real helper would swallow it before touching the DB.
+    assert all(e[0] is None for e in events)
+
+
+@pytest.mark.asyncio
+async def test_run_captures_thinking_block_text(monkeypatch):
+    messages = [
+        AssistantMessage(
+            content=[
+                ThinkingBlock(thinking="Let me consider the sources.", signature="s1"),
+                TextBlock(text="Here is the answer."),
+            ],
+            model="claude",
+        ),
+        _result_message("Here is the answer."),
+    ]
+    monkeypatch.setattr(ca, "query", _fake_query(messages))
+
+    text, _tool_uses, _usage, _model, thinking_texts = await ca._run(
+        "prompt", options=None
+    )
+
+    assert text == "Here is the answer."
+    assert thinking_texts == ["Let me consider the sources."]
+
+
+@pytest.mark.asyncio
+async def test_run_ignores_empty_thinking_block(monkeypatch):
+    messages = [
+        AssistantMessage(
+            content=[
+                ThinkingBlock(thinking="", signature="s1"),
+                TextBlock(text="Answer."),
+            ],
+            model="claude",
+        ),
+        _result_message("Answer."),
+    ]
+    monkeypatch.setattr(ca, "query", _fake_query(messages))
+
+    _text, _tool_uses, _usage, _model, thinking_texts = await ca._run(
+        "prompt", options=None
+    )
+
+    assert thinking_texts == []
 
 
 def test_build_usage_kwargs_copies_only_known_int_fields():
@@ -278,10 +414,11 @@ def _stub_tools_module(monkeypatch):
 def _capture_run(monkeypatch):
     captured = {}
 
-    async def fake_run(prompt, options):
+    async def fake_run(prompt, options, job_id=None):
         captured["prompt"] = prompt
         captured["options"] = options
-        return "ok", [], {}, None
+        captured["job_id"] = job_id
+        return "ok", [], {}, None, []
 
     monkeypatch.setattr(ca, "_run", fake_run)
     return captured
@@ -363,6 +500,64 @@ async def test_generate_attaches_usage_with_model(tmp_path, monkeypatch):
     }
     # tool_uses plumbing is untouched.
     assert message.additional_kwargs["tool_uses"] == []
+
+
+@pytest.mark.asyncio
+async def test_generate_passes_job_id_through_to_run(tmp_path, monkeypatch):
+    monkeypatch.setattr(ca, "CLAUDE_AGENT_CWD", str(tmp_path))
+    _stub_tools_module(monkeypatch)
+    captured = _capture_run(monkeypatch)
+
+    await ca.generate_with_claude_agent(
+        [SystemMessage(content="sys"), HumanMessage(content="hi")],
+        job_id="command:abc123",
+    )
+
+    assert captured["job_id"] == "command:abc123"
+
+
+@pytest.mark.asyncio
+async def test_generate_sets_thinking_kwarg_from_thinking_blocks(tmp_path, monkeypatch):
+    monkeypatch.setattr(ca, "CLAUDE_AGENT_CWD", str(tmp_path))
+    _stub_tools_module(monkeypatch)
+    messages = [
+        AssistantMessage(
+            content=[
+                ThinkingBlock(thinking="Step one.", signature="s"),
+                ThinkingBlock(thinking="Step two.", signature="s"),
+                TextBlock(text="Final answer."),
+            ],
+            model="claude-opus-4-8",
+        ),
+        _result_message("Final answer."),
+    ]
+    monkeypatch.setattr(ca, "query", _fake_query(messages))
+
+    message = await ca.generate_with_claude_agent(
+        [SystemMessage(content="sys"), HumanMessage(content="hi")]
+    )
+
+    assert message.content == "Final answer."
+    assert message.additional_kwargs["thinking"] == "Step one.\n\nStep two."
+
+
+@pytest.mark.asyncio
+async def test_generate_omits_thinking_key_when_no_thinking_blocks(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(ca, "CLAUDE_AGENT_CWD", str(tmp_path))
+    _stub_tools_module(monkeypatch)
+    messages = [
+        AssistantMessage(content=[TextBlock(text="Hi.")], model="claude"),
+        _result_message("Hi."),
+    ]
+    monkeypatch.setattr(ca, "query", _fake_query(messages))
+
+    message = await ca.generate_with_claude_agent(
+        [SystemMessage(content="sys"), HumanMessage(content="hi")]
+    )
+
+    assert "thinking" not in message.additional_kwargs
 
 
 @pytest.mark.asyncio

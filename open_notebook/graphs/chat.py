@@ -446,7 +446,7 @@ async def _generate_ai_message(
         )
         payload = await _slim_agent_payload(payload, state)
         return await generate_with_claude_agent(
-            payload, thread_id=thread_id, model=agent_model
+            payload, thread_id=thread_id, model=agent_model, job_id=job_id
         )
 
     logger.info(

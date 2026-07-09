@@ -20,6 +20,7 @@ from claude_agent_sdk import (
     ClaudeAgentOptions,
     ResultMessage,
     TextBlock,
+    ThinkingBlock,
     ToolResultBlock,
     ToolUseBlock,
     UserMessage,
@@ -34,6 +35,7 @@ from open_notebook.exceptions import (
     ExternalServiceError,
     RateLimitError,
 )
+from open_notebook.utils.job_progress import append_job_event
 from open_notebook.utils.text_utils import extract_text_content
 
 # Sentinel provider stored on the Model record. Must be intercepted before the
@@ -201,17 +203,17 @@ def _stringify_tool_result(content) -> Optional[str]:
 
 
 async def _run(
-    prompt: str, options: ClaudeAgentOptions
-) -> tuple[str, list[dict], dict, Optional[str]]:
+    prompt: str, options: ClaudeAgentOptions, job_id: Optional[str] = None
+) -> tuple[str, list[dict], dict, Optional[str], list[str]]:
     """Drive a single Claude Agent SDK query.
 
-    Returns ``(assistant text, tool_uses, usage, model)``.
+    Returns ``(assistant text, tool_uses, usage, model, thinking_texts)``.
 
-    Collects ``TextBlock`` text from each ``AssistantMessage`` (skips thinking) and
-    captures every ``ToolUseBlock`` (which MCP tool ran + its input). Tool *results*
-    ride back on the synthetic ``UserMessage`` the SDK emits after each tool runs;
-    those ``ToolResultBlock``s are matched to their tool-use by ``tool_use_id``.
-    Raises the appropriate ``OpenNotebookError`` subclass on a reported error.
+    Collects ``TextBlock`` text from each ``AssistantMessage`` and captures every
+    ``ToolUseBlock`` (which MCP tool ran + its input). Tool *results* ride back on
+    the synthetic ``UserMessage`` the SDK emits after each tool runs; those
+    ``ToolResultBlock``s are matched to their tool-use by ``tool_use_id``. Raises
+    the appropriate ``OpenNotebookError`` subclass on a reported error.
 
     Each tool-use disclosure is a dict with the exact shape the API's
     ``ToolUseDisclosure`` schema consumes:
@@ -221,8 +223,15 @@ async def _run(
     ``usage`` is the turn-total token-count dict from the final ``ResultMessage``
     (empty dict when the SDK reported none). ``model`` is the effective model id
     from the last ``AssistantMessage`` seen (None if no assistant turn arrived).
+    ``thinking_texts`` collects every ``ThinkingBlock.thinking`` seen, in order
+    (the caller joins them for ``additional_kwargs["thinking"]``).
+
+    When ``job_id`` is given, live ``tool_call``/``tool_result`` events are
+    appended to the job's ``progress.events[]`` log (agent console) as they
+    happen — best-effort via ``append_job_event``, never raises.
     """
     texts: list[str] = []
+    thinking_texts: list[str] = []
     tool_uses: dict[str, dict] = {}
     result: Optional[str] = None
     usage: dict = {}
@@ -247,10 +256,14 @@ async def _run(
             if message.model:
                 model_id = message.model
             for block in message.content:
-                # Collect plain text; ThinkingBlock is skipped. ToolUseBlock is
-                # recorded for disclosure, keyed by id so its result can match.
+                # Collect plain text and thinking; ToolUseBlock is recorded for
+                # disclosure (keyed by id so its result can match) and mirrored
+                # live onto the job's event log for the agent console.
                 if isinstance(block, TextBlock):
                     texts.append(block.text)
+                elif isinstance(block, ThinkingBlock):
+                    if block.thinking:
+                        thinking_texts.append(block.thinking)
                 elif isinstance(block, ToolUseBlock):
                     tool_uses[block.id] = {
                         "id": block.id,
@@ -259,6 +272,12 @@ async def _run(
                         "tool_result": None,
                         "is_error": None,
                     }
+                    await append_job_event(
+                        job_id,
+                        "tool_call",
+                        tool_name=block.name,
+                        tool_input=block.input,
+                    )
         elif isinstance(message, UserMessage):
             # Tool results come back on the synthetic user turn after each tool
             # runs; attach them to the matching tool-use disclosure.
@@ -268,10 +287,16 @@ async def _run(
                     if isinstance(block, ToolResultBlock):
                         disclosure = tool_uses.get(block.tool_use_id)
                         if disclosure is not None:
-                            disclosure["tool_result"] = _stringify_tool_result(
-                                block.content
-                            )
+                            stringified = _stringify_tool_result(block.content)
+                            disclosure["tool_result"] = stringified
                             disclosure["is_error"] = block.is_error
+                            await append_job_event(
+                                job_id,
+                                "tool_result",
+                                tool_name=disclosure["tool_name"],
+                                preview=(stringified or "")[:500],
+                                is_error=block.is_error,
+                            )
         elif isinstance(message, ResultMessage):
             if message.is_error:
                 logger.error(
@@ -283,7 +308,7 @@ async def _run(
             usage = message.usage or {}
 
     text = result if result else "".join(texts)
-    return text, list(tool_uses.values()), usage, model_id
+    return text, list(tool_uses.values()), usage, model_id, thinking_texts
 
 
 # Token-count fields copied verbatim from the SDK's ResultMessage.usage dict
@@ -319,7 +344,10 @@ def _build_usage_kwargs(usage: Optional[dict], model: Optional[str]) -> Optional
 
 
 async def generate_with_claude_agent(
-    payload: list, thread_id: Optional[str] = None, model: Optional[str] = None
+    payload: list,
+    thread_id: Optional[str] = None,
+    model: Optional[str] = None,
+    job_id: Optional[str] = None,
 ) -> AIMessage:
     """Run a chat ``payload`` through the Claude Agent SDK, returning an AIMessage.
 
@@ -329,6 +357,11 @@ async def generate_with_claude_agent(
     ``model`` pins a specific Claude model for this turn (e.g. ``claude-opus-4-8``).
     When ``None``, the CLAUDE_AGENT_MODEL env override or the Claude Code default
     is used (see ``_build_options``).
+
+    ``job_id`` (the command row backing this turn, when run as a job) is passed
+    through to ``_run`` so live ``tool_call``/``tool_result`` events land on the
+    agent console; ``None`` when not run as a job (events are then skipped, best
+    -effort, same as every other ``append_job_event`` caller).
 
     The Open Notebook data tools (in-process MCP) are attached so Claude can read
     the user's notebooks/sources/notes during the turn.
@@ -348,9 +381,10 @@ async def generate_with_claude_agent(
     )
 
     mcp_servers = {MCP_SERVER_NAME: build_open_notebook_mcp_server()}
-    text, tool_uses, usage, effective_model = await _run(
+    text, tool_uses, usage, effective_model, thinking_texts = await _run(
         transcript,
         _build_options(system_prompt, mcp_servers=mcp_servers, model=model),
+        job_id=job_id,
     )
     # Carry the tool-use disclosures (and per-turn token usage) back through
     # LangGraph on additional_kwargs (rides on the message object + survives the
@@ -360,6 +394,8 @@ async def generate_with_claude_agent(
     usage_kwargs = _build_usage_kwargs(usage, effective_model)
     if usage_kwargs is not None:
         additional_kwargs["usage"] = usage_kwargs
+    if thinking_texts:
+        additional_kwargs["thinking"] = "\n\n".join(thinking_texts)
     return AIMessage(content=text, additional_kwargs=additional_kwargs)
 
 
