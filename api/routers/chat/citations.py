@@ -168,6 +168,12 @@ async def _build_chat_message(msg: Any, fallback_index: int) -> ChatMessage:
     raw_media = extra.get("media") if isinstance(extra, dict) else None
     media = [MediaItem(**m) for m in raw_media] if raw_media else []
 
+    # Post-hoc thinking (A2): the graph node persists parsed <think> content on
+    # additional_kwargs.thinking when the model produced any. Absent on
+    # messages checkpointed before this change — degrade to None via .get().
+    raw_thinking = extra.get("thinking") if isinstance(extra, dict) else None
+    thinking = raw_thinking if isinstance(raw_thinking, str) and raw_thinking else None
+
     # Per-turn token usage (Claude Agent path only; Esperanto messages carry no
     # "usage" key → stays None → serializes as usage: null). The context window
     # is resolved server-side from the effective model id. Malformed payloads
@@ -212,4 +218,5 @@ async def _build_chat_message(msg: Any, fallback_index: int) -> ChatMessage:
         tool_uses=tool_uses,
         media=media,
         usage=usage,
+        thinking=thinking,
     )

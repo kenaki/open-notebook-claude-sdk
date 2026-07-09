@@ -131,6 +131,9 @@ class ChatMessage(BaseModel):
     usage: Optional[UsageInfo] = Field(
         None, description="Per-turn token usage (Claude Agent path only)"
     )
+    thinking: Optional[str] = Field(
+        None, description="Extracted <think> reasoning, if the model produced any"
+    )
 
 
 class ChatSessionResponse(BaseModel):

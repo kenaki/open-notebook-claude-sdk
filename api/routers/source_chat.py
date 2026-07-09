@@ -61,6 +61,9 @@ class ChatMessage(BaseModel):
     annotation_refs: Optional[List[AnnotationRef]] = Field(
         None, description="Structured annotation references carried by this message"
     )
+    thinking: Optional[str] = Field(
+        None, description="Extracted <think> reasoning, if the model produced any"
+    )
 
 
 class ContextIndicator(BaseModel):
@@ -332,12 +335,20 @@ async def get_source_chat_session(
                 for msg in thread_state.values["messages"]:
                     # Structured annotation references (Chunk D2) ride in the
                     # human message's additional_kwargs; surface them for pills.
-                    raw_refs = (
-                        getattr(msg, "additional_kwargs", None) or {}
-                    ).get("annotation_refs")
+                    extra = getattr(msg, "additional_kwargs", None) or {}
+                    raw_refs = extra.get("annotation_refs")
                     annotation_refs = (
                         [AnnotationRef(**ref) for ref in raw_refs]
                         if raw_refs
+                        else None
+                    )
+                    # Post-hoc thinking (A2): persisted by the graph node when
+                    # the model emitted <think> content; absent on messages
+                    # checkpointed before this change — degrade to None.
+                    raw_thinking = extra.get("thinking")
+                    thinking = (
+                        raw_thinking
+                        if isinstance(raw_thinking, str) and raw_thinking
                         else None
                     )
                     messages.append(
@@ -349,6 +360,7 @@ async def get_source_chat_session(
                             else str(msg),
                             timestamp=None,  # LangChain messages don't have timestamps by default
                             annotation_refs=annotation_refs,
+                            thinking=thinking,
                         )
                     )
 

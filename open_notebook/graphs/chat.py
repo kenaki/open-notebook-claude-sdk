@@ -24,7 +24,7 @@ from open_notebook.ai.provision import provision_langchain_model
 from open_notebook.config import CHAT_MEDIA_FOLDER, LANGGRAPH_CHECKPOINT_FILE
 from open_notebook.domain.notebook import Notebook
 from open_notebook.exceptions import OpenNotebookError
-from open_notebook.utils import clean_thinking_content
+from open_notebook.utils import parse_thinking_content
 from open_notebook.utils.error_classifier import classify_error
 from open_notebook.utils.graph_utils import run_async_in_node
 from open_notebook.utils.job_progress import report_job_progress
@@ -382,9 +382,10 @@ def call_model_with_messages(state: ThreadState, config: RunnableConfig) -> dict
             )
         )
 
-        # Clean thinking content from AI response (e.g., <think>...</think> tags)
+        # Extract + strip thinking content from AI response (e.g., <think>...</think>
+        # tags); persisted on additional_kwargs.thinking instead of discarded (A2).
         content = extract_text_content(ai_message.content)
-        cleaned_content = clean_thinking_content(content)
+        thinking, cleaned_content = parse_thinking_content(content)
         # Contract #5: AI messages must carry a stable `ai-` id — provider ids
         # (lc_run--*, bare UUIDs) don't survive as correlation keys for the
         # illustration sidecar, so anything unprefixed is replaced.
@@ -393,7 +394,13 @@ def call_model_with_messages(state: ThreadState, config: RunnableConfig) -> dict
             if isinstance(ai_message.id, str) and ai_message.id.startswith("ai-")
             else f"ai-{uuid4().hex}"
         )
-        cleaned_message = ai_message.model_copy(update={"content": cleaned_content, "id": stable_id})
+        update: dict = {"content": cleaned_content, "id": stable_id}
+        if thinking:
+            update["additional_kwargs"] = {
+                **ai_message.additional_kwargs,
+                "thinking": thinking,
+            }
+        cleaned_message = ai_message.model_copy(update=update)
 
         return {"messages": cleaned_message}
     except OpenNotebookError:

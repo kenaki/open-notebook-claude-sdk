@@ -20,7 +20,7 @@ from open_notebook.config import LANGGRAPH_CHECKPOINT_FILE
 from open_notebook.domain.notebook import Source, SourceInsight
 from open_notebook.exceptions import OpenNotebookError
 from open_notebook.graphs.chat import format_index_line
-from open_notebook.utils import clean_thinking_content
+from open_notebook.utils import parse_thinking_content
 from open_notebook.utils.context_builder import ContextBuilder
 from open_notebook.utils.error_classifier import classify_error
 from open_notebook.utils.graph_utils import run_async_in_node
@@ -319,10 +319,17 @@ def _call_model_with_source_context_inner(
         )
     )
 
-    # Clean thinking content from AI response (e.g., <think>...</think> tags)
+    # Extract + strip thinking content from AI response (e.g., <think>...</think>
+    # tags); persisted on additional_kwargs.thinking instead of discarded (A2).
     content = extract_text_content(ai_message.content)
-    cleaned_content = clean_thinking_content(content)
-    cleaned_message = ai_message.model_copy(update={"content": cleaned_content})
+    thinking, cleaned_content = parse_thinking_content(content)
+    update: dict = {"content": cleaned_content}
+    if thinking:
+        update["additional_kwargs"] = {
+            **ai_message.additional_kwargs,
+            "thinking": thinking,
+        }
+    cleaned_message = ai_message.model_copy(update=update)
 
     # Update state with context information. Only the AI message is emitted — the
     # human message (with its ``annotation_refs`` kwargs) was already checkpointed
