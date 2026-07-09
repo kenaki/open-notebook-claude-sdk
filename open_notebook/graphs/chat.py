@@ -2,6 +2,7 @@ import base64
 import mimetypes
 import os
 import sqlite3
+import time
 from typing import Annotated, Optional
 from uuid import uuid4
 
@@ -27,7 +28,7 @@ from open_notebook.exceptions import OpenNotebookError
 from open_notebook.utils import parse_thinking_content
 from open_notebook.utils.error_classifier import classify_error
 from open_notebook.utils.graph_utils import run_async_in_node
-from open_notebook.utils.job_progress import report_job_progress
+from open_notebook.utils.job_progress import append_job_event, report_job_progress
 from open_notebook.utils.text_utils import extract_text_content
 
 # Hard cap on search/outline/section round-trips per turn. Each round is a full
@@ -134,6 +135,93 @@ def _attach_media_blocks(payload: list) -> list:
     return new_payload
 
 
+# Live-thinking streaming (A3). Flush a thinking delta into the job event log
+# whenever ~this many seconds OR ~this many new content chars have accrued since
+# the last flush — a coalescing cadence so we emit readable chunks rather than a
+# per-token firehose. Thinking events are capped, then one truncation marker
+# (the full thinking still lands on the persisted message — see A2).
+_THINKING_FLUSH_SECONDS = 2.0
+_THINKING_FLUSH_CHARS = 400
+_MAX_THINKING_EVENTS = 150
+
+
+async def _stream_model(model, messages, job_id: Optional[str] = None) -> AIMessage:
+    """Invoke ``model`` on ``messages``, streaming token deltas so the model's
+    thinking can tail into the job's ``progress.events[]`` log DURING generation.
+
+    Accumulates the streamed ``AIMessageChunk``s into one message — equivalent to
+    ``.invoke()``, including ``.tool_calls`` (verified by the A3 ``.astream()``
+    spike against the local Ollama chat model). Every ``_THINKING_FLUSH_SECONDS``
+    OR ``_THINKING_FLUSH_CHARS`` new content chars, re-parses the accumulated
+    buffer with ``parse_thinking_content`` and appends the thinking **delta since
+    the last flush** as a ``thinking`` event. After ``_MAX_THINKING_EVENTS``
+    thinking events, one ``phase`` truncation marker is emitted and further
+    thinking is dropped.
+
+    NOTE: today's configured local models (nemotron-3-super, qwen3.6) don't emit
+    inline ``<think>`` tags, so ``parse_thinking_content`` finds nothing and no
+    thinking events fire — this is the correct seam for models that DO emit them
+    (and for the parked ``X-ollama-reasoning`` decision), a no-op until then.
+
+    When ``job_id`` is ``None`` there is nowhere to stream events to, so this
+    falls back to a plain (non-streamed) ``.invoke()`` — byte-identical result.
+    """
+    if job_id is None:
+        return model.invoke(messages)
+
+    accumulated = None
+    emitted_thinking_len = 0
+    thinking_events = 0
+    truncated = False
+    last_flush_time = time.monotonic()
+    chars_at_last_flush = 0
+
+    async def flush() -> None:
+        nonlocal emitted_thinking_len, thinking_events, truncated
+        nonlocal last_flush_time, chars_at_last_flush
+        text = extract_text_content(accumulated.content) if accumulated else ""
+        last_flush_time = time.monotonic()
+        chars_at_last_flush = len(text)
+        if truncated:
+            return
+        thinking, _ = parse_thinking_content(text)
+        delta = thinking[emitted_thinking_len:]
+        if not delta:
+            return
+        # Advance past what we've now accounted for BEFORE emitting, so the next
+        # flush's delta never re-includes or overlaps this text.
+        emitted_thinking_len = len(thinking)
+        if thinking_events >= _MAX_THINKING_EVENTS:
+            truncated = True
+            await append_job_event(
+                job_id,
+                "phase",
+                phase="…thinking log truncated",
+                label="…thinking log truncated",
+            )
+            return
+        thinking_events += 1
+        await append_job_event(job_id, "thinking", text=delta)
+
+    async for chunk in model.astream(messages):
+        accumulated = chunk if accumulated is None else accumulated + chunk
+        text_len = len(extract_text_content(accumulated.content))
+        if (
+            text_len - chars_at_last_flush >= _THINKING_FLUSH_CHARS
+            or time.monotonic() - last_flush_time >= _THINKING_FLUSH_SECONDS
+        ):
+            await flush()
+
+    # Final flush: capture any thinking delta accrued after the last threshold
+    # (e.g. a closing </think> in the last chunk).
+    await flush()
+
+    if accumulated is None:
+        # Empty stream — fall back so the caller still gets a well-formed message.
+        return model.invoke(messages)
+    return accumulated
+
+
 async def _run_tool_loop(
     model_with_tools, payload: list, ai_message: AIMessage, job_id: Optional[str] = None
 ) -> AIMessage:
@@ -165,6 +253,14 @@ async def _run_tool_loop(
             await report_job_progress(
                 job_id, phase, tool_name=call["name"], tool_input=call["args"]
             )
+            # Structured tool-call event for the agent console (alongside the
+            # back-compat phase/label above): what the model is about to run.
+            await append_job_event(
+                job_id,
+                "tool_call",
+                tool_name=call["name"],
+                tool_input=call["args"],
+            )
             if tool_fn is None:
                 result = f"Unknown tool: {call['name']}"
             else:
@@ -173,6 +269,14 @@ async def _run_tool_loop(
                 except Exception as e:
                     result = f"Tool error: {e}"
                     is_error = True
+            # …and the result (truncated preview) once it returns.
+            await append_job_event(
+                job_id,
+                "tool_result",
+                tool_name=call["name"],
+                preview=str(result)[:500],
+                is_error=is_error,
+            )
             disclosures.append(
                 {
                     "id": call["id"],
@@ -183,7 +287,9 @@ async def _run_tool_loop(
                 }
             )
             conversation.append(ToolMessage(content=str(result), tool_call_id=call["id"]))
-        ai_message = model_with_tools.invoke(_attach_media_blocks(conversation))
+        ai_message = await _stream_model(
+            model_with_tools, _attach_media_blocks(conversation), job_id
+        )
 
     if disclosures:
         ai_message = ai_message.model_copy(
@@ -357,7 +463,9 @@ async def _generate_ai_message(
         logger.debug(f"Model {model_id!r} does not support tool calling; plain chat")
         return model.invoke(_attach_media_blocks(payload))
 
-    first_message = model_with_tools.invoke(_attach_media_blocks(payload))
+    first_message = await _stream_model(
+        model_with_tools, _attach_media_blocks(payload), job_id
+    )
     return await _run_tool_loop(model_with_tools, payload, first_message, job_id=job_id)
 
 
