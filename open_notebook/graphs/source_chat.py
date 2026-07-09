@@ -19,8 +19,7 @@ from open_notebook.ai.provision import provision_langchain_model
 from open_notebook.config import LANGGRAPH_CHECKPOINT_FILE
 from open_notebook.domain.notebook import Source, SourceInsight
 from open_notebook.exceptions import OpenNotebookError
-from open_notebook.graphs.chat import format_index_line
-from open_notebook.utils import parse_thinking_content
+from open_notebook.graphs.chat import _stream_model, extract_thinking, format_index_line
 from open_notebook.utils.context_builder import ContextBuilder
 from open_notebook.utils.error_classifier import classify_error
 from open_notebook.utils.graph_utils import run_async_in_node
@@ -182,6 +181,7 @@ async def _generate_source_chat_message(
     payload,
     config: RunnableConfig,
     prompt_data: Optional[dict] = None,
+    job_id: Optional[str] = None,
 ) -> AIMessage:
     """Produce the source-chat AIMessage for the selected/default model.
 
@@ -193,7 +193,10 @@ async def _generate_source_chat_message(
 
     ``prompt_data`` feeds the agent-path slim-context swap only (see
     ``_slim_source_agent_payload``); the Esperanto path never reads it,
-    keeping that path byte-identical.
+    keeping that path byte-identical. ``job_id`` (A6/X-sourcechat-claude-jobid)
+    lets both branches emit live tool/thinking events the same way
+    ``chat.py`` does; it defaults to ``None`` so callers that don't run as a
+    job (or older tests) are unaffected.
     """
     if await is_claude_agent_selected(model_id):
         thread_id = config.get("configurable", {}).get("thread_id")
@@ -204,16 +207,16 @@ async def _generate_source_chat_message(
         )
         payload = _slim_source_agent_payload(payload, prompt_data)
         return await generate_with_claude_agent(
-            payload, thread_id=thread_id, model=agent_model
+            payload, thread_id=thread_id, model=agent_model, job_id=job_id
         )
 
     logger.info(
         f"Source chat model routing -> Esperanto/LangChain | model_id={model_id!r}"
     )
     model = await provision_langchain_model(
-        str(payload), model_id, "chat", max_tokens=8192
+        str(payload), model_id, "chat", max_tokens=8192, reasoning=True
     )
-    return model.invoke(payload)
+    return await _stream_model(model, payload, job_id)
 
 
 def call_model_with_source_context(
@@ -314,19 +317,24 @@ def _call_model_with_source_context_inner(
     model_id = config.get("configurable", {}).get("model_id") or state.get(
         "model_override"
     )
+    # This command's own record id (A5 added the state key; A6 wires it in so
+    # live tool/thinking events actually reach the job row — mirrors
+    # chat.py reading state["job_id"]).
+    job_id = state.get("job_id")
 
     # Bridge async generation into this sync LangGraph node (see
     # run_async_in_node: running-loop -> thread, no-loop -> asyncio.run).
     ai_message = run_async_in_node(
         lambda: _generate_source_chat_message(
-            model_id, payload, config, prompt_data=prompt_data
+            model_id, payload, config, prompt_data=prompt_data, job_id=job_id
         )
     )
 
     # Extract + strip thinking content from AI response (e.g., <think>...</think>
-    # tags); persisted on additional_kwargs.thinking instead of discarded (A2).
+    # tags, or Ollama's reasoning_content field, A6); persisted on
+    # additional_kwargs.thinking instead of discarded (A2/A6).
     content = extract_text_content(ai_message.content)
-    thinking, cleaned_content = parse_thinking_content(content)
+    thinking, cleaned_content = extract_thinking(ai_message, content)
     update: dict = {"content": cleaned_content}
     if thinking:
         update["additional_kwargs"] = {

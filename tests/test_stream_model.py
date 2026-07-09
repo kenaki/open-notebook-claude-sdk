@@ -140,6 +140,90 @@ async def test_stream_model_thinking_deltas_no_overlap(monkeypatch, recorder):
     assert not [t for (t, _p) in recorder["events"] if t == "phase"]
 
 
+# --- A6: Ollama `reasoning_content` deltas -----------------------------------
+
+
+@pytest.mark.asyncio
+async def test_stream_model_reasoning_content_deltas_flush_and_normalize(
+    monkeypatch, recorder
+):
+    """Reasoning arriving on `additional_kwargs["reasoning_content"]` (Ollama's
+    `reasoning` field, A6) streams into thinking events on the same cadence as
+    inline `<think>` tags, and the shared `extract_thinking` helper normalizes
+    the accumulated result into `additional_kwargs["thinking"]` afterward."""
+    monkeypatch.setattr(chat, "_THINKING_FLUSH_CHARS", 0)  # flush every chunk
+
+    chunks = [
+        AIMessageChunk(content="", additional_kwargs={"reasoning_content": "alpha "}),
+        AIMessageChunk(content="", additional_kwargs={"reasoning_content": "beta"}),
+        AIMessageChunk(content="answer"),
+    ]
+    model = FakeStreamModel(chunks=chunks)
+
+    result = await chat._stream_model(model, [HumanMessage(content="q")], job_id="cmd:1")
+
+    thinking_events = [p["text"] for (t, p) in recorder["events"] if t == "thinking"]
+    assert "".join(thinking_events) == "alpha beta"
+    assert result.additional_kwargs["reasoning_content"] == "alpha beta"
+    assert result.content == "answer"
+
+    # Downstream capture-site normalization (chat.py / source_chat.py, A6).
+    content = chat.extract_text_content(result.content)
+    thinking, cleaned = chat.extract_thinking(result, content)
+    assert thinking == "alpha beta"
+    assert cleaned == "answer"  # content had no inline tags to strip
+
+
+@pytest.mark.asyncio
+async def test_stream_model_tag_fallback_still_works_without_reasoning_content(
+    recorder,
+):
+    """A tag-emitting model (no `reasoning_content` key at all) still flows
+    through the `parse_thinking_content` fallback, unaffected by A6."""
+    chunks = [_text_chunk("<think>tagged reasoning</think>"), _text_chunk("done")]
+    model = FakeStreamModel(chunks=chunks)
+
+    result = await chat._stream_model(model, [HumanMessage(content="q")], job_id="cmd:1")
+
+    thinking_events = [p["text"] for (t, p) in recorder["events"] if t == "thinking"]
+    assert thinking_events == ["tagged reasoning"]
+    assert "reasoning_content" not in result.additional_kwargs
+
+
+def test_extract_thinking_never_overwrites_claude_agent_thinking():
+    """A4's Claude-agent path already sets `additional_kwargs["thinking"]`
+    directly; A6's normalization must never clobber it, even if `content`
+    happens to also carry `reasoning_content` or inline tags."""
+    message = AIMessage(
+        content="clean claude-agent answer",
+        additional_kwargs={
+            "thinking": "claude thinking already set",
+            "reasoning_content": "should be ignored",
+        },
+    )
+
+    thinking, cleaned = chat.extract_thinking(message, message.content)
+
+    assert thinking == "claude thinking already set"
+    assert cleaned == message.content
+
+
+def test_extract_thinking_prefers_reasoning_content_over_tags():
+    """When both a `reasoning_content` field AND inline tags are present (should
+    not happen in practice, but the precedence must be deterministic), the
+    Ollama reasoning field wins."""
+    message = AIMessage(
+        content="<think>tagged</think>answer",
+        additional_kwargs={"reasoning_content": "structured reasoning"},
+    )
+
+    thinking, cleaned = chat.extract_thinking(message, message.content)
+
+    assert thinking == "structured reasoning"
+    # Content is returned unchanged (not tag-stripped) when reasoning_content wins.
+    assert cleaned == message.content
+
+
 @pytest.mark.asyncio
 async def test_stream_model_final_flush_captures_trailing_thinking(recorder):
     # Default thresholds (400 chars / 2s) are NOT hit by this tiny stream, so the

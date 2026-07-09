@@ -145,6 +145,32 @@ _THINKING_FLUSH_CHARS = 400
 _MAX_THINKING_EVENTS = 150
 
 
+def extract_thinking(ai_message: AIMessage, content: str) -> tuple:
+    """Normalize this turn's thinking text into ``(thinking, cleaned_content)``.
+
+    Shared by ``chat.py``'s and ``source_chat.py``'s capture sites (A6). Never
+    overwrites a ``thinking`` value a prior step (e.g. the Claude-agent path's
+    ``ThinkingBlock`` capture, A4) already set on ``additional_kwargs`` — that
+    text is already final and ``content`` already clean. Otherwise, first hit
+    wins:
+      1. ``additional_kwargs["reasoning_content"]`` — Ollama's ``reasoning``
+         model field, when enabled (A6; see ``provision_langchain_model``)
+      2. ``parse_thinking_content(content)`` — inline ``<think>`` tag split
+         (A2), still correct for any model that emits tags instead
+
+    ``content`` should already be the message's extracted text content.
+    """
+    existing = ai_message.additional_kwargs.get("thinking")
+    if isinstance(existing, str) and existing.strip():
+        return existing, content
+
+    reasoning = ai_message.additional_kwargs.get("reasoning_content")
+    if isinstance(reasoning, str) and reasoning.strip():
+        return reasoning, content
+
+    return parse_thinking_content(content)
+
+
 async def _stream_model(model, messages, job_id: Optional[str] = None) -> AIMessage:
     """Invoke ``model`` on ``messages``, streaming token deltas so the model's
     thinking can tail into the job's ``progress.events[]`` log DURING generation.
@@ -158,10 +184,15 @@ async def _stream_model(model, messages, job_id: Optional[str] = None) -> AIMess
     thinking events, one ``phase`` truncation marker is emitted and further
     thinking is dropped.
 
-    NOTE: today's configured local models (nemotron-3-super, qwen3.6) don't emit
-    inline ``<think>`` tags, so ``parse_thinking_content`` finds nothing and no
-    thinking events fire — this is the correct seam for models that DO emit them
-    (and for the parked ``X-ollama-reasoning`` decision), a no-op until then.
+    Reasoning arrives one of two ways, both handled by ``extract_thinking``:
+    Ollama's separate ``reasoning_content`` field (A6, when the provisioned
+    model has ``reasoning=True`` — see ``provision_langchain_model``) accumulates
+    on ``additional_kwargs`` across chunks exactly like ``content`` does (both
+    are plain string concat via LangChain's chunk-merge); or inline ``<think>``
+    tags in the content buffer (A2's ``parse_thinking_content`` fallback, for
+    any model that emits tags instead). Today's configured local models without
+    ``reasoning`` enabled (nemotron-3-super, qwen3.6) emit neither, so this
+    remains a no-op for them — the correct seam either way.
 
     When ``job_id`` is ``None`` there is nowhere to stream events to, so this
     falls back to a plain (non-streamed) ``.invoke()`` — byte-identical result.
@@ -175,16 +206,22 @@ async def _stream_model(model, messages, job_id: Optional[str] = None) -> AIMess
     truncated = False
     last_flush_time = time.monotonic()
     chars_at_last_flush = 0
+    reasoning_chars_at_last_flush = 0
+
+    def _reasoning_len(message) -> int:
+        reasoning = message.additional_kwargs.get("reasoning_content") if message else None
+        return len(reasoning) if isinstance(reasoning, str) else 0
 
     async def flush() -> None:
         nonlocal emitted_thinking_len, thinking_events, truncated
-        nonlocal last_flush_time, chars_at_last_flush
+        nonlocal last_flush_time, chars_at_last_flush, reasoning_chars_at_last_flush
         text = extract_text_content(accumulated.content) if accumulated else ""
         last_flush_time = time.monotonic()
         chars_at_last_flush = len(text)
+        reasoning_chars_at_last_flush = _reasoning_len(accumulated)
         if truncated:
             return
-        thinking, _ = parse_thinking_content(text)
+        thinking, _ = extract_thinking(accumulated, text) if accumulated else ("", text)
         delta = thinking[emitted_thinking_len:]
         if not delta:
             return
@@ -206,8 +243,10 @@ async def _stream_model(model, messages, job_id: Optional[str] = None) -> AIMess
     async for chunk in model.astream(messages):
         accumulated = chunk if accumulated is None else accumulated + chunk
         text_len = len(extract_text_content(accumulated.content))
+        reasoning_len = _reasoning_len(accumulated)
         if (
             text_len - chars_at_last_flush >= _THINKING_FLUSH_CHARS
+            or reasoning_len - reasoning_chars_at_last_flush >= _THINKING_FLUSH_CHARS
             or time.monotonic() - last_flush_time >= _THINKING_FLUSH_SECONDS
         ):
             await flush()
@@ -453,7 +492,7 @@ async def _generate_ai_message(
         f"Chat model routing -> Esperanto/LangChain | model_id={model_id!r}"
     )
     model = await provision_langchain_model(
-        str(payload), model_id, "chat", max_tokens=8192
+        str(payload), model_id, "chat", max_tokens=8192, reasoning=True
     )
     # Provision on the text payload (above) so token counting is unaffected by
     # large base64 blobs; inline media only for the actual invoke.
@@ -491,9 +530,10 @@ def call_model_with_messages(state: ThreadState, config: RunnableConfig) -> dict
         )
 
         # Extract + strip thinking content from AI response (e.g., <think>...</think>
-        # tags); persisted on additional_kwargs.thinking instead of discarded (A2).
+        # tags, or Ollama's reasoning_content field, A6); persisted on
+        # additional_kwargs.thinking instead of discarded (A2/A6).
         content = extract_text_content(ai_message.content)
-        thinking, cleaned_content = parse_thinking_content(content)
+        thinking, cleaned_content = extract_thinking(ai_message, content)
         # Contract #5: AI messages must carry a stable `ai-` id — provider ids
         # (lc_run--*, bare UUIDs) don't survive as correlation keys for the
         # illustration sidecar, so anything unprefixed is replaced.
