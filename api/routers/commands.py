@@ -32,6 +32,11 @@ class CommandJobStatusResponse(BaseModel):
     created: Optional[str] = None
     updated: Optional[str] = None
     progress: Optional[Dict[str, Any]] = None
+    # Detail-only: the command row's stored input args (e.g. the chat
+    # `context` blob). List endpoints (/commands/active, /commands/jobs)
+    # already return `args` as a plain dict field; this mirrors it on the
+    # single-job detail response for the agent console.
+    args: Optional[Dict[str, Any]] = None
 
 
 @router.post("/commands/jobs", response_model=CommandJobResponse)

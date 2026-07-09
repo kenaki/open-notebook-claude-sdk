@@ -45,9 +45,17 @@ class CommandService:
 
     @staticmethod
     async def get_command_status(job_id: str) -> Dict[str, Any]:
-        """Get status of any command job"""
+        """Get status of any command job — this is the DETAIL fetch (single
+        job): unlike list_command_jobs, it returns `progress` WITH its full
+        `events[]` log plus `args` (the console reads this directly).
+        """
         try:
             status = await get_command_status(job_id)
+            progress, args = (
+                await CommandService._get_progress_and_args(job_id)
+                if status
+                else (None, None)
+            )
             return {
                 "job_id": job_id,
                 "status": status.status if status else "unknown",
@@ -61,24 +69,37 @@ class CommandService:
                 "updated": str(status.updated)
                 if status and hasattr(status, "updated") and status.updated
                 else None,
-                # surreal_commands' CommandResult doesn't carry the `progress`
-                # field we stamp via report_job_progress(), so fetch it directly.
-                "progress": await CommandService._get_progress(job_id)
-                if status
-                else None,
+                # surreal_commands' CommandResult doesn't carry `progress`/`args`
+                # — we stamp `progress` ourselves via report_job_progress()/
+                # append_job_event(), and `args` is the row's stored input.
+                "progress": progress,
+                "args": args,
             }
         except Exception as e:
             logger.error(f"Failed to get command status: {e}")
             raise
 
     @staticmethod
-    async def _get_progress(job_id: str) -> Optional[Dict[str, Any]]:
+    async def _get_progress_and_args(
+        job_id: str,
+    ) -> tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
         from open_notebook.database.repository import ensure_record_id, repo_query
 
         rows = await repo_query(
-            "SELECT progress FROM $job_id", {"job_id": ensure_record_id(job_id)}
+            "SELECT progress, args FROM $job_id", {"job_id": ensure_record_id(job_id)}
         )
-        return rows[0].get("progress") if rows else None
+        if not rows:
+            return None, None
+        return rows[0].get("progress"), rows[0].get("args")
+
+    @staticmethod
+    def _strip_events(progress: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """Drop `progress.events[]` for list-endpoint rows — the poller only
+        needs `phase`/`tool_name`/`tool_input`; the full log is detail-only.
+        """
+        if not isinstance(progress, dict) or "events" not in progress:
+            return progress
+        return {k: v for k, v in progress.items() if k != "events"}
 
     @staticmethod
     async def list_command_jobs(
@@ -137,8 +158,11 @@ class CommandService:
                         "args": row.get("args"),
                         # Live per-job phase written by long-running commands (e.g.
                         # source ingest → "Parsing PDF with Docling"). None for
-                        # commands that don't report progress.
-                        "progress": row.get("progress"),
+                        # commands that don't report progress. The full
+                        # `events[]` log is stripped here — list rows stay
+                        # small for the poller; only the detail endpoint
+                        # (get_command_status) returns events.
+                        "progress": CommandService._strip_events(row.get("progress")),
                     }
                 )
             return result
