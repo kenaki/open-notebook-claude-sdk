@@ -87,7 +87,7 @@ function deriveKind(name: string, args: Record<string, unknown> | null | undefin
 
 /** Cast the server status string to our JobStatus union (defaulting to 'new'). */
 function coerceStatus(raw: string | undefined): JobStatus {
-  if (raw === 'running' || raw === 'completed' || raw === 'failed') return raw
+  if (raw === 'running' || raw === 'completed' || raw === 'failed' || raw === 'canceled') return raw
   return 'new'
 }
 
@@ -234,10 +234,10 @@ export function useJobsPoller() {
           })
         }
 
-        // Detect transition to terminal state.
+        // Detect transition to terminal state (canceled counts — X-canceled-terminal).
         if (
           (prevStatus === 'new' || prevStatus === 'running') &&
-          (incoming.status === 'completed' || incoming.status === 'failed')
+          (incoming.status === 'completed' || incoming.status === 'failed' || incoming.status === 'canceled')
         ) {
           handleTermination(row.job_id, incoming)
         }
@@ -281,8 +281,8 @@ export function useJobsPoller() {
       finalStatus = coerceStatus(row.status)
       error = row.error_message ?? undefined
       // Genuinely still active (rare race) — leave it for the next poll tick
-      // instead of forcing a terminal state.
-      if (finalStatus !== 'completed' && finalStatus !== 'failed') return
+      // instead of forcing a terminal state. `canceled` is terminal too.
+      if (finalStatus !== 'completed' && finalStatus !== 'failed' && finalStatus !== 'canceled') return
     } catch {
       // Lookup failed — fall back to the previous best-effort assumption
       // rather than leaving the job stuck in the tray forever.

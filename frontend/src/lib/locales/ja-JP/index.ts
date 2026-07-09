@@ -643,12 +643,16 @@ export const jaJP = {
       empty: "No background jobs",
       activeCount: "{count} background jobs",
     },
+    kind: {
+      illustration: "メッセージを図解中",
+    },
     status: {
       new: "Queued",
       queued: "Queued",
       running: "Running",
       completed: "Completed",
       failed: "Failed",
+      canceled: "Canceled",
     },
     chatReady: "Your chat response is ready",
     chatFailed: "Chat generation failed",
@@ -668,6 +672,7 @@ export const jaJP = {
     contextArgs: "送信されたコンテキスト",
     contextMessage: "送信されたメッセージ",
     streaming: "処理中…",
+    jobFailed: "このジョブは失敗しました",
   },
   searchPage: {
     askAndSearch: "質問と検索",

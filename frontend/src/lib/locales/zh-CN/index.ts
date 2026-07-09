@@ -643,12 +643,16 @@ export const zhCN = {
       empty: "No background jobs",
       activeCount: "{count} background jobs",
     },
+    kind: {
+      illustration: "正在为消息配图",
+    },
     status: {
       new: "Queued",
       queued: "Queued",
       running: "Running",
       completed: "Completed",
       failed: "Failed",
+      canceled: "Canceled",
     },
     chatReady: "Your chat response is ready",
     chatFailed: "Chat generation failed",
@@ -668,6 +672,7 @@ export const zhCN = {
     contextArgs: "已发送的上下文",
     contextMessage: "已发送的消息",
     streaming: "处理中…",
+    jobFailed: "此任务失败了",
   },
   searchPage: {
     askAndSearch: "提问与搜索",

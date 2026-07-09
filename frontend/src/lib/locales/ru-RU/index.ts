@@ -643,12 +643,16 @@ export const ruRU = {
       empty: "No background jobs",
       activeCount: "{count} background jobs",
     },
+    kind: {
+      illustration: "Иллюстрация сообщения",
+    },
     status: {
       new: "Queued",
       queued: "Queued",
       running: "Running",
       completed: "Completed",
       failed: "Failed",
+      canceled: "Canceled",
     },
     chatReady: "Your chat response is ready",
     chatFailed: "Chat generation failed",
@@ -668,6 +672,7 @@ export const ruRU = {
     contextArgs: "Отправленный контекст",
     contextMessage: "Отправленное сообщение",
     streaming: "Выполняется…",
+    jobFailed: "Эта задача завершилась ошибкой",
   },
   searchPage: {
     askAndSearch: "Запрос и поиск",

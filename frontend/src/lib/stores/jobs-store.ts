@@ -16,7 +16,12 @@ export type JobKind =
   | 'abstract' // writing the document abstract (generate_source_abstract)
   | 'insight' // running an insight / transformation (run_transformation, create_insight)
   | 'illustration' // auto-illustrating an AI chat message (illustrate_message) — silent, tray-only
-export type JobStatus = 'new' | 'running' | 'completed' | 'failed'
+// `canceled` (agent-console B4): the backend can flip a queued/running job to
+// this terminal status (CommandService.cancel_command_job / cancel_source_jobs).
+// Recognizing it here — not just in the console's own poller — keeps the tray
+// poller (use-jobs-poller.ts) from mis-defaulting it to 'new' and polling a
+// dead job forever (see X-canceled-terminal in the coordinator).
+export type JobStatus = 'new' | 'running' | 'completed' | 'failed' | 'canceled'
 
 /**
  * i18n key for each kind's human-facing label. Shared by the tray row and the
@@ -109,7 +114,7 @@ export const useJobsStore = create<JobsState>()(
       clearFinished: () =>
         set((state) => ({
           jobs: state.jobs.filter(
-            (j) => j.status !== 'completed' && j.status !== 'failed'
+            (j) => j.status !== 'completed' && j.status !== 'failed' && j.status !== 'canceled'
           ),
         })),
 

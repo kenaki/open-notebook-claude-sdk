@@ -643,12 +643,16 @@ export const bnIN = {
       empty: "No background jobs",
       activeCount: "{count} background jobs",
     },
+    kind: {
+      illustration: "বার্তা চিত্রিত করা হচ্ছে",
+    },
     status: {
       new: "Queued",
       queued: "Queued",
       running: "Running",
       completed: "Completed",
       failed: "Failed",
+      canceled: "Canceled",
     },
     chatReady: "Your chat response is ready",
     chatFailed: "Chat generation failed",
@@ -668,6 +672,7 @@ export const bnIN = {
     contextArgs: "পাঠানো প্রসঙ্গ",
     contextMessage: "পাঠানো বার্তা",
     streaming: "কাজ চলছে…",
+    jobFailed: "এই কাজটি ব্যর্থ হয়েছে",
   },
   searchPage: {
     askAndSearch: "জিজ্ঞাসা ও অনুসন্ধান",

@@ -643,12 +643,16 @@ export const itIT = {
       empty: "No background jobs",
       activeCount: "{count} background jobs",
     },
+    kind: {
+      illustration: "Illustrazione del messaggio",
+    },
     status: {
       new: "Queued",
       queued: "Queued",
       running: "Running",
       completed: "Completed",
       failed: "Failed",
+      canceled: "Canceled",
     },
     chatReady: "Your chat response is ready",
     chatFailed: "Chat generation failed",
@@ -668,6 +672,7 @@ export const itIT = {
     contextArgs: "Contesto inviato",
     contextMessage: "Messaggio inviato",
     streaming: "In corso…",
+    jobFailed: "Questo lavoro non è riuscito",
   },
   searchPage: {
     askAndSearch: "Chiedi e cerca",

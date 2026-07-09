@@ -662,6 +662,7 @@ export const enUS = {
       summarize: "Summarizing chapter",
       abstract: "Writing abstract",
       insight: "Running insight",
+      illustration: "Illustrating message",
     },
     status: {
       new: "Queued",
@@ -669,6 +670,7 @@ export const enUS = {
       running: "Running",
       completed: "Completed",
       failed: "Failed",
+      canceled: "Canceled",
     },
     chatReady: "Your chat response is ready",
     chatFailed: "Chat generation failed",
@@ -690,6 +692,7 @@ export const enUS = {
     contextArgs: "Context sent",
     contextMessage: "Message sent",
     streaming: "Working…",
+    jobFailed: "This job failed",
   },
   searchPage: {
     askAndSearch: "Ask and Search",

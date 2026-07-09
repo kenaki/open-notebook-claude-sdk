@@ -145,6 +145,13 @@ export default function SourceDetailPage() {
           sourceId={sourceId}
           messages={chat.messages}
           isStreaming={chat.isStreaming}
+          // X-viewprocess-sourcechat (agent-console B4): source chat's job rows
+          // carry `sessionId` = the source-chat session id (registered in
+          // useSourceChat's sendMessage), matching notebook chat's ChatDock/
+          // PoppedChatPanel convention of forwarding the active session id as
+          // `chatScopeId` so MessageList's pending-bubble "view process" button
+          // can find this session's in-flight job.
+          chatScopeId={chat.currentSessionId ?? undefined}
           contextIndicators={chat.contextIndicators}
           onSendMessage={(message, model) => chat.sendMessage(message, model)}
           modelOverride={chat.currentSession?.model_override}

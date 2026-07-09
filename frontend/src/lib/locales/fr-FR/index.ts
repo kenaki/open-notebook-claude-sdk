@@ -643,12 +643,16 @@ export const frFR = {
       empty: "No background jobs",
       activeCount: "{count} background jobs",
     },
+    kind: {
+      illustration: "Illustration du message",
+    },
     status: {
       new: "Queued",
       queued: "Queued",
       running: "Running",
       completed: "Completed",
       failed: "Failed",
+      canceled: "Canceled",
     },
     chatReady: "Your chat response is ready",
     chatFailed: "Chat generation failed",
@@ -668,6 +672,7 @@ export const frFR = {
     contextArgs: "Contexte envoyé",
     contextMessage: "Message envoyé",
     streaming: "En cours…",
+    jobFailed: "Cette tâche a échoué",
   },
   searchPage: {
     askAndSearch: "Poser une question et Rechercher",

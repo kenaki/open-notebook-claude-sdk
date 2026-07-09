@@ -643,12 +643,16 @@ export const plPL = {
       empty: "No background jobs",
       activeCount: "{count} background jobs",
     },
+    kind: {
+      illustration: "Ilustrowanie wiadomości",
+    },
     status: {
       new: "Queued",
       queued: "Queued",
       running: "Running",
       completed: "Completed",
       failed: "Failed",
+      canceled: "Canceled",
     },
     chatReady: "Your chat response is ready",
     chatFailed: "Chat generation failed",
@@ -668,6 +672,7 @@ export const plPL = {
     contextArgs: "Wysłany kontekst",
     contextMessage: "Wysłana wiadomość",
     streaming: "Przetwarzanie…",
+    jobFailed: "To zadanie nie powiodło się",
   },
   searchPage: {
     askAndSearch: "Pytaj i szukaj",

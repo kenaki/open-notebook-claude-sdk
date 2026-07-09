@@ -643,12 +643,16 @@ export const caES = {
       empty: "No background jobs",
       activeCount: "{count} background jobs",
     },
+    kind: {
+      illustration: "Il·lustrant el missatge",
+    },
     status: {
       new: "Queued",
       queued: "Queued",
       running: "Running",
       completed: "Completed",
       failed: "Failed",
+      canceled: "Canceled",
     },
     chatReady: "Your chat response is ready",
     chatFailed: "Chat generation failed",
@@ -668,6 +672,7 @@ export const caES = {
     contextArgs: "Context enviat",
     contextMessage: "Missatge enviat",
     streaming: "Treballant…",
+    jobFailed: "Aquesta tasca ha fallat",
   },
   searchPage: {
     askAndSearch: "Pregunta i cerca",

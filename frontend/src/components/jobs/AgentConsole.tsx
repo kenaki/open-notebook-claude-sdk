@@ -23,7 +23,7 @@ import type { JobEvent } from '@/lib/types/api'
 // trimmed (no counter on the wire), but it CAN tell the cap was hit — the
 // array is sitting at exactly the cap — and surface a one-line notice.
 const EVENT_CAP = 200
-const KNOWN_STATUSES = new Set<JobStatus>(['new', 'running', 'completed', 'failed'])
+const KNOWN_STATUSES = new Set<JobStatus>(['new', 'running', 'completed', 'failed', 'canceled'])
 
 // One row per rendered activity item. Consecutive `thinking` events are
 // coalesced into a single row (coordinator spec) so a stream of small
@@ -83,9 +83,9 @@ function toDisplayString(value: unknown): string | undefined {
 }
 
 // Renders a status badge even for statuses `JobStatusBadge` doesn't know
-// about (e.g. `canceled`, which the backend can set but which isn't part of
-// the narrower tray `JobStatus` union) — falls back to a plain badge with the
-// raw status text instead of crashing on a missing lookup entry.
+// about (the detail payload's `status` is a raw server string, not narrowed to
+// `JobStatus` — e.g. a status this build predates) — falls back to a plain
+// badge with the raw status text instead of crashing on a missing lookup entry.
 function ConsoleStatusBadge({ status }: { status?: string }) {
   if (!status) return null
   if (KNOWN_STATUSES.has(status as JobStatus)) {
@@ -314,7 +314,15 @@ export function AgentConsole() {
           <TabsContent value="activity" className="mt-3 flex min-h-0 flex-1 flex-col">
             <div ref={activityWrapRef} className="min-h-0 flex-1">
               <ScrollArea className="h-full" viewportClassName="px-4 pb-3">
-                {rows.length === 0 && (
+                {status === 'failed' && (
+                  <div className="mb-2 rounded-lg border border-destructive/30 bg-destructive/10 px-2.5 py-2 text-xs text-destructive">
+                    <div className="font-medium">{t('console.jobFailed')}</div>
+                    {detail?.error_message && (
+                      <p className="mt-1 whitespace-pre-wrap font-mono text-[11px]">{detail.error_message}</p>
+                    )}
+                  </div>
+                )}
+                {rows.length === 0 && status !== 'failed' && (
                   <EmptyState text={t('console.empty')} />
                 )}
                 {(rows.length > 0 || isStreaming) && (

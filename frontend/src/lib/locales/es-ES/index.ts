@@ -643,12 +643,16 @@ export const esES = {
       empty: "No background jobs",
       activeCount: "{count} background jobs",
     },
+    kind: {
+      illustration: "Ilustrando mensaje",
+    },
     status: {
       new: "Queued",
       queued: "Queued",
       running: "Running",
       completed: "Completed",
       failed: "Failed",
+      canceled: "Canceled",
     },
     chatReady: "Your chat response is ready",
     chatFailed: "Chat generation failed",
@@ -668,6 +672,7 @@ export const esES = {
     contextArgs: "Contexto enviado",
     contextMessage: "Mensaje enviado",
     streaming: "Trabajando…",
+    jobFailed: "Esta tarea falló",
   },
   searchPage: {
     askAndSearch: "Preguntar y buscar",

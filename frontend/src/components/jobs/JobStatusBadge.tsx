@@ -30,6 +30,10 @@ const getJobStatusMeta = (
     label: t('jobs.status.failed'),
     className: 'bg-red-100 text-red-800 border-red-200',
   },
+  canceled: {
+    label: t('jobs.status.canceled'),
+    className: 'bg-muted text-muted-foreground border-border',
+  },
 })
 
 interface JobStatusBadgeProps {

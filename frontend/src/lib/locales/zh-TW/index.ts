@@ -643,12 +643,16 @@ export const zhTW = {
       empty: "No background jobs",
       activeCount: "{count} background jobs",
     },
+    kind: {
+      illustration: "正在為訊息配圖",
+    },
     status: {
       new: "Queued",
       queued: "Queued",
       running: "Running",
       completed: "Completed",
       failed: "Failed",
+      canceled: "Canceled",
     },
     chatReady: "Your chat response is ready",
     chatFailed: "Chat generation failed",
@@ -668,6 +672,7 @@ export const zhTW = {
     contextArgs: "已傳送的上下文",
     contextMessage: "已傳送的訊息",
     streaming: "處理中…",
+    jobFailed: "此工作失敗了",
   },
   searchPage: {
     askAndSearch: "提問與搜尋",
