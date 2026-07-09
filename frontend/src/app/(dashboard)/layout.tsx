@@ -11,6 +11,7 @@ import { CreateDialogsProvider } from '@/lib/hooks/use-create-dialogs'
 import { CommandPalette } from '@/components/common/CommandPalette'
 import { JobsRuntime } from '@/components/jobs/JobsRuntime'
 import { JobTray } from '@/components/jobs/JobTray'
+import { AgentConsole } from '@/components/jobs/AgentConsole'
 
 export default function DashboardLayout({
   children,
@@ -61,6 +62,7 @@ export default function DashboardLayout({
         <CommandPalette />
         <JobsRuntime />
         <JobTray />
+        <AgentConsole />
       </CreateDialogsProvider>
     </ErrorBoundary>
   )

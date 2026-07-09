@@ -24,7 +24,7 @@ import { KIND_LABEL_KEY } from '@/lib/stores/jobs-store'
 import { jobOrigin } from '@/lib/utils/job-origin'
 
 // One glyph per process type so each is distinguishable at a glance.
-const KIND_ICONS: Record<JobKind, LucideIcon> = {
+export const KIND_ICONS: Record<JobKind, LucideIcon> = {
   notebook_chat: MessageCircle,
   source_chat: MessageSquare,
   podcast: Mic,
