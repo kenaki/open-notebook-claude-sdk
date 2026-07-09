@@ -53,7 +53,19 @@ from open_notebook.domain.notebook import Source, SourceSection
 from open_notebook.exceptions import ConfigurationError
 from open_notebook.utils import clean_thinking_content
 from open_notebook.utils.error_classifier import classify_error
+from open_notebook.utils.job_progress import report_job_progress
 from open_notebook.utils.text_utils import extract_text_content
+
+
+def _job_id(input_data: CommandInput) -> Optional[str]:
+    """Extract this command's own record id for progress/event reporting
+    (mirrors the ``execution_context.command_id`` pattern used across
+    ``commands/*``). ``None`` when run outside a tracked job (e.g. tests)."""
+    return (
+        str(input_data.execution_context.command_id)
+        if input_data.execution_context
+        else None
+    )
 
 # ---------------------------------------------------------------------------
 # Pydantic I/O models
@@ -201,6 +213,9 @@ async def summarize_section(
     verify-clean (B2) hasn't landed yet. Skips gracefully (summary=None, no
     crash) when the section has no text or the model returns empty output.
     """
+    job_id = _job_id(input_data)
+    await report_job_progress(job_id, "Loading section")
+
     section = await SourceSection.get(input_data.source_section_id)
     if not section:
         raise ValueError(
@@ -222,6 +237,7 @@ async def summarize_section(
         )
         text = text[:_MAX_SUMMARY_INPUT_CHARS] + "\n\n[…truncated for length]"
 
+    await report_job_progress(job_id, "Summarizing section")
     model = await provision_langchain_model(
         text, None, "transformation", max_tokens=8192
     )
@@ -244,6 +260,7 @@ async def summarize_section(
         )
         return SummarizeSectionOutput(summary=None)
 
+    await report_job_progress(job_id, "Saving summary")
     had_summary = bool(section.summary and section.summary.strip())
     section.summary = summary
     await section.save()
@@ -317,6 +334,8 @@ async def summarize_source(
     the rest.
     """
     start_time = time.time()
+    job_id = _job_id(input_data)
+    await report_job_progress(job_id, "Checking chaptering status")
 
     source = await Source.get(input_data.source_id)
     if not source:
@@ -339,6 +358,9 @@ async def summarize_source(
             f"chaptering may still be running; will retry"
         )
 
+    await report_job_progress(
+        job_id, "Submitting section summary jobs", sections=len(section_ids)
+    )
     jobs_submitted = 0
     section_titles = _flatten_section_titles(tree)
     for section_id in section_ids:
@@ -407,6 +429,9 @@ async def generate_source_abstract(
     new one is added, so re-running (auto-retry or a manual re-run via
     ``Source.summarize_sections()``) never duplicates it.
     """
+    job_id = _job_id(input_data)
+    await report_job_progress(job_id, "Loading section summaries")
+
     source = await Source.get(input_data.source_id)
     if not source:
         raise ValueError(f"Source '{input_data.source_id}' not found")
@@ -450,6 +475,7 @@ async def generate_source_abstract(
         "Based on these chapter summaries, write a concise abstract for the "
         f"document.\n\n{rollup_text}"
     )
+    await report_job_progress(job_id, "Generating abstract")
     model = await provision_langchain_model(
         rollup_text, None, "transformation", max_tokens=8192
     )
@@ -467,6 +493,7 @@ async def generate_source_abstract(
             success=False, source_id=input_data.source_id, error_message=note
         )
 
+    await report_job_progress(job_id, "Saving abstract")
     # --- Idempotency: replace any existing abstract insight, never duplicate ---
     existing = await source.get_insights()
     for insight in existing:

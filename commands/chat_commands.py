@@ -32,6 +32,7 @@ from open_notebook.domain.notebook import ChatSession, Notebook
 from open_notebook.graphs.chat import graph as chat_graph
 from open_notebook.graphs.source_chat import source_chat_graph
 from open_notebook.utils.error_classifier import classify_error
+from open_notebook.utils.job_progress import append_job_event
 
 
 class ChatCompletionInput(CommandInput):
@@ -165,6 +166,16 @@ async def chat_completion_command(
             else None
         )
 
+        # Record what context this turn was given (console visibility, A5) —
+        # only the notebook-chat path forwards a context blob via input_data.
+        if input_data.context:
+            await append_job_event(
+                job_id,
+                "context",
+                chars=len(input_data.context),
+                preview=input_data.context[:1000],
+            )
+
         # Model override: explicit arg wins, else the session-level setting.
         model_override = (
             input_data.model_override
@@ -184,6 +195,7 @@ async def chat_completion_command(
             state_values["messages"] = state_values.get("messages", [])
             state_values["source_id"] = _prefixed(input_data.source_id or "", "source")
             state_values["model_override"] = model_override
+            state_values["job_id"] = job_id
             # Structured annotation refs (Chunk D2) travel as typed state, not in
             # message content: the resolved REFERENCED-ANNOTATION section goes into
             # graph state and the compact refs list rides on the human message's

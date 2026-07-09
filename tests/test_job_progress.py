@@ -116,6 +116,36 @@ async def test_report_job_progress_noop_without_job_id(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_append_job_event_context_event_shape(monkeypatch):
+    """Per the Event contract, a ``context`` event is
+    ``{"type": "context", "chars": <int>, "preview": <=1000 chars>}`` — no
+    tool/phase fields, and the extra payload (chars/preview) passes through
+    into the appended event dict untouched (chat_commands.py owns truncating
+    ``preview`` to <=1000 chars before calling this helper)."""
+    mock_query = _patch_repo_query(monkeypatch)
+    preview = "x" * 1000
+
+    await job_progress.append_job_event(
+        "command:abc123", "context", chars=12345, preview=preview
+    )
+
+    mock_query.assert_awaited_once()
+    query_str, query_vars = mock_query.await_args.args
+
+    # No phase/tool clauses for a bare context event.
+    assert "progress.phase" not in query_str
+    assert "progress.tool_name" not in query_str
+    assert "progress.tool_input" not in query_str
+
+    event = query_vars["event"]
+    assert event["type"] == "context"
+    assert event["chars"] == 12345
+    assert event["preview"] == preview
+    assert len(event["preview"]) <= 1000
+    assert isinstance(event["t"], str)
+
+
+@pytest.mark.asyncio
 async def test_append_job_event_sets_phase_when_given(monkeypatch):
     mock_query = _patch_repo_query(monkeypatch)
 

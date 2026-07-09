@@ -41,7 +41,19 @@ from open_notebook.domain.notebook import Source, SourceSection
 from open_notebook.exceptions import ConfigurationError
 from open_notebook.utils import clean_thinking_content
 from open_notebook.utils.error_classifier import classify_error
+from open_notebook.utils.job_progress import report_job_progress
 from open_notebook.utils.text_utils import extract_text_content
+
+
+def _job_id(input_data: CommandInput) -> Optional[str]:
+    """Extract this command's own record id for progress/event reporting
+    (mirrors the ``execution_context.command_id`` pattern used across
+    ``commands/*``). ``None`` when run outside a tracked job (e.g. tests)."""
+    return (
+        str(input_data.execution_context.command_id)
+        if input_data.execution_context
+        else None
+    )
 
 # ---------------------------------------------------------------------------
 # Tunables
@@ -276,6 +288,9 @@ async def verify_clean_section(
     PDF, no page range, section too large, vision model unconfigured, or an
     empty model response.
     """
+    job_id = _job_id(input_data)
+    await report_job_progress(job_id, "Loading section")
+
     section = await SourceSection.get(input_data.source_section_id)
     if not section:
         raise ValueError(
@@ -314,6 +329,7 @@ async def verify_clean_section(
         return VerifyCleanSectionOutput(cleaned_content=None, discrepancies=note)
 
     # --- Render pages to PNG ground-truth images ---
+    await report_job_progress(job_id, "Rendering pages")
     try:
         page_images = await _run_render(
             file_path, section.page_start, section.page_end
@@ -371,6 +387,7 @@ async def verify_clean_section(
         return VerifyCleanSectionOutput(cleaned_content=None, discrepancies=note)
 
     # --- Invoke ---
+    await report_job_progress(job_id, "Running vision verify")
     lc_model = vision_model.to_langchain()
     try:
         response = await lc_model.ainvoke([message])
@@ -393,6 +410,7 @@ async def verify_clean_section(
     cleaned, discrepancies = _split_cleaned_and_discrepancies(raw)
 
     # --- Persist: cleaned layer only; raw is immutable ---
+    await report_job_progress(job_id, "Saving cleaned content")
     if cleaned:
         section.cleaned_content = cleaned
         await section.save()
@@ -443,6 +461,8 @@ async def verify_clean_source(
     we raise so the job retries — a qualifying PDF always yields >= 1 section.
     """
     start_time = time.time()
+    job_id = _job_id(input_data)
+    await report_job_progress(job_id, "Checking chaptering status")
 
     source = await Source.get(input_data.source_id)
     if not source:
@@ -496,6 +516,9 @@ async def verify_clean_source(
             error_message=note,
         )
 
+    await report_job_progress(
+        job_id, "Submitting section verify jobs", sections=len(section_ids)
+    )
     jobs_submitted = 0
     section_titles = _flatten_section_titles(tree)
     for section_id in section_ids:

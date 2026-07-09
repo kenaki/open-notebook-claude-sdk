@@ -38,6 +38,10 @@ class SourceChatState(TypedDict):
     # Resolved REFERENCED-ANNOTATION prompt section forwarded by chat_commands
     # (Chunk D2); the compact refs list rides on the human message's kwargs.
     annotation_context: Optional[str]
+    # This command's own record id (chat_commands.py), mirroring
+    # ThreadState.job_id in graphs/chat.py — lets progress/event reporting
+    # reach this graph's run. Not yet wired into a node (A5 adds the key only).
+    job_id: Optional[str]
 
 
 # --- Claude-agent slim context (AGENT-CTX N1) --------------------------------
