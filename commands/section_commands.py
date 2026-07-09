@@ -17,6 +17,7 @@ from commands._job_guards import submit_command_once
 from open_notebook.database.repository import ensure_record_id, repo_query
 from open_notebook.domain.notebook import Source, SourceSection
 from open_notebook.exceptions import ConfigurationError
+from open_notebook.parsers.outline import ADMONITION_MARKERS, resolve_toc
 
 # ---------------------------------------------------------------------------
 # Pydantic I/O models
@@ -76,10 +77,9 @@ def _detect_page_offset(doc) -> Optional[int]:
         return None
 
 
-# to-fix/003: Docling emits admonition callouts as markdown pseudo-headings
-# (e.g. '# Tip' ×69 in one book). They are never real section titles, so they
-# are excluded from the heading-candidate set used for TOC title matching.
-_ADMONITION_MARKERS = frozenset({"tip", "note", "warning", "caution", "important"})
+# to-fix/003 excluded admonition callouts ('# Tip' ×69 in one book) from the
+# heading-candidate set used for TOC title matching. to-fix/006 moved the marker
+# set to parsers/outline, where the reader outline shares it.
 
 # to-fix/003: a markdown slice whose length exceeds
 # max(_PAGE_BUDGET_SLACK × raw text length of its page span, _PAGE_BUDGET_FLOOR)
@@ -131,7 +131,7 @@ def _sections_from_toc(doc, toc: List, full_text: str) -> List[Dict]:
     title_positions: Dict[str, List[int]] = {}
     for m in heading_re.finditer(full_text):
         key = m.group(2).strip().lower()
-        if key in _ADMONITION_MARKERS:
+        if key in ADMONITION_MARKERS:
             continue
         title_positions.setdefault(key, []).append(m.start())
 
@@ -265,7 +265,7 @@ def _sections_from_markdown_headings(full_text: str) -> List[Dict]:
     matches = [
         m
         for m in heading_re.finditer(full_text)
-        if m.group(2).strip().lower() not in _ADMONITION_MARKERS
+        if m.group(2).strip().lower() not in ADMONITION_MARKERS
     ]
     if not matches:
         return []
@@ -383,7 +383,8 @@ async def _build_sections_for_source(source: Source) -> int:
                 import fitz  # PyMuPDF
 
                 doc = fitz.open(fp)
-                toc = doc.get_toc()
+                # Same TOC provider seam the reader outline uses (to-fix/006).
+                toc = resolve_toc(doc)
                 logger.debug(f"PDF opened: {len(doc)} pages, {len(toc)} TOC entries")
 
                 # Detect and persist page_offset

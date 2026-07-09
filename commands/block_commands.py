@@ -10,6 +10,9 @@ rest of the ingest lifecycle:
               ``status='building'``; set ``source.parse_status='parsing'``.
 3. PARSE    — ``DoclingBlockParser.parse`` off the event loop
               (``asyncio.to_thread``) + shared ``finalize()``.
+3a. OUTLINE — realign ``section_index`` against the PDF's TOC bookmarks
+              (``parsers/outline``) so the reader outline is hierarchical rather
+              than the flat level-1 list Docling's layout path can produce.
 4. INSERT   — ``blocks.bulk_insert_blocks`` (explicit composite RecordIDs,
               idempotent on crash+retry). The gen is INVISIBLE until the flip.
 5. FINALIZE — stamp the header: ``block_count``, ``page_count``, ``pages``,
@@ -61,6 +64,11 @@ from open_notebook.parsers.base import blocks_to_markdown, finalize
 from open_notebook.parsers.docling_parser import (
     DoclingBlockParser,
     page_map_from_blocks,
+)
+from open_notebook.parsers.outline import (
+    build_outline,
+    headings_from_blocks,
+    read_pdf_toc,
 )
 from open_notebook.utils.anchor_match import anchor_match, quote_hash
 from open_notebook.utils.block_images import extract_block_images
@@ -417,6 +425,28 @@ async def build_blocks_command(input_data: BuildBlocksInput) -> BuildBlocksOutpu
         result = await asyncio.to_thread(parser.parse, Path(file_path))
         finalized = finalize(result)
 
+        # ---- 3a. OUTLINE (to-fix/006) ------------------------------------
+        # Docling's PDF path never assigns a heading level, so `finalized`'s own
+        # section_index is flat. Realign it against the PDF's TOC bookmarks — the
+        # authoritative hierarchy — keeping each entry's block `seq` so the reader
+        # can still scroll to it. No bookmarks (or any failure) → the flat,
+        # junk-filtered outline finalize() already built.
+        section_index = finalized.section_index
+        try:
+            toc = await asyncio.to_thread(read_pdf_toc, Path(file_path))
+            if toc:
+                section_index = build_outline(
+                    headings_from_blocks(finalized.blocks),
+                    finalized.page_index,
+                    toc,
+                    last_seq=finalized.blocks[-1].seq if finalized.blocks else -1,
+                )
+        except Exception as exc:
+            logger.warning(
+                f"build_blocks: TOC alignment failed for {source_id} "
+                f"({exc}) — falling back to the flat outline"
+            )
+
         # ---- 3b. RASTERIZE figure/table crops (B3, db-design §4 step 3) ---
         # Sets image_ref on figure/table blocks (relative to UPLOADS_FOLDER);
         # per-block failures degrade to image_ref=None and never abort the parse.
@@ -442,7 +472,7 @@ async def build_blocks_command(input_data: BuildBlocksInput) -> BuildBlocksOutpu
                 "page_count": finalized.page_count,
                 "pages": [p.model_dump() for p in finalized.pages],
                 "page_index": finalized.page_index,
-                "section_index": finalized.section_index,
+                "section_index": section_index,
                 "status": "ready",
             },
         )

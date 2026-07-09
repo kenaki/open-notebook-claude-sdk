@@ -22,6 +22,8 @@ from typing import Any, List, Optional, Protocol, Set
 from loguru import logger
 from pydantic import BaseModel, model_validator
 
+from open_notebook.parsers.outline import build_flat_outline, headings_from_blocks
+
 
 class BlockType(StrEnum):
     """Typed layout roles a parser can emit. Enforced in Pydantic, NOT via a DB
@@ -142,7 +144,9 @@ def finalize(result: ParseResult) -> FinalizedParse:
        currently-open heading titles.
     4. ``parent_seq < seq`` validation — a dangling / forward parent is dropped
        to None (with a warning) rather than corrupting the tree.
-    5. ``page_index`` (page -> [seq_lo, seq_hi]) + ``section_index`` (outline).
+    5. ``page_index`` (page -> [seq_lo, seq_hi]) + ``section_index`` (a flat,
+       junk-filtered outline; a TOC-bearing PDF gets a hierarchical one later,
+       in ``build_blocks``).
 
     Pure; never touches the DB.
     """
@@ -197,16 +201,12 @@ def finalize(result: ParseResult) -> FinalizedParse:
             # list stays positionally aligned (index == page - 1).
             page_index.append([0, -1])
 
-    section_index = [
-        {
-            "seq": b.seq,
-            "level": b.level if b.level is not None else 1,
-            "title": b.text or "",
-            "subtree_end": b.subtree_end,
-        }
-        for b in blocks
-        if b.type == BlockType.heading
-    ]
+    # to-fix/006 option A: junk-filtered. This is the outline a parser can build
+    # on its own; when the source is a PDF with bookmarks, `build_blocks` replaces
+    # it with the hierarchical TOC-aligned outline (parsers/outline.build_outline).
+    section_index = build_flat_outline(
+        headings_from_blocks(blocks), last_seq=last_seq
+    )
 
     return FinalizedParse(
         parser_name=result.parser_name,
