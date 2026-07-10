@@ -12,6 +12,7 @@ import rehypeHighlight from 'rehype-highlight'
 import { MarkdownCodeBlock } from './MarkdownCodeBlock'
 import { MessageActions } from './MessageActions'
 import { MessageReferences, AnnotationReferences } from './MessageReferences'
+import { RecallReferences } from './RecallReferences'
 import { MessageMedia } from './MessageMedia'
 import { useAnnotationJumpStore } from '@/lib/stores/annotation-jump-store'
 import { ToolUseDisclosure, describeTool, detailFor } from './ToolUseDisclosure'
@@ -217,6 +218,9 @@ export function MessageList({
                       citations={message.citations}
                       onReferenceClick={onReferenceClick}
                     />
+                  )}
+                  {message.type === 'ai' && message.recall_refs && message.recall_refs.length > 0 && (
+                    <RecallReferences refs={message.recall_refs} />
                   )}
                   {message.type === 'ai' && (
                     <MessageActions content={message.content} notebookId={notebookId} />

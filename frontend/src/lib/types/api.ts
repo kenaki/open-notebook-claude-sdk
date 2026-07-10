@@ -392,6 +392,27 @@ export interface AnnotationRef {
   page?: number | null
 }
 
+// One recall breadcrumb carried by an AI chat message (study-memory Track
+// C1/B3). Mirrors the backend `RecallRef` contract (coordinator.md's
+// Reconciliation section) verbatim: a metadata-only pointer to a prior chat
+// exchange or the user's own annotation that's related to the current
+// answer. Deliberately carries NO gist, note, or answer text — the spoiler
+// guard is structural (two backend tools: search vs. full-content), not a UI
+// choice, so this shape must never grow a content/gist field.
+export interface RecallRef {
+  kind: 'exchange' | 'annotation'
+  title?: string | null
+  session_id?: string | null
+  scope?: 'source' | 'notebook' | null
+  source_id?: string | null
+  notebook_id?: string | null
+  message_id?: string | null
+  annotation_id?: string | null
+  page?: number | null
+  quote?: string | null
+  similarity?: number
+}
+
 export interface SourceChatMessage {
   id: string
   type: 'human' | 'ai'
@@ -420,6 +441,10 @@ export interface SourceChatMessage {
   // Optional/absent on old messages and non-thinking-capable models — the UI
   // renders nothing when unset.
   thinking?: string
+  // Recall breadcrumbs to prior study material related to this answer
+  // (study-memory Track C1/B3). AI turns only; absent when nothing relevant
+  // was found or on old sessions. Never carries gist/note/answer text.
+  recall_refs?: RecallRef[]
 }
 
 export interface SourceChatContextIndicator {
@@ -505,6 +530,10 @@ export interface NotebookChatMessage {
   // Optional/absent on old messages and non-thinking-capable models — the UI
   // renders nothing when unset.
   thinking?: string
+  // Recall breadcrumbs to prior study material related to this answer
+  // (study-memory Track C1/B3). AI turns only; absent when nothing relevant
+  // was found or on old sessions. Never carries gist/note/answer text.
+  recall_refs?: RecallRef[]
 }
 
 export interface NotebookChatSessionWithMessages extends NotebookChatSession {
