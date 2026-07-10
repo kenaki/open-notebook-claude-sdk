@@ -142,7 +142,7 @@ describe('navigateToRecallRef — annotation refs', () => {
     expect(ctx.push).not.toHaveBeenCalled()
   })
 
-  it('annotation on a different source: routes to that source page', () => {
+  it('annotation on a different source with no handler registered there: routes to that source page', () => {
     const ctx = makeCtx({ sourceId: 'source:current' })
     const ref: RecallRef = {
       ...baseRef,
@@ -153,11 +153,43 @@ describe('navigateToRecallRef — annotation refs', () => {
 
     navigateToRecallRef(ref, ctx)
 
+    expect(ctx.requestJump).toHaveBeenCalledWith('source:other', 'source_annotation:ghi')
     expect(ctx.push).toHaveBeenCalledWith('/sources/source:other')
-    expect(ctx.requestJump).not.toHaveBeenCalled()
   })
 
-  it('annotation with no current source in context (notebook chat) routes to the source page', () => {
+  it('annotation on a different source with a handler registered there (e.g. a workspace reader panel): jumps in place, no push', () => {
+    const requestJump = vi.fn<RecallNavContext['requestJump']>().mockReturnValue(true)
+    const ctx = makeCtx({ sourceId: 'source:current', requestJump })
+    const ref: RecallRef = {
+      ...baseRef,
+      kind: 'annotation',
+      source_id: 'source:other',
+      annotation_id: 'source_annotation:ghi',
+    }
+
+    navigateToRecallRef(ref, ctx)
+
+    expect(ctx.requestJump).toHaveBeenCalledWith('source:other', 'source_annotation:ghi')
+    expect(ctx.push).not.toHaveBeenCalled()
+  })
+
+  it('annotation with no current source in context (notebook chat) but a handler registered for the ref source: jumps in place, no push', () => {
+    const requestJump = vi.fn<RecallNavContext['requestJump']>().mockReturnValue(true)
+    const ctx = makeCtx({ requestJump })
+    const ref: RecallRef = {
+      ...baseRef,
+      kind: 'annotation',
+      source_id: 'source:other',
+      annotation_id: 'source_annotation:ghi',
+    }
+
+    navigateToRecallRef(ref, ctx)
+
+    expect(ctx.requestJump).toHaveBeenCalledWith('source:other', 'source_annotation:ghi')
+    expect(ctx.push).not.toHaveBeenCalled()
+  })
+
+  it('annotation with no current source in context (notebook chat) and no handler registered: routes to the source page', () => {
     const ctx = makeCtx()
     const ref: RecallRef = {
       ...baseRef,
@@ -168,8 +200,8 @@ describe('navigateToRecallRef — annotation refs', () => {
 
     navigateToRecallRef(ref, ctx)
 
+    expect(ctx.requestJump).toHaveBeenCalledWith('source:other', 'source_annotation:ghi')
     expect(ctx.push).toHaveBeenCalledWith('/sources/source:other')
-    expect(ctx.requestJump).not.toHaveBeenCalled()
   })
 
   it('annotation missing both source id and annotation id is a no-op', () => {

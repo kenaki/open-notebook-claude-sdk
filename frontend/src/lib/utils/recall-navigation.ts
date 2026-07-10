@@ -24,8 +24,8 @@ export interface RecallNavContext {
   sourceId?: string
   /** Switches THIS chat surface to another of its own sessions in place (e.g. `useSourceChat().switchSession`). Only used for the same-source-chat exchange branch. */
   switchSession?: (sessionId: string) => void
-  /** `useAnnotationJumpStore().requestJump` — no-ops if that source isn't mounted. */
-  requestJump: (sourceId: string, annotationId: string) => void
+  /** `useAnnotationJumpStore().requestJump` — no-op (returns false) if that source isn't mounted. */
+  requestJump: (sourceId: string, annotationId: string) => boolean
   /** `next/navigation` router's `push`. */
   push: (path: string) => void
 }
@@ -44,10 +44,11 @@ export interface RecallNavContext {
  *    "same notebook" special case.
  *  - exchange, anything else (cross-source, or scope missing) → route to
  *    that source's detail page if we at least have a source id.
- *  - annotation, same source mounted → `requestJump`.
- *  - annotation, different/absent source → route to that source's detail
- *    page (Q-cross-source-session's accepted default: landing on the page is
- *    v1, no programmatic session/jump hook for a different source).
+ *  - annotation, same source mounted (`ctx.sourceId`) → `requestJump`.
+ *  - annotation, otherwise → TRY a jump for the ref's own source first (e.g. a
+ *    workspace reader panel has that source mounted even though it isn't
+ *    `ctx.sourceId`); only if no handler is registered (`requestJump` returns
+ *    false, P-jump-bool) fall back to routing to that source's detail page.
  */
 export function navigateToRecallRef(ref: RecallRef, ctx: RecallNavContext): void {
   if (ref.kind === 'exchange') {
@@ -73,6 +74,9 @@ export function navigateToRecallRef(ref: RecallRef, ctx: RecallNavContext): void
   if (ref.kind === 'annotation') {
     if (ref.annotation_id && ctx.sourceId && sameRecord(ref.source_id, ctx.sourceId)) {
       ctx.requestJump(ctx.sourceId, ref.annotation_id)
+      return
+    }
+    if (ref.annotation_id && ref.source_id && ctx.requestJump(ref.source_id, ref.annotation_id)) {
       return
     }
     if (ref.source_id) {

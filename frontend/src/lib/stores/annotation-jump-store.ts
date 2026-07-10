@@ -19,7 +19,8 @@ interface AnnotationJumpState {
   handlers: Record<string, JumpHandler>
   register: (sourceId: string, handler: JumpHandler) => void
   unregister: (sourceId: string) => void
-  requestJump: (sourceId: string, annotationId: string) => void
+  /** Returns true iff a handler was registered for `sourceId` and was invoked — lets callers (e.g. recall-navigation's try-jump-then-push) know whether the jump actually happened. */
+  requestJump: (sourceId: string, annotationId: string) => boolean
 }
 
 export const useAnnotationJumpStore = create<AnnotationJumpState>((set, get) => ({
@@ -34,6 +35,9 @@ export const useAnnotationJumpStore = create<AnnotationJumpState>((set, get) => 
       return { handlers: next }
     }),
   requestJump: (sourceId, annotationId) => {
-    get().handlers[sourceId]?.(annotationId)
+    const handler = get().handlers[sourceId]
+    if (!handler) return false
+    handler(annotationId)
+    return true
   },
 }))
