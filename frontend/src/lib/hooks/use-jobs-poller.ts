@@ -168,7 +168,16 @@ function serverRowToJob(row: CommandJobSummary): BackgroundJob {
  *   cache so the answer appears in the chat UI.
  * - Persisted in-flight jobs (from before a reload) are reconciled on first poll.
  */
-export function useJobsPoller() {
+export interface UseJobsPollerOptions {
+  // Focus-mode windows (`?focus=1`) keep polling — so their own chat/session
+  // data stays fresh — but must not pop completion/failure toasts; the main
+  // window is the single notifier (Decisions #2, cross-interface-study). All
+  // cache invalidations still run unchanged.
+  quiet?: boolean
+}
+
+export function useJobsPoller(options: UseJobsPollerOptions = {}) {
+  const { quiet = false } = options
   const queryClient = useQueryClient()
   const router = useRouter()
   const { t } = useTranslation()
@@ -370,17 +379,22 @@ export function useJobsPoller() {
       // fan-out jobs (embed/verify/summarize) complete silently in the tray.
       // Illustration is never in TOAST_ON_COMPLETE, so it's silent by the same
       // mechanism — no extra guard needed here.
-      if (isChatJob) {
-        toast.success(t('jobs.chatReady'), { action: viewAction })
-      } else if (TOAST_ON_COMPLETE.has(job.kind)) {
-        toast.success(t('jobs.finishedToast').replace('{job}', jobTitle(job)), {
-          action: viewAction,
-        })
+      // `quiet` (focus-mode windows) skips the toast only — invalidations above
+      // always run so the window's own data stays fresh (Decisions #2).
+      if (!quiet) {
+        if (isChatJob) {
+          toast.success(t('jobs.chatReady'), { action: viewAction })
+        } else if (TOAST_ON_COMPLETE.has(job.kind)) {
+          toast.success(t('jobs.finishedToast').replace('{job}', jobTitle(job)), {
+            action: viewAction,
+          })
+        }
       }
     } else if (job.status === 'failed') {
       // Every kind's failure is surfaced — failures are rare and worth knowing —
       // EXCEPT illustration, which is silent even on failure (see above).
-      if (!isIllustrationJob) {
+      // `quiet` suppresses this toast too — a focus window never notifies.
+      if (!isIllustrationJob && !quiet) {
         let message: string
         if (isChatJob) {
           message = getApiErrorMessage(job.error, t, 'jobs.chatFailed')

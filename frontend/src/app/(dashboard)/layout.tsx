@@ -2,6 +2,7 @@
 
 import { useAuth } from '@/lib/hooks/use-auth'
 import { useVersionCheck } from '@/lib/hooks/use-version-check'
+import { useFocusMode } from '@/lib/hooks/use-focus-mode'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
@@ -21,6 +22,7 @@ export default function DashboardLayout({
   const { isAuthenticated, isLoading } = useAuth()
   const router = useRouter()
   const [hasCheckedAuth, setHasCheckedAuth] = useState(false)
+  const focusMode = useFocusMode()
 
   // Check for version updates once per session
   useVersionCheck()
@@ -52,6 +54,22 @@ export default function DashboardLayout({
   // Don't render anything if not authenticated (during redirect)
   if (!isAuthenticated) {
     return null
+  }
+
+  // Focus-mode windows (`?focus=1`) — pop-out reader/chat windows — render
+  // content only: no CommandPalette/JobTray/AgentConsole (the main window is
+  // the single surface for those), and the poller stays quiet (no toasts) so
+  // job completions don't double-notify across windows (Decisions #2).
+  if (focusMode) {
+    return (
+      <ErrorBoundary>
+        <CreateDialogsProvider>
+          {children}
+          <ModalProvider />
+          <JobsRuntime quiet />
+        </CreateDialogsProvider>
+      </ErrorBoundary>
+    )
   }
 
   return (
