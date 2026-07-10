@@ -110,13 +110,18 @@ function AnnotationRefBody({
   sourceId,
   refItem,
 }: {
-  sourceId: string
+  // Fallback when the ref itself carries no source_id (source chat's surface
+  // always has one). cross-interface-study Track B3: a notebook-chat ref
+  // prefers its own `refItem.source_id` since it can point at a different
+  // source than any single surface-level id.
+  sourceId?: string
   refItem: AnnotationRef
 }) {
   const { t } = useTranslation()
   const base = useApiBase()
+  const effectiveSourceId = refItem.source_id ?? sourceId
   const hasAnchor = refItem.block_seq != null
-  const block = useBlock(sourceId, hasAnchor ? refItem.block_seq : null, {
+  const block = useBlock(effectiveSourceId, hasAnchor ? refItem.block_seq : null, {
     enabled: hasAnchor,
   })
 
@@ -196,7 +201,10 @@ export function AnnotationReferences({
   onJumpTo,
 }: {
   refs: AnnotationRef[]
-  sourceId: string
+  // cross-interface-study Track B3: optional — notebook chat has no single
+  // surface-level source; each ref falls back to its own `source_id` instead
+  // (passed straight through to AnnotationRefBody for block hydration).
+  sourceId?: string
   onJumpTo?: (ref: AnnotationRef) => void
 }) {
   const { t } = useTranslation()

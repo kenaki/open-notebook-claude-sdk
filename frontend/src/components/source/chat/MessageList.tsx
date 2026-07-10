@@ -47,9 +47,11 @@ interface MessageListProps {
   contextType?: 'source' | 'notebook'
   chatScopeId?: string
   notebookId?: string
-  // D8: source-chat only — enables annotation reference pills on human turns and
-  // routes their "jump to highlight" click to the active PDF/Reader tab. Absent
-  // for notebook chat (which never carries annotation refs).
+  // D8: source-chat surfaces always pass this; it enables annotation reference
+  // pills on human turns and routes their "jump to highlight" click to the
+  // active PDF/Reader tab. Notebook chat omits it — its refs carry their own
+  // per-ref `source_id` instead (cross-interface-study Track B3), since a
+  // notebook spans multiple sources.
   sourceId?: string
   onReferenceClick: (type: string, id: string) => void
   onSuggestion: (prompt: string) => void
@@ -261,11 +263,19 @@ export function MessageList({
                       />
                     )}
                   </div>
-                  {isHuman && sourceId && message.annotation_refs && message.annotation_refs.length > 0 && (
+                  {isHuman && message.annotation_refs && message.annotation_refs.length > 0 &&
+                    (sourceId || message.annotation_refs.some((ref) => ref.source_id)) && (
                     <AnnotationReferences
                       refs={message.annotation_refs}
                       sourceId={sourceId}
-                      onJumpTo={(ref) => requestJump(sourceId, ref.id)}
+                      onJumpTo={(ref) => {
+                        // cross-interface-study Track B3: a notebook-chat ref can
+                        // point at a different source than the surface's own
+                        // sourceId (source chat always has one; notebook chat
+                        // never does) — prefer the ref's own source_id.
+                        const targetSourceId = ref.source_id ?? sourceId
+                        if (targetSourceId) requestJump(targetSourceId, ref.id)
+                      }}
                     />
                   )}
                   {message.type === 'ai' && message.media && message.media.length > 0 && (

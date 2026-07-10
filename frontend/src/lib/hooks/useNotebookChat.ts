@@ -187,7 +187,17 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections,
   // their own session independently). Auto-creates a session only when targeting
   // the dock with none selected yet.
   const sendMessageTo = useCallback(
-    async (targetSessionId: string | null, message: string, modelOverride?: string, media?: MediaItem[]): Promise<{ ok: boolean }> => {
+    async (
+      targetSessionId: string | null,
+      message: string,
+      modelOverride?: string,
+      media?: MediaItem[],
+      // cross-interface-study Track B3: annotation ids the user is referencing
+      // (mirrors useSourceChat.sendMessage's options shape). Resolved server-side
+      // into the AI context; the resolved refs come back on the human message as
+      // `annotation_refs`.
+      options?: { annotationIds?: string[] }
+    ): Promise<{ ok: boolean }> => {
       let sessionId = targetSessionId
 
       // Auto-create session if none exists (dock-only path).
@@ -240,7 +250,8 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections,
           message,
           context,
           model_override: modelOverride ?? (cachedSession?.model_override ?? undefined),
-          media: media && media.length ? media : undefined
+          media: media && media.length ? media : undefined,
+          annotation_ids: options?.annotationIds
         })
         // Register in the global jobs store so getIsSending + the tray track this.
         useJobsStore.getState().register({

@@ -387,6 +387,11 @@ export interface SourceChatSession extends BaseChatSession {
 // anchored) highlight; `page` is 1-indexed.
 export interface AnnotationRef {
   id: string
+  // Owning source of this annotation (cross-interface-study Track B3). Always
+  // present on notebook-chat refs (a notebook spans multiple sources, so the
+  // ref can't rely on a single surface-level sourceId); optional on source-chat
+  // refs, which fall back to the chat surface's own sourceId.
+  source_id?: string
   quote?: string | null
   block_seq?: number | null
   page?: number | null
@@ -515,6 +520,11 @@ export interface NotebookChatMessage {
   // Claude Agent tool-use disclosure (AI messages; null/absent on the Esperanto
   // path and old sessions). Plan D / Chunk 10.
   tool_uses?: ToolUseDisclosure[]
+  // Structured annotation references (cross-interface-study Track B1/B3).
+  // Present on the HUMAN turn that referenced highlights; the UI renders them
+  // as pills (AnnotationReferences). Each ref carries `source_id` since a
+  // notebook chat can reference annotations across multiple sources.
+  annotation_refs?: AnnotationRef[]
   // Ground-truth token usage for this AI turn (chat-foundation N2, frozen
   // contract #9). Null/absent on the Esperanto path and old sessions.
   usage?: UsageInfo | null
@@ -580,6 +590,11 @@ export interface SendNotebookChatMessageRequest {
   // Image/video attachments for this turn (Plan D / Chunk 12). Mirrors the
   // backend ExecuteChatRequest.media.
   media?: MediaItem[]
+  // Annotation IDs the user is referencing (cross-interface-study Track B1/B3).
+  // Mirrors source chat's SendMessageRequest.annotation_ids: each is resolved
+  // into the AI context and recorded as a cites_annotation edge; the resolved
+  // refs come back on the human message as `annotation_refs`.
+  annotation_ids?: string[]
 }
 
 export interface ExecuteChatJobResponse {
