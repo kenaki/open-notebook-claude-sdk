@@ -1,4 +1,5 @@
 import base64
+import json
 import mimetypes
 import os
 import sqlite3
@@ -24,6 +25,7 @@ from open_notebook.ai.claude_agent import (
 from open_notebook.ai.provision import provision_langchain_model
 from open_notebook.config import CHAT_MEDIA_FOLDER, LANGGRAPH_CHECKPOINT_FILE
 from open_notebook.domain.notebook import Notebook
+from open_notebook.domain.recall import dedupe_and_cap_recall_refs
 from open_notebook.exceptions import OpenNotebookError
 from open_notebook.utils import parse_thinking_content
 from open_notebook.utils.error_classifier import classify_error
@@ -44,6 +46,8 @@ _TOOL_PHASE_LABELS = {
     "search_sources": "Searching your sources",
     "get_source_outline": "Reading document outline",
     "get_section": "Reading a section",
+    "search_past_discussions": "Recalling past discussions",
+    "get_past_discussion": "Reading a past discussion",
 }
 
 
@@ -276,10 +280,18 @@ async def _run_tool_loop(
     Before each tool call, stamps a live phase (+ tool name/input) onto the
     job row via ``report_job_progress`` so the chat UI can show what's
     happening instead of a bare spinner for the duration of the round-trip.
+
+    Recall refs (study-memory, chunk B1): whenever ``search_past_discussions``
+    returns cleanly, its metadata-only ``results`` are collected into
+    ``recall_refs`` alongside ``disclosures``, then deduped/capped (see
+    ``open_notebook.domain.recall.dedupe_and_cap_recall_refs``) and attached
+    to the final message as ``additional_kwargs["recall_refs"]`` — same seam
+    as ``tool_uses``, only when non-empty.
     """
     tools_by_name = {t.name: t for t in CHAT_TOOLS}
     conversation = list(payload)
     disclosures: list[dict] = []
+    recall_refs: list[dict] = []
 
     for _ in range(_MAX_TOOL_ITERATIONS):
         if not getattr(ai_message, "tool_calls", None):
@@ -308,6 +320,13 @@ async def _run_tool_loop(
                 except Exception as e:
                     result = f"Tool error: {e}"
                     is_error = True
+            if call["name"] == "search_past_discussions" and not is_error:
+                try:
+                    recall_refs.extend(json.loads(result).get("results") or [])
+                except (TypeError, ValueError):
+                    logger.warning(
+                        f"search_past_discussions returned non-JSON result: {result!r}"
+                    )
             # …and the result (truncated preview) once it returns.
             await append_job_event(
                 job_id,
@@ -330,12 +349,17 @@ async def _run_tool_loop(
             model_with_tools, _attach_media_blocks(conversation), job_id
         )
 
+    kwargs_update: dict = {}
     if disclosures:
+        kwargs_update["tool_uses"] = disclosures
+    if recall_refs:
+        kwargs_update["recall_refs"] = dedupe_and_cap_recall_refs(recall_refs)
+    if kwargs_update:
         ai_message = ai_message.model_copy(
             update={
                 "additional_kwargs": {
                     **ai_message.additional_kwargs,
-                    "tool_uses": disclosures,
+                    **kwargs_update,
                 }
             }
         )

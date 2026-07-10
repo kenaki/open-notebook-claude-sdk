@@ -14,6 +14,7 @@ import json
 from langchain_core.tools import tool
 
 from open_notebook.domain.notebook import Source, SourceSection, text_search
+from open_notebook.domain.recall import get_exchange_content, recall_search
 
 # Cap individual serialized strings so one chapter can't blow the context.
 _MAX_STR = 4000
@@ -102,4 +103,39 @@ async def get_section(source_id: str, section_id: str) -> str:
     )
 
 
-CHAT_TOOLS = [search_sources, get_source_outline, get_section]
+@tool
+async def search_past_discussions(query: str, limit: int = 5) -> str:
+    """Search the user's PAST chat discussions and highlighted annotations for
+    ones related to the current topic (study-memory recall).
+
+    Returns METADATA ONLY — titles, snippets, and similarity scores that point
+    at prior study sessions and highlights. These are pointers, NOT their
+    content: you may cite them (e.g. "we touched on this before in ...") but
+    you must NEVER restate, paraphrase, or guess what was concluded there from
+    the metadata alone — you do not actually know. If the user asks what was
+    said/concluded/highlighted, call get_past_discussion with the ref's id
+    from these results to fetch the real content first."""
+    refs = await recall_search(query, limit=limit)
+    return json.dumps({"results": refs, "count": len(refs)}, default=str)
+
+
+@tool
+async def get_past_discussion(ref_id: str) -> str:
+    """Fetch the FULL content of ONE past discussion or highlight, by the
+    ``id`` of a result from search_past_discussions (e.g.
+    "chat_exchange:abc" or "source_annotation:xyz").
+
+    Use this ONLY when the user explicitly asks what was discussed, decided,
+    or highlighted before — never call it speculatively just because
+    search_past_discussions found something related."""
+    content = await get_exchange_content(ref_id)
+    return json.dumps(content, default=str)
+
+
+CHAT_TOOLS = [
+    search_sources,
+    get_source_outline,
+    get_section,
+    search_past_discussions,
+    get_past_discussion,
+]

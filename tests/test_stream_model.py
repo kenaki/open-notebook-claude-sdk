@@ -342,3 +342,80 @@ async def test_run_tool_loop_tool_error_marks_is_error(monkeypatch, recorder):
     res_ev = next(p for (t, p) in recorder["events"] if t == "tool_result")
     assert res_ev["is_error"] is True
     assert "boom" in res_ev["preview"]
+
+
+# --- _run_tool_loop: recall_refs capture (study-memory chunk B1) ------------
+
+
+@pytest.mark.asyncio
+async def test_run_tool_loop_captures_recall_refs(monkeypatch, recorder):
+    """A clean search_past_discussions call feeds its metadata-only results
+    into additional_kwargs["recall_refs"] (deduped/capped), alongside
+    tool_uses — the same seam, only when non-empty."""
+    import json
+
+    refs = [
+        {
+            "kind": "exchange",
+            "title": "Prior chat",
+            "session_id": "chat_session:abc",
+            "scope": "notebook",
+            "source_id": None,
+            "notebook_id": "notebook:nb1",
+            "message_id": "ai-1",
+            "annotation_id": None,
+            "page": None,
+            "quote": "What is a monad?",
+            "similarity": 0.71,
+        }
+    ]
+    fake_tool = _FakeTool(
+        "search_past_discussions",
+        result=json.dumps({"results": refs, "count": 1}),
+    )
+    monkeypatch.setattr(chat, "CHAT_TOOLS", [fake_tool])
+    final_model = FakeStreamModel(chunks=[AIMessageChunk(content="final answer")])
+
+    first = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": "search_past_discussions",
+                "args": {"query": "monad"},
+                "id": "c1",
+                "type": "tool_call",
+            }
+        ],
+    )
+
+    result = await chat._run_tool_loop(
+        final_model,
+        [HumanMessage(content="what did we say about monads?")],
+        first,
+        job_id="cmd:9",
+    )
+
+    assert result.additional_kwargs["recall_refs"] == refs
+    assert result.additional_kwargs["tool_uses"][0]["tool_name"] == "search_past_discussions"
+
+
+@pytest.mark.asyncio
+async def test_run_tool_loop_no_recall_refs_key_when_no_results(monkeypatch, recorder):
+    """search_sources (unrelated tool) never populates recall_refs; the key is
+    absent entirely rather than an empty list."""
+    fake_tool = _FakeTool("search_sources", result="found 3 sources")
+    monkeypatch.setattr(chat, "CHAT_TOOLS", [fake_tool])
+    final_model = FakeStreamModel(chunks=[AIMessageChunk(content="final answer")])
+
+    first = AIMessage(
+        content="",
+        tool_calls=[
+            {"name": "search_sources", "args": {"query": "x"}, "id": "c1", "type": "tool_call"}
+        ],
+    )
+
+    result = await chat._run_tool_loop(
+        final_model, [HumanMessage(content="q")], first, job_id="cmd:9"
+    )
+
+    assert "recall_refs" not in result.additional_kwargs
