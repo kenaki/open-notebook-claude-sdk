@@ -345,7 +345,7 @@ export const PDFViewer = memo(function PDFViewer({
   if (error) {
     return (
       <div className="flex items-center justify-center p-8 text-destructive">
-        {error instanceof Error ? error.message : String(error)}
+        {t('sources.pdfLoadError')}
       </div>
     )
   }

@@ -691,7 +691,6 @@ export const enUS = {
     },
     status: {
       new: "Queued",
-      queued: "Queued",
       running: "Running",
       completed: "Completed",
       failed: "Failed",
@@ -702,7 +701,6 @@ export const enUS = {
     finishedToast: "{job} finished",
     failedToast: "{job} failed",
     view: "View",
-    generating: "Generating…",
   },
   console: {
     title: "Agent console",
