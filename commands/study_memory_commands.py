@@ -222,13 +222,16 @@ async def _generate_gist(answer: str, cmd_id: str) -> Tuple[str, bool]:
 
     try:
         model = apply_reasoning_flag(
-            await provision_langchain_model(
-                answer, None, "transformation", max_tokens=512
-            ),
+            await provision_langchain_model(answer, None, "gist", max_tokens=512),
             False,
         )
         defaults = await model_manager.get_defaults()
-        lane = await heavy_lane_for(defaults.default_transformation_model)
+        # Gate on the resolved gist model (small by design) rather than the heavy
+        # transformation model, so the mirror doesn't queue behind the big slot.
+        gist_model_id = (
+            defaults.default_gist_model or defaults.default_transformation_model
+        )
+        lane = await heavy_lane_for(gist_model_id)
         async with lane:
             await report_job_progress(cmd_id, "Distilling gist")
             response = await model.ainvoke(

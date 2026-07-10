@@ -512,6 +512,8 @@ export const ptBR = {
       anchorLegacyTip: "Criado antes da análise por blocos — este destaque não está ancorado à estrutura do documento.",
       sectionLabel: "Seção",
       groupBySection: "Agrupar por seção",
+      collapseSidebar: "Recolher destaques",
+      expandSidebar: "Expandir destaques",
       unsectioned: "Sem seção",
       jumpLegacyPdf: "PDF aberto para mostrar este destaque.",
     },
@@ -693,6 +695,7 @@ export const ptBR = {
       abstract: "Escrevendo resumo",
       insight: "Executando insight",
       illustration: "Ilustrando mensagem",
+      mirror: "Atualizando memória",
     },
     status: {
       new: "Queued",

@@ -101,6 +101,9 @@ async def build_context_data(
     total_content = ""
 
     if context_config:
+        logger.info(f"Building context from context_config for notebook {notebook.id}")
+        logger.info(f"Context config sources: {context_config.get('sources', {})}")
+        logger.info(f"Context config notes: {context_config.get('notes', {})}")
         for source_id, status in (context_config.get("sources") or {}).items():
             if "not in" in status:
                 continue
@@ -124,8 +127,10 @@ async def build_context_data(
                         continue
                     source_context = await source.get_context(context_size="long")
                 else:
+                    logger.warning(f"Source {source_id} with status '{status}' doesn't match 'insights' or 'full content'")
                     continue
 
+                logger.info(f"Added source {source_id} to context with status '{status}'")
                 sources_context.append(source_context)
                 total_content += str(source_context)
             except Exception as e:
@@ -152,6 +157,7 @@ async def build_context_data(
     else:
         # Default: every source short, every note short.
         sources = await notebook.get_sources()
+        logger.info(f"Fetched {len(sources)} sources for notebook {notebook.id}")
         insights_by_source = await _insights_by_source(
             [s.id for s in sources if s.id]
         )
@@ -180,4 +186,5 @@ async def build_context_data(
                 logger.warning(f"Error processing note {note.id}: {str(e)}")
                 continue
 
+    logger.info(f"Context build complete: {len(sources_context)} sources, {len(notes_context)} notes, {len(total_content)} total chars")
     return sources_context, notes_context, total_content

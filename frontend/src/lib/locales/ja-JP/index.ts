@@ -512,6 +512,8 @@ export const jaJP = {
       anchorLegacyTip: "ブロック解析より前に作成されたため、このハイライトは文書構造に固定されていません。",
       sectionLabel: "セクション",
       groupBySection: "セクションでグループ化",
+      collapseSidebar: "ハイライトを折りたたむ",
+      expandSidebar: "ハイライトを展開",
       unsectioned: "セクションなし",
       jumpLegacyPdf: "このハイライトを表示するためにPDFを開きました。",
     },
@@ -693,6 +695,7 @@ export const jaJP = {
       abstract: "要約を作成中",
       insight: "インサイトを実行中",
       illustration: "メッセージを図解中",
+      mirror: "メモリを更新中",
     },
     status: {
       new: "Queued",

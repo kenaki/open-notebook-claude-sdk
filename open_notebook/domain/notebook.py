@@ -98,6 +98,8 @@ class Notebook(ObjectModel):
                 if include_full_text
                 else " omit source.full_text, source.page_map, source.page_labels"
             )
+            notebook_record_id = ensure_record_id(self.id)
+            logger.info(f"Querying sources for notebook {notebook_record_id}")
             srcs = await repo_query(
                 f"""
                 select *{source_projection} from (
@@ -105,8 +107,9 @@ class Notebook(ObjectModel):
                 fetch source
             ) order by source.updated desc
             """,
-                {"id": ensure_record_id(self.id)},
+                {"id": notebook_record_id},
             )
+            logger.info(f"Query returned {len(srcs) if srcs else 0} sources for notebook {notebook_record_id}")
             return [Source(**src["source"]) for src in srcs] if srcs else []
         except Exception as e:
             logger.error(f"Error fetching sources for notebook {self.id}: {str(e)}")

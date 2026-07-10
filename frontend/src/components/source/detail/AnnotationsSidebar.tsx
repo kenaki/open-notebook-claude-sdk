@@ -2,11 +2,15 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Layers, Sparkles } from 'lucide-react'
+import { Layers, PanelRightClose, PanelRightOpen, Sparkles } from 'lucide-react'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { cn } from '@/lib/utils'
 import { resolveTagColorKey, tagColorStyle } from '@/lib/utils/tag-colors'
 import { sourcesApi } from '@/lib/api/sources'
+import {
+  GLOBAL_SIDEBAR_KEY,
+  useAnnotationsSidebarStore,
+} from '@/lib/stores/annotations-sidebar-store'
 import { HIGHLIGHT_PALETTE } from './AnnotationHighlightPopover'
 import type { Annotation, SourceSectionNode } from '@/lib/types/api'
 
@@ -40,11 +44,15 @@ function chapterTitleForPage(topLevel: SourceSectionNode[], page: number): strin
 }
 
 /**
- * Document Foundation Phase4: compact list of a PDF source's saved
- * highlights, sitting beside the PDFViewer. Purely presentational — jumping
- * is delegated to the caller (which owns the highlight plugin instance).
- * Header offers a per-color filter and a per-tag filter; colors/tags with no
- * highlights are hidden or dimmed.
+ * Document Foundation Phase4: compact list of a source's saved highlights,
+ * sitting beside the PDFViewer and the ReaderView. Purely presentational —
+ * jumping is delegated to the caller (which knows how to reach a highlight in
+ * its own view). Header offers a per-color filter and a per-tag filter;
+ * colors/tags with no highlights are hidden or dimmed.
+ *
+ * Collapses to a narrow rail, giving the reader back its line width. The state
+ * lives in a per-source store, not local state, because both tabs mount their
+ * own instance and stay mounted — see `annotations-sidebar-store`.
  */
 /** One highlight row — shared by the flat list and the grouped view. */
 function AnnotationRow({
@@ -104,6 +112,10 @@ export function AnnotationsSidebar({
   const [tagFilter, setTagFilter] = useState<string | null>(null)
   const [groupBySection, setGroupBySection] = useState(false)
 
+  const storeKey = sourceId ?? GLOBAL_SIDEBAR_KEY
+  const collapsed = useAnnotationsSidebarStore((s) => s.collapsedBySource[storeKey] ?? false)
+  const toggleCollapsed = useAnnotationsSidebarStore((s) => s.toggle)
+
   // All tags currently in use, in first-seen order.
   const allTags = useMemo(
     () => [...new Set(annotations.flatMap((a) => a.tags ?? []))],
@@ -156,6 +168,30 @@ export function AnnotationsSidebar({
     return [...map.entries()]
   }, [groupBySection, visible, sectionData, t])
 
+  if (collapsed) {
+    return (
+      <div className="flex w-8 shrink-0 flex-col items-center gap-2 rounded-md border border-border py-2">
+        <button
+          type="button"
+          aria-expanded={false}
+          title={t('sources.annotations.expandSidebar')}
+          aria-label={t('sources.annotations.expandSidebar')}
+          onClick={() => toggleCollapsed(storeKey)}
+          className="rounded-sm p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <PanelRightOpen className="h-4 w-4" aria-hidden="true" />
+        </button>
+        <span
+          aria-hidden="true"
+          className="[writing-mode:vertical-rl] select-none text-xs font-semibold text-muted-foreground"
+        >
+          {t('sources.annotations.title')}
+          {annotations.length > 0 && ` (${annotations.length})`}
+        </span>
+      </div>
+    )
+  }
+
   return (
     <div className="flex w-56 shrink-0 flex-col overflow-hidden rounded-md border border-border">
       <div className="border-b border-border px-2 py-1.5">
@@ -164,23 +200,35 @@ export function AnnotationsSidebar({
             {t('sources.annotations.title')}
             {annotations.length > 0 && ` (${annotations.length})`}
           </div>
-          {sourceId && annotations.length > 0 && (
+          <div className="flex items-center gap-0.5">
+            {sourceId && annotations.length > 0 && (
+              <button
+                type="button"
+                aria-pressed={groupBySection}
+                title={t('sources.annotations.groupBySection')}
+                aria-label={t('sources.annotations.groupBySection')}
+                onClick={() => setGroupBySection((prev) => !prev)}
+                className={cn(
+                  'rounded-sm p-0.5 transition-colors',
+                  groupBySection
+                    ? 'text-foreground'
+                    : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                <Layers className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+            )}
             <button
               type="button"
-              aria-pressed={groupBySection}
-              title={t('sources.annotations.groupBySection')}
-              aria-label={t('sources.annotations.groupBySection')}
-              onClick={() => setGroupBySection((prev) => !prev)}
-              className={cn(
-                'rounded-sm p-0.5 transition-colors',
-                groupBySection
-                  ? 'text-foreground'
-                  : 'text-muted-foreground hover:text-foreground'
-              )}
+              aria-expanded
+              title={t('sources.annotations.collapseSidebar')}
+              aria-label={t('sources.annotations.collapseSidebar')}
+              onClick={() => toggleCollapsed(storeKey)}
+              className="rounded-sm p-0.5 text-muted-foreground transition-colors hover:text-foreground"
             >
-              <Layers className="h-3.5 w-3.5" aria-hidden="true" />
+              <PanelRightClose className="h-3.5 w-3.5" aria-hidden="true" />
             </button>
-          )}
+          </div>
         </div>
         {annotations.length > 0 && (
           <div className="mt-1.5 flex items-center gap-1.5">

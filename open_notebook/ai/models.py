@@ -69,6 +69,11 @@ class DefaultModels(RecordModel):
     default_vision_model: Optional[str] = None
     default_embedding_model: Optional[str] = None
     default_tools_model: Optional[str] = None
+    # Distilling a completed chat turn into a short recall gist (study-memory
+    # mirror). A trivial, high-frequency job — points at a small/cheap model so
+    # it doesn't spin up the heavy transformation model. Falls back to the
+    # transformation → chat default when unset.
+    default_gist_model: Optional[str] = None
 
     @classmethod
     async def get_instance(cls) -> "DefaultModels":
@@ -249,6 +254,12 @@ class ModelManager:
             )
         elif model_type == "tools":
             model_id = defaults.default_tools_model or defaults.default_chat_model
+        elif model_type == "gist":
+            model_id = (
+                defaults.default_gist_model
+                or defaults.default_transformation_model
+                or defaults.default_chat_model
+            )
         elif model_type == "embedding":
             model_id = defaults.default_embedding_model
         elif model_type == "text_to_speech":

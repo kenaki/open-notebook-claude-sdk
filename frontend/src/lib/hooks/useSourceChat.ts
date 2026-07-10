@@ -53,13 +53,17 @@ export function useSourceChat(sourceId: string) {
   const messages: SourceChatMessage[] = currentSession?.messages ?? []
   const contextIndicators = currentSession?.context_indicators ?? null
 
-  // True while the 202 submit is in-flight OR while a background job for this
-  // session is active (new/running).
+  // True while the 202 submit is in-flight OR while the *chat* job for this
+  // session is active (new/running). Scoped to kind === 'source_chat' so the
+  // fire-and-forget study-memory mirror job (mirror_chat_exchange), which shares
+  // this session_id, doesn't keep the "Generating…" spinner spinning after the
+  // answer has already rendered.
   const isStreaming = currentSessionId
     ? (!!sendingBySession[currentSessionId] ||
        storeJobs.some(
          (j) =>
            j.sessionId === currentSessionId &&
+           j.kind === 'source_chat' &&
            (j.status === 'new' || j.status === 'running')
        ))
     : false

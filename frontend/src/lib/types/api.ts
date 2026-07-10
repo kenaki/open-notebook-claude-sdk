@@ -622,8 +622,17 @@ export interface CommandJobSummary {
    * open_notebook.graphs.chat) so the chat UI can render a localized,
    * icon-matched label via ToolUseDisclosure's `describeTool`/`detailFor`
    * instead of the raw English `phase` string.
+   *
+   * `partial_content` is the answer-so-far (thinking stripped), overwritten each
+   * flush by the streaming graph so the chat bubble can render the reply
+   * progressively instead of one-shot on completion.
    */
-  progress?: { phase?: string; tool_name?: string; tool_input?: Record<string, unknown> } | null
+  progress?: {
+    phase?: string
+    tool_name?: string
+    tool_input?: Record<string, unknown>
+    partial_content?: string
+  } | null
 }
 
 // Per-status job totals from GET /commands/jobs/counts — real table-wide

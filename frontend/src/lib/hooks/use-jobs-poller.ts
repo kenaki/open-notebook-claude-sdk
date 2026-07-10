@@ -75,6 +75,8 @@ export function deriveKind(name: string, args: Record<string, unknown> | null | 
       return 'source'
     case 'illustrate_message':
       return 'illustration'
+    case 'mirror_chat_exchange':
+      return 'mirror'
     default:
       // embed_source / embed_note / embed_insight / embed_chunk / vectorize_source
       // / rebuild_embeddings / backfill_page_numbers → indexing for search.
@@ -128,6 +130,12 @@ function serverRowToJob(row: CommandJobSummary): BackgroundJob {
     row.progress && row.progress.tool_input && typeof row.progress.tool_input === 'object'
       ? row.progress.tool_input
       : undefined
+  // Answer-so-far streamed by the chat graph (thinking stripped) so the pending
+  // bubble renders the reply progressively instead of one-shot on completion.
+  const partialContent =
+    row.progress && typeof row.progress.partial_content === 'string'
+      ? row.progress.partial_content
+      : undefined
 
   return {
     jobId: row.job_id,
@@ -138,7 +146,12 @@ function serverRowToJob(row: CommandJobSummary): BackgroundJob {
     label,
     command: row.name,
     status: coerceStatus(row.status),
-    progress: phase ? { phase, tool_name: toolName, tool_input: toolInput } : undefined,
+    // Set progress when there's a phase OR streamed answer text — a plain chat
+    // turn with no tool loop streams partial_content without ever setting phase.
+    progress:
+      phase || partialContent
+        ? { phase, tool_name: toolName, tool_input: toolInput, partial_content: partialContent }
+        : undefined,
     startedAt: row.created ?? new Date().toISOString(),
     error: row.error_message ?? undefined,
   }
@@ -186,6 +199,19 @@ export function useJobsPoller() {
         return POLL_INTERVAL_FAST
       }
 
+      // Keep the fast cadence for the whole life of an active chat turn so its
+      // streamed answer (progress.partial_content) renders smoothly rather than
+      // in 4s jumps. Only chat kinds — background fan-out (embed/verify) doesn't
+      // need sub-2s polling and would just add load.
+      const hasActiveChat =
+        (data?.some((r) => r.name === 'chat_completion') ?? false) ||
+        jobs.some(
+          (j) =>
+            (j.kind === 'notebook_chat' || j.kind === 'source_chat') &&
+            (j.status === 'new' || j.status === 'running')
+        )
+      if (hasActiveChat) return POLL_INTERVAL_FAST
+
       // Active data: poll at standard interval.
       if (data && data.length > 0) return POLL_INTERVAL_ACTIVE
 
@@ -225,7 +251,8 @@ export function useJobsPoller() {
         if (
           existing.status !== incoming.status ||
           existing.error !== incoming.error ||
-          existing.progress?.phase !== incoming.progress?.phase
+          existing.progress?.phase !== incoming.progress?.phase ||
+          existing.progress?.partial_content !== incoming.progress?.partial_content
         ) {
           update(row.job_id, {
             status: incoming.status,

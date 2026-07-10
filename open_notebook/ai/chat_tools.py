@@ -13,6 +13,7 @@ import json
 
 from langchain_core.tools import tool
 
+from open_notebook.database.repository import ensure_record_id, repo_query
 from open_notebook.domain.notebook import Source, SourceSection, text_search
 from open_notebook.domain.recall import get_exchange_content, recall_search
 
@@ -35,6 +36,45 @@ def _find_outline_node(nodes: list[dict], section_id: str) -> dict | None:
         if found is not None:
             return found
     return None
+
+
+async def _gather_descendant_content(source_id: str, section_id: str) -> str:
+    """Concatenate the body text of a section's descendants, in reading order.
+
+    A chapter node usually has no body of its own — its prose lives in child
+    sections. When ``get_section`` is asked to summarize such a chapter it would
+    otherwise see an empty ``content``; this walks the section tree from
+    ``section_id`` and stitches the descendants' content together so the model
+    has the actual text to work from. One flat query + an in-memory tree walk.
+    """
+    rows = await repo_query(
+        "SELECT id, parent, title, content, cleaned_content "
+        "FROM source_section WHERE source = $sid ORDER BY order",
+        {"sid": ensure_record_id(source_id)},
+    )
+    if not rows:
+        return ""
+
+    # Bucket child ids by parent so we can collect the whole subtree under the
+    # target section (parent links are direct-only).
+    children_by_parent: dict[str, list[dict]] = {}
+    for row in rows:
+        parent = row.get("parent")
+        if parent is not None:
+            children_by_parent.setdefault(str(parent), []).append(row)
+
+    parts: list[str] = []
+
+    def _collect(node_id: str) -> None:
+        for child in children_by_parent.get(node_id, []):
+            body = child.get("cleaned_content") or child.get("content") or ""
+            if body.strip():
+                title = child.get("title") or ""
+                parts.append(f"## {title}\n\n{body.strip()}".strip())
+            _collect(str(child["id"]))
+
+    _collect(section_id)
+    return "\n\n".join(parts)
 
 
 @tool
@@ -91,6 +131,12 @@ async def get_section(source_id: str, section_id: str) -> str:
     otherwise the raw parsed content."""
     section = await SourceSection.get(section_id)
     content = section.cleaned_content or section.content
+    # Chapter nodes carry no body of their own — the text lives in child
+    # sections. Stitch descendant content together so summarize/quiz actions get
+    # the actual prose instead of an empty string (which is what made the model
+    # fall back to describing the section's metadata).
+    if not (content and content.strip()):
+        content = await _gather_descendant_content(str(section.source or source_id), section_id)
     return json.dumps(
         {
             "section_id": section_id,

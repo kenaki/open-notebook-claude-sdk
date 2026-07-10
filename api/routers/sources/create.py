@@ -245,8 +245,17 @@ async def create_source(
             )
             await source.save()
 
-            for notebook_id in source_data.notebooks or []:
-                await source.add_to_notebook(notebook_id)
+            if source_data.notebooks:
+                logger.info(f"Linking source {source.id} to {len(source_data.notebooks)} notebook(s): {source_data.notebooks}")
+                for notebook_id in source_data.notebooks:
+                    try:
+                        await source.add_to_notebook(notebook_id)
+                        logger.info(f"Successfully linked source {source.id} to notebook {notebook_id}")
+                    except Exception as link_error:
+                        logger.error(f"Failed to link source {source.id} to notebook {notebook_id}: {link_error}")
+                        raise
+            else:
+                logger.warning(f"Source {source.id} created with no notebooks specified")
 
             try:
                 command_id = await _submit_source_command(
@@ -289,8 +298,17 @@ async def create_source(
                 source = Source(title=source_data.title or "Processing...", topics=[])
                 await source.save()
 
-                for notebook_id in source_data.notebooks or []:
-                    await source.add_to_notebook(notebook_id)
+                if source_data.notebooks:
+                    logger.info(f"Linking source {source.id} to {len(source_data.notebooks)} notebook(s): {source_data.notebooks}")
+                    for notebook_id in source_data.notebooks:
+                        try:
+                            await source.add_to_notebook(notebook_id)
+                            logger.info(f"Successfully linked source {source.id} to notebook {notebook_id}")
+                        except Exception as link_error:
+                            logger.error(f"Failed to link source {source.id} to notebook {notebook_id}: {link_error}")
+                            raise
+                else:
+                    logger.warning(f"Source {source.id} created with no notebooks specified")
 
                 command_input = SourceProcessingInput(
                     source_id=str(source.id),

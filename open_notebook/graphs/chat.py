@@ -30,7 +30,11 @@ from open_notebook.exceptions import OpenNotebookError
 from open_notebook.utils import parse_thinking_content
 from open_notebook.utils.error_classifier import classify_error
 from open_notebook.utils.graph_utils import run_async_in_node
-from open_notebook.utils.job_progress import append_job_event, report_job_progress
+from open_notebook.utils.job_progress import (
+    append_job_event,
+    report_job_progress,
+    report_partial_content,
+)
 from open_notebook.utils.text_utils import extract_text_content
 
 # Hard cap on search/outline/section round-trips per turn. Each round is a full
@@ -223,9 +227,15 @@ async def _stream_model(model, messages, job_id: Optional[str] = None) -> AIMess
         last_flush_time = time.monotonic()
         chars_at_last_flush = len(text)
         reasoning_chars_at_last_flush = _reasoning_len(accumulated)
+        thinking, cleaned = extract_thinking(accumulated, text) if accumulated else ("", text)
+        # Stream the answer-so-far (thinking stripped) into a scalar progress
+        # field the chat bubble renders live — overwritten each flush, so no
+        # event-cap drift. Stamped before the truncated/no-delta early returns
+        # so the answer keeps streaming even after the thinking log is capped.
+        if cleaned:
+            await report_partial_content(job_id, cleaned)
         if truncated:
             return
-        thinking, _ = extract_thinking(accumulated, text) if accumulated else ("", text)
         delta = thinking[emitted_thinking_len:]
         if not delta:
             return

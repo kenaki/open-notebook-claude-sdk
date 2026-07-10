@@ -73,6 +73,33 @@ async def append_job_event(
         )
 
 
+async def report_partial_content(job_id: Optional[str], content: str) -> None:
+    """Stream the answer-so-far (thinking already stripped) into the job row's
+    ``progress.partial_content`` scalar so the chat bubble can render the reply
+    progressively instead of one-shot on completion.
+
+    Unlike ``progress.events[]`` (append-only, capped at ``_MAX_EVENTS``, oldest
+    trimmed), this is a single field OVERWRITTEN each flush — so a long answer
+    never drifts or loses its opening as it grows. The authoritative final text
+    still arrives via the checkpoint on job completion; this is display-only.
+
+    Writes the nested path directly (not a MERGE) so it never clobbers a
+    concurrent ``progress.events`` / ``progress.phase`` write. Best-effort: a
+    missing job_id or any DB error is swallowed — must never break generation.
+    """
+    if not job_id:
+        return
+    try:
+        from open_notebook.database.repository import ensure_record_id, repo_query
+
+        await repo_query(
+            "UPDATE $id SET progress.partial_content = $content;",
+            {"id": ensure_record_id(job_id), "content": content},
+        )
+    except Exception as exc:
+        logger.debug(f"partial content stamp skipped: {exc!r}")
+
+
 async def report_job_progress(job_id: Optional[str], phase: str, **extra: Any) -> None:
     """Stamp a human-readable phase (plus optional structured extras) onto the
     running ``command`` row so the background-jobs tray — and any UI reading

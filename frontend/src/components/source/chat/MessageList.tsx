@@ -111,6 +111,10 @@ export function MessageList({
       ? s.jobs.find((j) => j.sessionId === chatScopeId && (j.status === 'new' || j.status === 'running'))
       : undefined
   )
+  // All jobs, so a `pending-<jobId>` placeholder can find its own job by id and
+  // render the streamed answer-so-far (progress.partial_content). Works for both
+  // source and notebook chat regardless of whether chatScopeId is forwarded.
+  const storeJobs = useJobsStore((s) => s.jobs)
 
   const fallbackEmptyTitle = emptyStateTitle
     ?? t('chat.startConversation').replace('{type}', contextType === 'source' ? t('navigation.sources') : t('common.notebook'))
@@ -147,8 +151,17 @@ export function MessageList({
             const isHuman = message.type === 'human'
             const showDivider = isHuman && index > 0
 
-            // Pending placeholder: spinner bubble while the worker generates.
+            // Pending placeholder: while the worker generates, render the
+            // answer-so-far streamed onto the job (progress.partial_content) with
+            // the spinner beneath, or a bare spinner bubble before any text lands.
             if (message.pending) {
+              const jobId = message.id.startsWith('pending-')
+                ? message.id.slice('pending-'.length)
+                : null
+              const streamingJob = jobId
+                ? storeJobs.find((job) => job.jobId === jobId)
+                : undefined
+              const partial = streamingJob?.progress?.partial_content
               return (
                 <div
                   key={message.id}
@@ -156,7 +169,26 @@ export function MessageList({
                   style={MSG_SCROLL_MARGIN}
                   className="flex justify-start"
                 >
-                  <PendingBubble activeProgress={activeProgress} activeJob={activeSessionJob} />
+                  {partial && partial.trim() ? (
+                    <div className="flex w-full flex-col items-start gap-1.5">
+                      <div className="w-full text-foreground chat-msg-enter">
+                        <AIMessageContent
+                          content={partial}
+                          onReferenceClick={onReferenceClick}
+                          appendReferenceList={false}
+                        />
+                      </div>
+                      <PendingBubble
+                        activeProgress={activeProgress}
+                        activeJob={activeSessionJob ?? streamingJob}
+                      />
+                    </div>
+                  ) : (
+                    <PendingBubble
+                      activeProgress={activeProgress}
+                      activeJob={activeSessionJob ?? streamingJob}
+                    />
+                  )}
                 </div>
               )
             }

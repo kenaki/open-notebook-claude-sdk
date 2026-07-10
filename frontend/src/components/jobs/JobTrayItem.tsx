@@ -7,6 +7,7 @@ import {
   Loader2,
   MessageCircle,
   MessageSquare,
+  BrainCircuit,
   Mic,
   ScanEye,
   ScrollText,
@@ -35,6 +36,7 @@ export const KIND_ICONS: Record<JobKind, LucideIcon> = {
   abstract: ScrollText,
   insight: Sparkles,
   illustration: Wand2,
+  mirror: BrainCircuit,
 }
 
 interface JobTrayItemProps {

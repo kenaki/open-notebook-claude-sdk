@@ -512,6 +512,8 @@ export const zhCN = {
       anchorLegacyTip: "在块解析之前创建——此高亮未锚定到文档结构。",
       sectionLabel: "章节",
       groupBySection: "按章节分组",
+      collapseSidebar: "收起高亮",
+      expandSidebar: "展开高亮",
       unsectioned: "无章节",
       jumpLegacyPdf: "已打开 PDF 以显示此高亮。",
     },
@@ -693,6 +695,7 @@ export const zhCN = {
       abstract: "正在撰写摘要",
       insight: "正在生成洞察",
       illustration: "正在为消息配图",
+      mirror: "正在更新记忆",
     },
     status: {
       new: "Queued",

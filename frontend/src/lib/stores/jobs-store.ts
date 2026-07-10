@@ -16,6 +16,7 @@ export type JobKind =
   | 'abstract' // writing the document abstract (generate_source_abstract)
   | 'insight' // running an insight / transformation (run_transformation, create_insight)
   | 'illustration' // auto-illustrating an AI chat message (illustrate_message) — silent, tray-only
+  | 'mirror' // study-memory mirror of a completed chat turn (mirror_chat_exchange) — silent, tray-only
 // `canceled` (agent-console B4): the backend can flip a queued/running job to
 // this terminal status (CommandService.cancel_command_job / cancel_source_jobs).
 // Recognizing it here — not just in the console's own poller — keeps the tray
@@ -40,6 +41,7 @@ export const KIND_LABEL_KEY: Record<JobKind, string> = {
   abstract: 'jobs.kind.abstract',
   insight: 'jobs.kind.insight',
   illustration: 'jobs.kind.illustration',
+  mirror: 'jobs.kind.mirror',
 }
 
 export interface BackgroundJob {
@@ -53,7 +55,7 @@ export interface BackgroundJob {
   /** Raw backend command name (e.g. "embed_source") — shown as row metadata. */
   command?: string
   status: JobStatus
-  progress?: { phase?: string; tool_name?: string; tool_input?: Record<string, unknown> }
+  progress?: { phase?: string; tool_name?: string; tool_input?: Record<string, unknown>; partial_content?: string }
   startedAt: string
   error?: string
 }

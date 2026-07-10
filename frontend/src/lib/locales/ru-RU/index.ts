@@ -512,6 +512,8 @@ export const ruRU = {
       anchorLegacyTip: "Создано до разбора на блоки — это выделение не привязано к структуре документа.",
       sectionLabel: "Раздел",
       groupBySection: "Группировать по разделам",
+      collapseSidebar: "Свернуть выделения",
+      expandSidebar: "Развернуть выделения",
       unsectioned: "Без раздела",
       jumpLegacyPdf: "PDF открыт, чтобы показать это выделение.",
     },
@@ -693,6 +695,7 @@ export const ruRU = {
       abstract: "Написание аннотации",
       insight: "Формирование инсайта",
       illustration: "Иллюстрация сообщения",
+      mirror: "Обновление памяти",
     },
     status: {
       new: "Queued",

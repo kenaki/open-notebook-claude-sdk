@@ -126,9 +126,12 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections,
       sessionId ? (sessionDataById[sessionId]?.messages ?? []) : [],
     [sessionDataById]
   )
-  // True while the 202 submit is in-flight OR while a background job for this
+  // True while the 202 submit is in-flight OR while the *chat* job for this
   // session is active (new/running). Keyed strictly by sessionId so multiple
-  // popped panels don't bleed into each other.
+  // popped panels don't bleed into each other, and scoped to kind ===
+  // 'notebook_chat' so the fire-and-forget study-memory mirror job
+  // (mirror_chat_exchange), which shares this session_id, doesn't keep the
+  // spinner spinning after the answer has already rendered.
   const getIsSending = useCallback(
     (sessionId: string | null): boolean => {
       if (!sessionId) return false
@@ -136,6 +139,7 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections,
       return storeJobs.some(
         (j) =>
           j.sessionId === sessionId &&
+          j.kind === 'notebook_chat' &&
           (j.status === 'new' || j.status === 'running')
       )
     },
@@ -151,6 +155,7 @@ export function useNotebookChat({ notebookId, sources, notes, contextSelections,
       return storeJobs.find(
         (j) =>
           j.sessionId === sessionId &&
+          j.kind === 'notebook_chat' &&
           (j.status === 'new' || j.status === 'running')
       )?.progress
     },

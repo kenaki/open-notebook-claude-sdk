@@ -228,8 +228,18 @@ async def get_source_outline(args: dict) -> dict:
     {"source_id": str, "section_id": str},
 )
 async def get_section(args: dict) -> dict:
+    from open_notebook.ai.chat_tools import _gather_descendant_content
+
     section = await SourceSection.get(args["section_id"])
     content = section.cleaned_content or section.content
+    # Chapter nodes carry no body of their own — their text lives in child
+    # sections. Stitch descendant content together so summarize/quiz get the
+    # actual prose instead of an empty string (which made the model fall back to
+    # describing the section's metadata: title / page / summary: null).
+    if not (content and content.strip()):
+        content = await _gather_descendant_content(
+            str(section.source or args["source_id"]), args["section_id"]
+        )
     return _result(
         {
             "section_id": args["section_id"],

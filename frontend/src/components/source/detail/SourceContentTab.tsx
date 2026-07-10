@@ -85,10 +85,14 @@ export const SourceContentTab = memo(function SourceContentTab({
   const handleSectionAction = useCallback(
     (kind: SectionActionKind, section: SourceSectionNode) => {
       const title = section.title?.trim() || t('sources.untitledSection')
+      // Include the section id so the chat model can call get_section(section_id)
+      // to pull the actual chapter text, instead of guessing from the title and
+      // parroting back the outline metadata (title / page / summary: null).
+      const ref = `"${title}" (section_id: ${section.id})`
       const prompt =
         kind === 'summarize'
-          ? `Summarize section: ${title}`
-          : `Quiz me on section: ${title}`
+          ? `Summarize section ${ref}`
+          : `Quiz me on section ${ref}`
       void sourceChat.sendMessage(prompt)
     },
     [sourceChat, t]

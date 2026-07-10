@@ -515,6 +515,8 @@ export const deDE = {
       anchorLegacyTip: "Vor der Blockanalyse erstellt – diese Markierung ist nicht an der Dokumentstruktur verankert.",
       sectionLabel: "Abschnitt",
       groupBySection: "Nach Abschnitt gruppieren",
+      collapseSidebar: "Markierungen einklappen",
+      expandSidebar: "Markierungen ausklappen",
       unsectioned: "Ohne Abschnitt",
       jumpLegacyPdf: "PDF geöffnet, um diese Markierung anzuzeigen.",
     },
@@ -696,6 +698,7 @@ export const deDE = {
       abstract: "Zusammenfassung wird verfasst",
       insight: "Insight wird ausgeführt",
       illustration: "Illustriere Nachricht",
+      mirror: "Aktualisiere Speicher",
     },
     status: {
       new: "Queued",

@@ -512,6 +512,8 @@ export const trTR = {
       anchorLegacyTip: "Blok ayrıştırmasından önce oluşturuldu — bu vurgu belge yapısına sabitlenmemiş.",
       sectionLabel: "Bölüm",
       groupBySection: "Bölüme göre grupla",
+      collapseSidebar: "Vurguları daralt",
+      expandSidebar: "Vurguları genişlet",
       unsectioned: "Bölümsüz",
       jumpLegacyPdf: "Bu vurguyu göstermek için PDF açıldı.",
     },
@@ -693,6 +695,7 @@ export const trTR = {
       abstract: "Özet yazılıyor",
       insight: "İçgörü çalıştırılıyor",
       illustration: "Mesaj görselleştiriliyor",
+      mirror: "Bellek güncelleniyor",
     },
     status: {
       new: "Queued",

@@ -8,10 +8,10 @@ import unicodedata
 from typing import Tuple
 
 # Patterns for matching thinking content in AI responses
-# Standard pattern: <think>...</think>
-THINK_PATTERN = re.compile(r"<think>(.*?)</think>", re.DOTALL)
+# Standard pattern: <think>...</think> or <thinking>...</thinking>
+THINK_PATTERN = re.compile(r"<think(?:ing)?>(.*?)</think(?:ing)?>", re.DOTALL)
 # Pattern for malformed output: content</think> (missing opening tag)
-THINK_PATTERN_NO_OPEN = re.compile(r"^(.*?)</think>", re.DOTALL)
+THINK_PATTERN_NO_OPEN = re.compile(r"^(.*?)</think(?:ing)?>", re.DOTALL)
 
 
 def remove_non_ascii(text: str) -> str:

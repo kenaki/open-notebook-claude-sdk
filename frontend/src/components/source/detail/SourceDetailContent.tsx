@@ -571,6 +571,8 @@ export function SourceDetailContent({
             <ReaderView
               sourceId={source.id}
               onChatAboutHighlight={onChatAboutHighlight}
+              onChatAboutHighlights={onChatAboutHighlights}
+              onJumpToAnnotation={routeJump}
               onReprocess={() => setReparseOpen(true)}
               jumpApiRef={readerJumpRef}
               initialPage={storedPage}

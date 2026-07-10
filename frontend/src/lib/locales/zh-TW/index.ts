@@ -512,6 +512,8 @@ export const zhTW = {
       anchorLegacyTip: "在區塊解析之前建立——此醒目提示未錨定至文件結構。",
       sectionLabel: "章節",
       groupBySection: "依章節分組",
+      collapseSidebar: "收合重點",
+      expandSidebar: "展開重點",
       unsectioned: "無章節",
       jumpLegacyPdf: "已開啟 PDF 以顯示此標註。",
     },
@@ -693,6 +695,7 @@ export const zhTW = {
       abstract: "正在撰寫摘要",
       insight: "正在產生洞察",
       illustration: "正在為訊息配圖",
+      mirror: "正在更新記憶",
     },
     status: {
       new: "Queued",

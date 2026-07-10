@@ -512,6 +512,8 @@ export const caES = {
       anchorLegacyTip: "Creat abans de l'anàlisi per blocs: aquest ressaltat no està ancorat a l'estructura del document.",
       sectionLabel: "Secció",
       groupBySection: "Agrupa per secció",
+      collapseSidebar: "Replega els subratllats",
+      expandSidebar: "Desplega els subratllats",
       unsectioned: "Sense secció",
       jumpLegacyPdf: "S'ha obert el PDF per mostrar aquest subratllat.",
     },
@@ -693,6 +695,7 @@ export const caES = {
       abstract: "Escrivint el resum",
       insight: "Executant la perspectiva",
       illustration: "Il·lustrant el missatge",
+      mirror: "Actualitzant la memòria",
     },
     status: {
       new: "Queued",

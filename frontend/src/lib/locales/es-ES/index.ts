@@ -512,6 +512,8 @@ export const esES = {
       anchorLegacyTip: "Creado antes del análisis por bloques: este resaltado no está anclado a la estructura del documento.",
       sectionLabel: "Sección",
       groupBySection: "Agrupar por sección",
+      collapseSidebar: "Contraer resaltados",
+      expandSidebar: "Expandir resaltados",
       unsectioned: "Sin sección",
       jumpLegacyPdf: "Se abrió el PDF para mostrar este resaltado.",
     },
@@ -693,6 +695,7 @@ export const esES = {
       abstract: "Redactando resumen",
       insight: "Ejecutando perspectiva",
       illustration: "Ilustrando mensaje",
+      mirror: "Actualizando memoria",
     },
     status: {
       new: "Queued",

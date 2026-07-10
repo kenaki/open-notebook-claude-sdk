@@ -512,6 +512,8 @@ export const bnIN = {
       anchorLegacyTip: "ব্লক পার্সিংয়ের আগে তৈরি — এই হাইলাইটটি নথির কাঠামোর সাথে অ্যাঙ্কর করা নেই।",
       sectionLabel: "বিভাগ",
       groupBySection: "বিভাগ অনুযায়ী গোষ্ঠীবদ্ধ করুন",
+      collapseSidebar: "হাইলাইট প্যানেল সংকুচিত করুন",
+      expandSidebar: "হাইলাইট প্যানেল প্রসারিত করুন",
       unsectioned: "বিভাগহীন",
       jumpLegacyPdf: "এই হাইলাইটটি দেখাতে PDF খোলা হয়েছে।",
     },
@@ -693,6 +695,7 @@ export const bnIN = {
       abstract: "সারাংশ লেখা হচ্ছে",
       insight: "ইনসাইট চালানো হচ্ছে",
       illustration: "বার্তা চিত্রিত করা হচ্ছে",
+      mirror: "মেমরি আপডেট করা হচ্ছে",
     },
     status: {
       new: "Queued",

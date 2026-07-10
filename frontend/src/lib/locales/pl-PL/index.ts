@@ -512,6 +512,8 @@ export const plPL = {
       anchorLegacyTip: "Utworzone przed analizą blokową — to podświetlenie nie jest zakotwiczone w strukturze dokumentu.",
       sectionLabel: "Sekcja",
       groupBySection: "Grupuj według sekcji",
+      collapseSidebar: "Zwiń zaznaczenia",
+      expandSidebar: "Rozwiń zaznaczenia",
       unsectioned: "Bez sekcji",
       jumpLegacyPdf: "Otwarto plik PDF, aby pokazać to zaznaczenie.",
     },
@@ -693,6 +695,7 @@ export const plPL = {
       abstract: "Pisanie streszczenia",
       insight: "Generowanie analizy",
       illustration: "Ilustrowanie wiadomości",
+      mirror: "Aktualizowanie pamięci",
     },
     status: {
       new: "Queued",

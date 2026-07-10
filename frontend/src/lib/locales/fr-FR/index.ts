@@ -512,6 +512,8 @@ export const frFR = {
       anchorLegacyTip: "Créé avant l'analyse par blocs : ce surlignage n'est pas ancré à la structure du document.",
       sectionLabel: "Section",
       groupBySection: "Grouper par section",
+      collapseSidebar: "Réduire les surlignages",
+      expandSidebar: "Développer les surlignages",
       unsectioned: "Sans section",
       jumpLegacyPdf: "PDF ouvert pour afficher ce surlignage.",
     },
@@ -693,6 +695,7 @@ export const frFR = {
       abstract: "Rédaction du résumé",
       insight: "Exécution de l'analyse",
       illustration: "Illustration du message",
+      mirror: "Mise à jour de la mémoire",
     },
     status: {
       new: "Queued",

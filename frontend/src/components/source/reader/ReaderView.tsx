@@ -17,6 +17,7 @@ import { sourcesApi } from '@/lib/api/sources'
 import { buildPageSpans, firstSeqFromPage, nextChunkWindow, pageForSeq } from '@/lib/utils/page-index'
 import type { Annotation, Block } from '@/lib/types/api'
 import { AnnotationHighlightPopover, DEFAULT_HIGHLIGHT_COLOR } from '@/components/source/detail/AnnotationHighlightPopover'
+import { AnnotationsSidebar } from '@/components/source/detail/AnnotationsSidebar'
 import {
   buildReaderRenderItems,
   readerItemKey,
@@ -98,6 +99,8 @@ interface ChunkRange {
 export function ReaderView({
   sourceId,
   onChatAboutHighlight,
+  onChatAboutHighlights,
+  onJumpToAnnotation,
   onReprocess,
   jumpApiRef,
   initialPage,
@@ -113,6 +116,18 @@ export function ReaderView({
    * highlight's popover; absent for a fresh selection → quote fallback).
    */
   onChatAboutHighlight?: (quote: string, annotationId?: string) => void
+  /**
+   * "Ask AI about <tag>" from the highlights sidebar — the same handler the PDF
+   * tab passes. Undefined hides the button.
+   */
+  onChatAboutHighlights?: (quotes: string[], tag: string, annotationIds: string[]) => void
+  /**
+   * Jumps to a highlight by id, routed by the parent: an anchored one scrolls
+   * the reader, a legacy one (no block anchor, so it can't render here) switches
+   * to the PDF tab. Without it the sidebar falls back to a local block scroll,
+   * which can't reach a legacy highlight.
+   */
+  onJumpToAnnotation?: (annotationId: string) => void
   /**
    * D8: opens the same Re-process confirm dialog the header chip uses, so a
    * stale-highlight CTA inside the reader can trigger a re-anchor. Hidden when
@@ -501,6 +516,33 @@ export function ReaderView({
     [annotations]
   )
 
+  // Sidebar row → the highlight. The parent routes when it can (it owns the tab
+  // switch a legacy highlight needs); the fallback keeps the sidebar usable in a
+  // standalone reader, where only an anchored highlight is reachable.
+  const handleSidebarJump = useCallback(
+    (annotation: Annotation) => {
+      if (onJumpToAnnotation) {
+        onJumpToAnnotation(annotation.id)
+        return
+      }
+      if (annotation.block_seq != null) {
+        void handleJump(annotation.block_seq)
+      } else if (annotation.page != null) {
+        handleJumpToPage(annotation.page)
+      }
+    },
+    [onJumpToAnnotation, handleJump, handleJumpToPage]
+  )
+
+  const handleAskAiAboutTag = useCallback(
+    (tag: string) => {
+      const tagged = annotations.filter((a) => a.tags?.includes(tag))
+      const quotes = tagged.map((a) => a.quote).filter((q): q is string => !!q)
+      onChatAboutHighlights?.(quotes, tag, tagged.map((a) => a.id))
+    },
+    [annotations, onChatAboutHighlights]
+  )
+
   const minLoaded = Math.min(...loadedChunks)
   const maxLoaded = Math.max(...loadedChunks)
   const topLoading = ranges[0]?.index === minLoaded && spanQueries[0]?.isLoading
@@ -564,63 +606,74 @@ export function ReaderView({
           </Tooltip>
         )}
       </div>
-      <div
-        ref={containerRef}
-        onScroll={handleScroll}
-        className="min-h-0 flex-1 overflow-y-auto pr-1"
-      >
-        <div ref={topSentinelRef} className="h-1" />
-        {topLoading && (
-          <div className="flex justify-center py-2">
-            <LoadingSpinner size="sm" />
-          </div>
-        )}
+      <div className="flex min-h-0 flex-1 gap-2">
         <div
-          ref={contentRef}
-          onMouseUp={handleMouseUp}
-          // Inline font-size/line-height beat prose-sm's root sizing without
-          // relying on stylesheet order; the heading ramp reads the CSS var.
-          style={
-            {
-              fontSize: `${typography.fontSize}px`,
-              lineHeight: typography.lineHeight,
-              '--reader-heading-scale': typography.headingScale,
-            } as React.CSSProperties
-          }
-          className="chat-markdown reader-typography prose prose-sm prose-neutral dark:prose-invert max-w-none break-words"
+          ref={containerRef}
+          onScroll={handleScroll}
+          className="min-h-0 flex-1 overflow-y-auto pr-1"
         >
-          {renderItems.length === 0 && (
-            <p className="text-sm text-muted-foreground">{t('sources.reader.empty')}</p>
+          <div ref={topSentinelRef} className="h-1" />
+          {topLoading && (
+            <div className="flex justify-center py-2">
+              <LoadingSpinner size="sm" />
+            </div>
           )}
-          {renderItems.map((item) => {
-            const page = readerItemPage(item)
-            const showPageMarker = page != null && page !== lastPage
-            if (page != null) lastPage = page
-            return (
-              <div key={readerItemKey(item)}>
-                {showPageMarker && (
-                  <div
-                    aria-hidden="true"
-                    data-page={page}
-                    className="not-prose my-3 flex items-center gap-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
-                  >
-                    <span className="rounded-full border border-border px-1.5 py-0.5">
-                      {t('sources.reader.page').replace('{page}', String(page))}
-                    </span>
-                    <span className="h-px flex-1 bg-border" />
-                  </div>
-                )}
-                <ReaderBlockItem item={item} hl={hl} />
-              </div>
-            )
-          })}
-        </div>
-        {bottomLoading && (
-          <div className="flex justify-center py-2">
-            <LoadingSpinner size="sm" />
+          <div
+            ref={contentRef}
+            onMouseUp={handleMouseUp}
+            // Inline font-size/line-height beat prose-sm's root sizing without
+            // relying on stylesheet order; the heading ramp reads the CSS var.
+            style={
+              {
+                fontSize: `${typography.fontSize}px`,
+                lineHeight: typography.lineHeight,
+                '--reader-heading-scale': typography.headingScale,
+              } as React.CSSProperties
+            }
+            className="chat-markdown reader-typography prose prose-sm prose-neutral dark:prose-invert max-w-none break-words"
+          >
+            {renderItems.length === 0 && (
+              <p className="text-sm text-muted-foreground">{t('sources.reader.empty')}</p>
+            )}
+            {renderItems.map((item) => {
+              const page = readerItemPage(item)
+              const showPageMarker = page != null && page !== lastPage
+              if (page != null) lastPage = page
+              return (
+                <div key={readerItemKey(item)}>
+                  {showPageMarker && (
+                    <div
+                      aria-hidden="true"
+                      data-page={page}
+                      className="not-prose my-3 flex items-center gap-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
+                    >
+                      <span className="rounded-full border border-border px-1.5 py-0.5">
+                        {t('sources.reader.page').replace('{page}', String(page))}
+                      </span>
+                      <span className="h-px flex-1 bg-border" />
+                    </div>
+                  )}
+                  <ReaderBlockItem item={item} hl={hl} />
+                </div>
+              )
+            })}
           </div>
-        )}
-        <div ref={bottomSentinelRef} className="h-1" />
+          {bottomLoading && (
+            <div className="flex justify-center py-2">
+              <LoadingSpinner size="sm" />
+            </div>
+          )}
+          <div ref={bottomSentinelRef} className="h-1" />
+        </div>
+
+        {/* The same highlights list the PDF tab shows, over the same annotation
+            query — collapsible so it can give the reader back its line width. */}
+        <AnnotationsSidebar
+          annotations={annotations}
+          sourceId={sourceId}
+          onJumpTo={handleSidebarJump}
+          onAskAiAboutTag={onChatAboutHighlights ? handleAskAiAboutTag : undefined}
+        />
       </div>
 
       {/* Reader-born selection toolbar: pick a color to highlight, add with a

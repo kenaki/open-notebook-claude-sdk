@@ -512,6 +512,8 @@ export const enUS = {
       anchorLegacyTip: "Made before block parsing — this highlight isn't anchored to the document structure.",
       sectionLabel: "Section",
       groupBySection: "Group by section",
+      collapseSidebar: "Collapse highlights",
+      expandSidebar: "Expand highlights",
       unsectioned: "Unsectioned",
       jumpLegacyPdf: "Opened the PDF to show this highlight.",
     },
@@ -694,6 +696,7 @@ export const enUS = {
       abstract: "Writing abstract",
       insight: "Running insight",
       illustration: "Illustrating message",
+      mirror: "Updating memory",
     },
     status: {
       new: "Queued",

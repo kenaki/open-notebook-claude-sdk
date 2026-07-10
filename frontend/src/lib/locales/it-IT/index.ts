@@ -512,6 +512,8 @@ export const itIT = {
       anchorLegacyTip: "Creato prima dell'analisi a blocchi: questa evidenziazione non è ancorata alla struttura del documento.",
       sectionLabel: "Sezione",
       groupBySection: "Raggruppa per sezione",
+      collapseSidebar: "Comprimi evidenziazioni",
+      expandSidebar: "Espandi evidenziazioni",
       unsectioned: "Senza sezione",
       jumpLegacyPdf: "PDF aperto per mostrare questa evidenziazione.",
     },
@@ -693,6 +695,7 @@ export const itIT = {
       abstract: "Scrittura riassunto",
       insight: "Esecuzione insight",
       illustration: "Illustrazione del messaggio",
+      mirror: "Aggiornamento della memoria",
     },
     status: {
       new: "Queued",
