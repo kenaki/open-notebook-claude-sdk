@@ -2,6 +2,7 @@ import { QueryCache, QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import i18n from '@/lib/i18n'
 import { getApiErrorMessage } from '@/lib/utils/error-handler'
+import { initBroadcastSync } from '@/lib/sync/broadcast'
 
 export const queryClient = new QueryClient({
   // Global surface for *query* failures so they're no longer silent. Mutations are
@@ -52,3 +53,9 @@ export const QUERY_KEYS = {
   // full progress (events + args), polled while the console is open.
   commandJob: (jobId: string) => ['commands', 'job', jobId] as const,
 }
+
+// Cross-window sync: mirror local query invalidations to peer windows and set
+// up the intent/ack bus. Runs once per window at module load (this singleton is
+// imported by every window's providers + jobs poller). No-ops under SSR / no
+// BroadcastChannel. See lib/sync/broadcast.ts (Decisions #5 / P-bus-emitter).
+initBroadcastSync(queryClient)
