@@ -1,13 +1,16 @@
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
 from loguru import logger
+from pydantic import BaseModel
 
 from api.models import (
     AnnotationResponse,
     CreateAnnotationRequest,
     UpdateAnnotationRequest,
 )
+from api.routers._helpers import ensure_prefix
+from open_notebook.database.repository import ensure_record_id, repo_query
 from open_notebook.domain.notebook import Source, SourceAnnotation
 from open_notebook.exceptions import NotFoundError
 from open_notebook.utils.block_anchor import (
@@ -17,6 +20,76 @@ from open_notebook.utils.block_anchor import (
 )
 
 router = APIRouter()
+
+
+# --- Reverse lookup: citing sessions + counts (cross-interface-study B2) -----
+# Powers the "linked chats" view (Decisions #3): a highlight popover listing
+# which chat sessions cited it, and a bulk per-source count for sidebar
+# badges. Both are read-only and reuse the `cites_annotation` edge (migration
+# 24, write-only until now) + `refers_to` (session scope classification, see
+# `domain/notebook.py: ChatSession.get_notebook_id`).
+
+
+class CitingSessionResponse(BaseModel):
+    session_id: str
+    title: str
+    scope: str  # "notebook" | "source"
+    notebook_id: Optional[str] = None
+    source_id: Optional[str] = None
+    updated: Optional[str] = None
+
+
+class CitingCountsResponse(BaseModel):
+    counts: Dict[str, int]
+
+
+def _classify_citing_sessions(
+    session_rows: List[Dict[str, Any]],
+    refers_rows: List[Dict[str, Any]],
+) -> List[CitingSessionResponse]:
+    """Join session rows with their `refers_to` scope edge and classify.
+
+    Pure (no DB) so it's directly testable with fake rows. `refers_rows` is
+    `{in, out}` from `refers_to`; `out` is a full record id (`notebook:...` or
+    `source:...`).
+
+    Q-orphan-sessions: a citing session with no `refers_to` edge (its target
+    notebook/source was deleted, or the edge is otherwise missing — shouldn't
+    happen in steady state) is SKIPPED rather than surfaced with a best-effort
+    "unknown" scope. Chosen as the simpler option: the response type stays a
+    strict `"notebook"|"source"` union and no consumer needs to handle a third
+    scope value for an edge case with no clear navigation target anyway.
+    """
+    scope_out_by_session: Dict[str, str] = {
+        str(row["in"]): str(row["out"])
+        for row in refers_rows
+        if row.get("in") is not None and row.get("out") is not None
+    }
+    items: List[CitingSessionResponse] = []
+    for row in session_rows:
+        session_id = str(row.get("id"))
+        out = scope_out_by_session.get(session_id)
+        if out is None:
+            continue
+        if out.startswith("notebook:"):
+            scope, notebook_id, source_id = "notebook", out, None
+        elif out.startswith("source:"):
+            scope, notebook_id, source_id = "source", None, out
+        else:
+            continue
+        updated = row.get("updated")
+        items.append(
+            CitingSessionResponse(
+                session_id=session_id,
+                title=row.get("title") or "Untitled Session",
+                scope=scope,
+                notebook_id=notebook_id,
+                source_id=source_id,
+                updated=str(updated) if updated else None,
+            )
+        )
+    items.sort(key=lambda item: item.updated or "", reverse=True)
+    return items
 
 
 def _anchor_state(
@@ -210,3 +283,79 @@ async def delete_annotation(annotation_id: str):
     except Exception as e:
         logger.error(f"Error deleting annotation {annotation_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error deleting annotation: {str(e)}")
+
+
+@router.get(
+    "/annotations/{annotation_id}/citing-sessions",
+    response_model=List[CitingSessionResponse],
+)
+async def get_citing_sessions(annotation_id: str):
+    """List chat sessions that cite this annotation, newest first (linked-chats view, B2).
+
+    Read-only reverse lookup over the write-only `cites_annotation` edge
+    (migration 24). An unknown/never-cited annotation id simply yields `[]` —
+    no 404, since this is a bulk-lookup surface, not a single-resource fetch.
+    """
+    try:
+        full_id = ensure_prefix(annotation_id, "source_annotation")
+        edges = await repo_query(
+            "SELECT in FROM cites_annotation WHERE out = $ann",
+            {"ann": ensure_record_id(full_id)},
+        )
+        session_ids = [str(e["in"]) for e in edges if e.get("in") is not None]
+        if not session_ids:
+            return []
+
+        rid_list = [ensure_record_id(sid) for sid in session_ids]
+        session_rows = await repo_query(
+            "SELECT id, title, updated FROM chat_session WHERE id IN $ids",
+            {"ids": rid_list},
+        )
+        refers_rows = await repo_query(
+            "SELECT in, out FROM refers_to WHERE in IN $ids",
+            {"ids": rid_list},
+        )
+        return _classify_citing_sessions(session_rows, refers_rows)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            f"Error fetching citing sessions for annotation {annotation_id}: {str(e)}"
+        )
+        raise HTTPException(
+            status_code=500, detail=f"Error fetching citing sessions: {str(e)}"
+        )
+
+
+@router.get(
+    "/sources/{source_id}/annotations/citing-counts",
+    response_model=CitingCountsResponse,
+)
+async def get_citing_counts(source_id: str):
+    """Bulk citing-session count per annotation for a source (sidebar badges, B2).
+
+    One extra query beyond the existing annotation-list fetch: annotation ids
+    for the source, then a single grouped count over `cites_annotation`
+    (mirrors `command_service`'s `count() AS n ... GROUP BY` usage) — avoids an
+    N+1 per-annotation count.
+    """
+    try:
+        full_source_id = ensure_prefix(source_id, "source")
+        annotations = await SourceAnnotation.get_for_source(full_source_id)
+        ann_ids = [ensure_record_id(a.id) for a in annotations if a.id]
+        if not ann_ids:
+            return CitingCountsResponse(counts={})
+
+        rows = await repo_query(
+            "SELECT out, count() AS n FROM cites_annotation WHERE out IN $ids GROUP BY out",
+            {"ids": ann_ids},
+        )
+        counts = {str(r["out"]): int(r.get("n") or 0) for r in rows}
+        return CitingCountsResponse(counts=counts)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching citing counts for source {source_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error fetching citing counts: {str(e)}"
+        )
