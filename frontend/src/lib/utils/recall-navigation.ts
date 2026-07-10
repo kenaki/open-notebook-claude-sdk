@@ -1,4 +1,5 @@
 import type { RecallRef } from '@/lib/types/api'
+import { sendIntent, INTENT_ANNOTATION_JUMP } from '@/lib/sync/broadcast'
 
 /**
  * Comparison-only normalizer: strips a SurrealDB record's table prefix so two
@@ -47,8 +48,9 @@ export interface RecallNavContext {
  *  - annotation, same source mounted (`ctx.sourceId`) → `requestJump`.
  *  - annotation, otherwise → TRY a jump for the ref's own source first (e.g. a
  *    workspace reader panel has that source mounted even though it isn't
- *    `ctx.sourceId`); only if no handler is registered (`requestJump` returns
- *    false, P-jump-bool) fall back to routing to that source's detail page.
+ *    `ctx.sourceId`); if no LOCAL handler is registered (`requestJump` returns
+ *    false, P-jump-bool), offer the jump to a PEER WINDOW via the sync bus (C4);
+ *    only if no peer acks either do we route to that source's detail page.
  */
 export function navigateToRecallRef(ref: RecallRef, ctx: RecallNavContext): void {
   if (ref.kind === 'exchange') {
@@ -76,7 +78,19 @@ export function navigateToRecallRef(ref: RecallRef, ctx: RecallNavContext): void
       ctx.requestJump(ctx.sourceId, ref.annotation_id)
       return
     }
-    if (ref.annotation_id && ref.source_id && ctx.requestJump(ref.source_id, ref.annotation_id)) {
+    if (ref.annotation_id && ref.source_id) {
+      // Try a locally-mounted handler (e.g. a workspace reader panel) first.
+      if (ctx.requestJump(ref.source_id, ref.annotation_id)) return
+      // Local miss → offer the jump to a PEER WINDOW that may have this source
+      // mounted (C4) before routing away. Fire-and-forget: the caller never
+      // awaits — we own the ack promise here and only fall back to a push if no
+      // peer acks within the (short) ack window. Peer OS focus isn't forced
+      // (browsers ignore it without a user gesture — P-focus-selffocus).
+      const sourceId = ref.source_id
+      const annotationId = ref.annotation_id
+      void sendIntent(INTENT_ANNOTATION_JUMP, { sourceId, annotationId }).then((acked) => {
+        if (!acked) ctx.push(`/sources/${sourceId}`)
+      })
       return
     }
     if (ref.source_id) {

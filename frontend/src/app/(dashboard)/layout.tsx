@@ -13,6 +13,7 @@ import { CommandPalette } from '@/components/common/CommandPalette'
 import { JobsRuntime } from '@/components/jobs/JobsRuntime'
 import { JobTray } from '@/components/jobs/JobTray'
 import { AgentConsole } from '@/components/jobs/AgentConsole'
+import { CrossWindowRuntime } from '@/components/sync/CrossWindowRuntime'
 
 export default function DashboardLayout({
   children,
@@ -67,6 +68,7 @@ export default function DashboardLayout({
           {children}
           <ModalProvider />
           <JobsRuntime quiet />
+          <CrossWindowRuntime />
         </CreateDialogsProvider>
       </ErrorBoundary>
     )
@@ -81,6 +83,7 @@ export default function DashboardLayout({
         <JobsRuntime />
         <JobTray />
         <AgentConsole />
+        <CrossWindowRuntime />
       </CreateDialogsProvider>
     </ErrorBoundary>
   )

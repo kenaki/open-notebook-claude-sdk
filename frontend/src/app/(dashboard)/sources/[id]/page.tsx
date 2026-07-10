@@ -1,6 +1,6 @@
 'use client'
 
-import { useRouter, useParams } from 'next/navigation'
+import { useRouter, useParams, useSearchParams } from 'next/navigation'
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -10,6 +10,7 @@ import { ChatPanel } from '@/components/source/chat'
 import { useNavigation } from '@/lib/hooks/use-navigation'
 import { SourceDetailContent } from '@/components/source/detail'
 import { useTranslation } from '@/lib/hooks/use-translation'
+import { sendIntent, INTENT_ASK_AI } from '@/lib/sync/broadcast'
 
 // Remembers whether the chat column was open across visits/reloads.
 const CHAT_OPEN_KEY = 'source-detail-chat-open'
@@ -32,9 +33,17 @@ function composeTagPrompt(tag: string, quotes: string[]): string {
 export default function SourceDetailPage() {
   const router = useRouter()
   const params = useParams()
+  const searchParams = useSearchParams()
   const { t } = useTranslation()
   const sourceId = params?.id ? decodeURIComponent(params.id as string) : ''
   const navigation = useNavigation()
+
+  // Chunk C4: a reader window popped from a workspace carries `nb=<notebookId>`
+  // (set by C3). When present, "Ask AI" first tries to hand the passage to that
+  // notebook's chat window — staging it into the workspace's active dock
+  // composer — and only stages into THIS window's own source chat if no peer
+  // window acks. No `nb` param → behaves exactly as a standalone source page.
+  const notebookForIntent = searchParams?.get('nb') ?? null
 
   // Initialize source chat
   const chat = useSourceChat(sourceId)
@@ -77,6 +86,26 @@ export default function SourceDetailPage() {
     setAskRefs(annotationIds)
     setFocusSignal((n) => n + 1)
   }, [])
+
+  // Chunk C4: hand the passage to the owning notebook's chat window if this is a
+  // workspace-spawned reader window (`nb` present) and a peer acks within the
+  // ack window; otherwise fall back to staging into this window's source chat —
+  // identical to the standalone behavior. Callers pass the same (text, ids) they
+  // would have staged, so the fallback is unchanged.
+  const stageAskOrSend = useCallback(
+    async (text: string, annotationIds: string[]) => {
+      if (notebookForIntent) {
+        const sent = await sendIntent(
+          INTENT_ASK_AI,
+          { notebookId: notebookForIntent, text, annotationIds },
+          { timeoutMs: 300 }
+        )
+        if (sent) return
+      }
+      stageAsk(text, annotationIds)
+    },
+    [notebookForIntent, stageAsk]
+  )
 
   const handleBack = useCallback(() => {
     const returnPath = navigation.getReturnPath()
@@ -157,10 +186,11 @@ export default function SourceDetailPage() {
           onChatAboutHighlight={(quote, annotationId) => {
             // D8: an existing highlight → structured annotation ref + short text;
             // a fresh un-saved selection (no id) → quote-paste fallback.
+            // C4: stageAskOrSend routes to the chat window first when `nb` is set.
             if (annotationId) {
-              stageAsk(t('chat.askAboutHighlight'), [annotationId])
+              void stageAskOrSend(t('chat.askAboutHighlight'), [annotationId])
             } else {
-              stageAsk(`Tell me about this highlighted passage: "${quote}"`, [])
+              void stageAskOrSend(`Tell me about this highlighted passage: "${quote}"`, [])
             }
           }}
           onChatAboutHighlights={(quotes, tag, annotationIds) => {
@@ -170,9 +200,9 @@ export default function SourceDetailPage() {
               if (ids.length > MAX_TAG_ANNOTATION_IDS) {
                 toast.info(t('chat.tagAskTruncated').replace('{tag}', tag))
               }
-              stageAsk(t('chat.askAboutTag').replace('{tag}', tag), capped)
+              void stageAskOrSend(t('chat.askAboutTag').replace('{tag}', tag), capped)
             } else {
-              stageAsk(composeTagPrompt(tag, quotes), [])
+              void stageAskOrSend(composeTagPrompt(tag, quotes), [])
             }
           }}
         />

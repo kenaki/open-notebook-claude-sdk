@@ -26,6 +26,7 @@ import { useChatWorkspaceStore, SOURCE_PANEL_DEFAULT_WIDTH } from '@/lib/stores/
 import { useNotebookWorkspaceStrict } from './NotebookWorkspaceProvider'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { openNamedWindow } from '@/lib/utils/windows'
+import { onIntent, INTENT_ASK_AI, type AskAiIntent } from '@/lib/sync/broadcast'
 
 const DOCK = 'dock'
 
@@ -206,6 +207,26 @@ export function DeepDiveWorkspace({ activeChatId }: { activeChatId: string }) {
     },
     [dockActiveChatId, setDraft, setAskRefs, bumpComposerFocus]
   )
+
+  // Chunk C4 receiver: a reader window popped from THIS notebook's workspace
+  // (carrying `nb=<notebookId>`) can hand a highlighted passage here via the
+  // ask-AI intent. Stage it into the dock's active composer exactly like an
+  // in-panel Ask-AI (reusing stagePanelAsk's convention), then ack so the sender
+  // doesn't fall back to its own in-window staging. Only THIS notebook's intents
+  // are claimed; with no main docked (nothing to stage into) we decline, so the
+  // reader keeps the passage locally.
+  useEffect(() => {
+    const unsub = onIntent(INTENT_ASK_AI, (data) => {
+      const p = data as AskAiIntent
+      if (p.notebookId !== notebookId) return false
+      if (!dockActiveChatId) return false
+      setDraft(dockActiveChatId, p.text)
+      setAskRefs(dockActiveChatId, p.annotationIds?.length ? p.annotationIds : null)
+      bumpComposerFocus()
+      return true
+    })
+    return unsub
+  }, [notebookId, dockActiveChatId, setDraft, setAskRefs, bumpComposerFocus])
 
   const handlePanelChatAboutHighlight = useCallback(
     (quote: string, annotationId?: string) => {

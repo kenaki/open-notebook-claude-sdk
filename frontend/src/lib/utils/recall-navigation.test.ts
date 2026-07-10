@@ -1,7 +1,28 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 import { navigateToRecallRef, type RecallNavContext } from './recall-navigation'
+import { sendIntent } from '@/lib/sync/broadcast'
 import type { RecallRef } from '@/lib/types/api'
+
+// C4: the annotation branch now offers a local-miss jump to a PEER WINDOW via
+// the sync bus before routing away. Mock the bus so we can drive the ack result.
+vi.mock('@/lib/sync/broadcast', () => ({
+  sendIntent: vi.fn(),
+  INTENT_ANNOTATION_JUMP: 'annotation-jump',
+}))
+
+const mockedSendIntent = vi.mocked(sendIntent)
+
+// The peer fallback is fire-and-forget (handled inside a `.then`), so tests must
+// let microtasks + the resolved-promise continuation drain before asserting the
+// push. A macrotask tick flushes both.
+const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+beforeEach(() => {
+  // Default: no peer window acks → the branch falls back to a push.
+  mockedSendIntent.mockReset()
+  mockedSendIntent.mockResolvedValue(false)
+})
 
 const baseRef: RecallRef = {
   kind: 'exchange',
@@ -127,7 +148,7 @@ describe('navigateToRecallRef — exchange refs', () => {
 })
 
 describe('navigateToRecallRef — annotation refs', () => {
-  it('annotation on the currently-mounted source: requests a jump (no navigation)', () => {
+  it('annotation on the currently-mounted source: requests a jump (no navigation, no peer intent)', () => {
     const ctx = makeCtx({ sourceId: 'source:abc' })
     const ref: RecallRef = {
       ...baseRef,
@@ -140,9 +161,11 @@ describe('navigateToRecallRef — annotation refs', () => {
 
     expect(ctx.requestJump).toHaveBeenCalledWith('source:abc', 'source_annotation:ghi')
     expect(ctx.push).not.toHaveBeenCalled()
+    // The current source is mounted here, so we never reach the peer bus.
+    expect(mockedSendIntent).not.toHaveBeenCalled()
   })
 
-  it('annotation on a different source with no handler registered there: routes to that source page', () => {
+  it('annotation on a different source, no local handler and no peer ack: routes to that source page', async () => {
     const ctx = makeCtx({ sourceId: 'source:current' })
     const ref: RecallRef = {
       ...baseRef,
@@ -153,11 +176,19 @@ describe('navigateToRecallRef — annotation refs', () => {
 
     navigateToRecallRef(ref, ctx)
 
+    // Local miss → offer the jump to a peer window before routing.
     expect(ctx.requestJump).toHaveBeenCalledWith('source:other', 'source_annotation:ghi')
+    expect(mockedSendIntent).toHaveBeenCalledWith('annotation-jump', {
+      sourceId: 'source:other',
+      annotationId: 'source_annotation:ghi',
+    })
+    // Push is fire-and-forget inside the ack promise — not yet.
+    expect(ctx.push).not.toHaveBeenCalled()
+    await flush()
     expect(ctx.push).toHaveBeenCalledWith('/sources/source:other')
   })
 
-  it('annotation on a different source with a handler registered there (e.g. a workspace reader panel): jumps in place, no push', () => {
+  it('annotation on a different source with a LOCAL handler (e.g. a workspace reader panel): jumps in place, no peer intent, no push', () => {
     const requestJump = vi.fn<RecallNavContext['requestJump']>().mockReturnValue(true)
     const ctx = makeCtx({ sourceId: 'source:current', requestJump })
     const ref: RecallRef = {
@@ -170,10 +201,33 @@ describe('navigateToRecallRef — annotation refs', () => {
     navigateToRecallRef(ref, ctx)
 
     expect(ctx.requestJump).toHaveBeenCalledWith('source:other', 'source_annotation:ghi')
+    expect(mockedSendIntent).not.toHaveBeenCalled()
     expect(ctx.push).not.toHaveBeenCalled()
   })
 
-  it('annotation with no current source in context (notebook chat) but a handler registered for the ref source: jumps in place, no push', () => {
+  it('annotation with a local miss but a PEER WINDOW that acks the jump: no push', async () => {
+    mockedSendIntent.mockResolvedValue(true)
+    const ctx = makeCtx({ sourceId: 'source:current' })
+    const ref: RecallRef = {
+      ...baseRef,
+      kind: 'annotation',
+      source_id: 'source:other',
+      annotation_id: 'source_annotation:ghi',
+    }
+
+    navigateToRecallRef(ref, ctx)
+
+    expect(ctx.requestJump).toHaveBeenCalledWith('source:other', 'source_annotation:ghi')
+    expect(mockedSendIntent).toHaveBeenCalledWith('annotation-jump', {
+      sourceId: 'source:other',
+      annotationId: 'source_annotation:ghi',
+    })
+    await flush()
+    // A peer window handled the jump — we must NOT also navigate away here.
+    expect(ctx.push).not.toHaveBeenCalled()
+  })
+
+  it('annotation with no current source in context (notebook chat) but a LOCAL handler for the ref source: jumps in place, no peer intent, no push', () => {
     const requestJump = vi.fn<RecallNavContext['requestJump']>().mockReturnValue(true)
     const ctx = makeCtx({ requestJump })
     const ref: RecallRef = {
@@ -186,10 +240,11 @@ describe('navigateToRecallRef — annotation refs', () => {
     navigateToRecallRef(ref, ctx)
 
     expect(ctx.requestJump).toHaveBeenCalledWith('source:other', 'source_annotation:ghi')
+    expect(mockedSendIntent).not.toHaveBeenCalled()
     expect(ctx.push).not.toHaveBeenCalled()
   })
 
-  it('annotation with no current source in context (notebook chat) and no handler registered: routes to the source page', () => {
+  it('annotation with no current source in context (notebook chat), no local handler and no peer ack: routes to the source page', async () => {
     const ctx = makeCtx()
     const ref: RecallRef = {
       ...baseRef,
@@ -201,13 +256,16 @@ describe('navigateToRecallRef — annotation refs', () => {
     navigateToRecallRef(ref, ctx)
 
     expect(ctx.requestJump).toHaveBeenCalledWith('source:other', 'source_annotation:ghi')
+    expect(mockedSendIntent).toHaveBeenCalled()
+    await flush()
     expect(ctx.push).toHaveBeenCalledWith('/sources/source:other')
   })
 
-  it('annotation missing both source id and annotation id is a no-op', () => {
+  it('annotation missing both source id and annotation id is a no-op (no peer intent)', () => {
     const ctx = makeCtx({ sourceId: 'source:abc' })
     navigateToRecallRef({ ...baseRef, kind: 'annotation' }, ctx)
     expect(ctx.push).not.toHaveBeenCalled()
     expect(ctx.requestJump).not.toHaveBeenCalled()
+    expect(mockedSendIntent).not.toHaveBeenCalled()
   })
 })

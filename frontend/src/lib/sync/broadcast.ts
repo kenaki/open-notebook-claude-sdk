@@ -44,6 +44,27 @@ export const EXCLUDED_KEY_PREFIXES: readonly (readonly unknown[])[] = [
 export const INTENT_ASK_AI = 'ask-ai'
 export const INTENT_ANNOTATION_JUMP = 'annotation-jump'
 
+/**
+ * `ask-ai` payload (Chunk C4): a reader window opened from a workspace hands a
+ * highlighted passage to that notebook's chat window, staging it (never
+ * auto-sending) into the active dock composer. `notebookId` targets the right
+ * workspace window (the reader's `nb` search param — Decisions #8).
+ */
+export interface AskAiIntent {
+  notebookId: string
+  text: string
+  annotationIds: string[]
+}
+
+/**
+ * `annotation-jump` payload (Chunk C4): a recall pill whose source isn't mounted
+ * in this window offers the jump to a peer window that has it before routing away.
+ */
+export interface AnnotationJumpIntent {
+  sourceId: string
+  annotationId: string
+}
+
 type MessageType = 'invalidate' | 'intent' | 'ack'
 
 interface InvalidatePayload {
