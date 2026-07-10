@@ -1,6 +1,7 @@
 'use client'
 
-import { memo, useMemo, useRef } from 'react'
+import { memo, useCallback, useMemo, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 import { Activity, Sparkles } from 'lucide-react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
@@ -18,8 +19,9 @@ import { useAnnotationJumpStore } from '@/lib/stores/annotation-jump-store'
 import { ToolUseDisclosure, describeTool, detailFor } from './ToolUseDisclosure'
 import { ThinkingDisclosure } from './ThinkingDisclosure'
 import { convertReferencesToCompactMarkdown, createCompactReferenceLinkComponent } from '@/lib/utils/source-references'
+import { navigateToRecallRef } from '@/lib/utils/recall-navigation'
 import { useTranslation } from '@/lib/hooks/use-translation'
-import type { SourceChatMessage } from '@/lib/types/api'
+import type { RecallRef, SourceChatMessage } from '@/lib/types/api'
 import { useChatScrollAnchor } from './useChatScrollAnchor'
 import { useJobsStore, type BackgroundJob } from '@/lib/stores/jobs-store'
 import { useAgentConsoleStore } from '@/lib/stores/agent-console-store'
@@ -52,6 +54,12 @@ interface MessageListProps {
   onReferenceClick: (type: string, id: string) => void
   onSuggestion: (prompt: string) => void
   onRetry?: (messageId: string) => void
+  // study-memory C2: switches THIS chat surface to another of its OWN sessions
+  // in place (source chat's `useSourceChat().switchSession`). Only relevant to
+  // a recall pill pointing at a same-source exchange; absent in notebook chat,
+  // where every recall pill navigates via router instead (see
+  // `navigateToRecallRef`).
+  onSwitchSession?: (sessionId: string) => void
 }
 
 export function MessageList({
@@ -69,9 +77,27 @@ export function MessageList({
   onReferenceClick,
   onSuggestion,
   onRetry,
+  onSwitchSession,
 }: MessageListProps) {
   const { t } = useTranslation()
+  const router = useRouter()
   const requestJump = useAnnotationJumpStore((s) => s.requestJump)
+  // study-memory C2: resolves a recall-pill click per the branch table in
+  // `navigateToRecallRef` — session-level navigation only (coordinator
+  // P-nav-depth), never a message-level scroll. Built here (not threaded down
+  // as a ready-made callback) because MessageList already owns everything the
+  // branch table needs except `onSwitchSession`, which is the one piece only
+  // the source-chat page can supply.
+  const handleOpenRecallRef = useCallback(
+    (ref: RecallRef) =>
+      navigateToRecallRef(ref, {
+        sourceId,
+        switchSession: onSwitchSession,
+        requestJump,
+        push: router.push,
+      }),
+    [sourceId, onSwitchSession, requestJump, router]
+  )
   const scrollAreaRef = useRef<HTMLDivElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const { tailSpacer } = useChatScrollAnchor({ isDock, messages, scrollAreaRef, messagesEndRef })
@@ -220,7 +246,7 @@ export function MessageList({
                     />
                   )}
                   {message.type === 'ai' && message.recall_refs && message.recall_refs.length > 0 && (
-                    <RecallReferences refs={message.recall_refs} />
+                    <RecallReferences refs={message.recall_refs} onOpenRef={handleOpenRecallRef} />
                   )}
                   {message.type === 'ai' && (
                     <MessageActions content={message.content} notebookId={notebookId} />

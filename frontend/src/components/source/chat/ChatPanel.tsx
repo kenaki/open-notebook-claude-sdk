@@ -76,6 +76,11 @@ interface ChatPanelProps {
   onAddPending?: (item: MediaItem) => void
   onRemovePending?: (index: number) => void
   onRetry?: (messageId: string) => void
+  // study-memory C2: forwarded to MessageList so a same-source-chat recall pill
+  // can switch this surface to the referenced session in place, instead of
+  // navigating away. Source chat only (`useSourceChat().switchSession`);
+  // notebook chat omits it — its recall pills always navigate via router.
+  onSwitchSession?: (sessionId: string) => void
 }
 
 export function ChatPanel({
@@ -114,6 +119,7 @@ export function ChatPanel({
   onAddPending,
   onRemovePending,
   onRetry,
+  onSwitchSession,
 }: ChatPanelProps) {
   const { t } = useTranslation()
   const [internalInput, setInternalInput] = useState('')
@@ -236,6 +242,7 @@ export function ChatPanel({
       onReferenceClick={handleReferenceClick}
       onSuggestion={handleSuggestion}
       onRetry={onRetry}
+      onSwitchSession={onSwitchSession}
     />
   )
 

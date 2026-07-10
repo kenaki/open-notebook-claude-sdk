@@ -229,6 +229,9 @@ export default function SourceDetailPage() {
           onUpdateSession={(sessionId, title) => chat.updateSession(sessionId, { title })}
           onDeleteSession={chat.deleteSession}
           loadingSessions={chat.loadingSessions}
+          // study-memory C2: a same-source-chat recall pill switches this panel
+          // to the referenced session in place (mirrors onSelectSession above).
+          onSwitchSession={chat.switchSession}
         />
       </div>
     </div>
