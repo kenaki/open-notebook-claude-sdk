@@ -4,6 +4,11 @@ import traceback
 from fastapi import APIRouter, HTTPException
 from loguru import logger
 
+from api.annotation_refs import (
+    make_cached_source_resolver,
+    make_source_in_notebook_check,
+    resolve_annotations_for_chat,
+)
 from api.command_service import CommandService
 from api.context_service import build_context_data
 from api.routers._helpers import ensure_prefix, get_or_404
@@ -34,6 +39,22 @@ async def execute_chat(request: ExecuteChatRequest):
             else getattr(session, "model_override", None)
         )
 
+        # Resolve any referenced annotations BEFORE job submit (mirrors the
+        # source-chat send path): records the cites_annotation edges and builds
+        # the REFERENCED-ANNOTATION prompt section + the compact refs list. Both
+        # travel to the worker as typed ChatCompletionInput fields, not embedded
+        # in message content. Ownership = the annotation's source belongs to this
+        # notebook (reference edge); refs may span sources, so each is fetched.
+        annotation_ctx = ""
+        annotation_refs: list = []
+        if request.annotation_ids and notebook_id:
+            annotation_ctx, annotation_refs = await resolve_annotations_for_chat(
+                request.annotation_ids,
+                full_session_id,
+                check_ownership=make_source_in_notebook_check(notebook_id),
+                resolve_source=make_cached_source_resolver(),
+            )
+
         job_id = await CommandService.submit_command_job(
             "open_notebook",
             "chat_completion",
@@ -46,6 +67,8 @@ async def execute_chat(request: ExecuteChatRequest):
                 "kind": "notebook",
                 "notebook_id": notebook_id,
                 "label": request.message[:60],
+                "annotation_context": annotation_ctx,
+                "annotation_refs": annotation_refs,
             },
         )
 

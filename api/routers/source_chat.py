@@ -6,20 +6,14 @@ from langchain_core.runnables import RunnableConfig
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from api.annotation_refs import resolve_annotations_for_chat
 from api.command_service import CommandService
 from api.routers._helpers import ensure_prefix, get_or_404
 from open_notebook.database.repository import (
     ensure_record_id,
     repo_query,
-    repo_relate,
 )
-from open_notebook.domain import blocks
-from open_notebook.domain.notebook import ChatSession, Source, SourceAnnotation
-from open_notebook.exceptions import NotFoundError
-from open_notebook.graphs.source_chat import (
-    annotation_block_content,
-    build_annotation_context_section,
-)
+from open_notebook.domain.notebook import ChatSession, Source
 from open_notebook.graphs.source_chat import (
     source_chat_graph as source_chat_graph,
 )
@@ -48,6 +42,9 @@ class AnnotationRef(BaseModel):
     Surfaced on the session-GET payload so the UI can render reference pills."""
 
     id: str = Field(..., description="Annotation ID")
+    source_id: Optional[str] = Field(
+        None, description="Owning source id (per-ref jump target; cross-study Decision #6)"
+    )
     quote: Optional[str] = Field(None, description="Highlighted quote text")
     block_seq: Optional[int] = Field(None, description="Anchored block seq (None if legacy)")
     page: Optional[int] = Field(None, description="1-indexed page of the annotation")
@@ -183,84 +180,31 @@ class SendSourceChatJobResponse(BaseModel):
     session_id: str = Field(..., description="Chat session ID")
 
 
-# Cap referenced annotations per message so a tag-ask over a large tag can't blow
-# the agent context (Track D Open Question Q-tag-ask-limit; default 10).
-_MAX_ANNOTATION_REFS = 10
-
-
-async def _relate_citation(full_session_id: str, annotation_id: str) -> None:
-    """Record a ``chat_session->cites_annotation->source_annotation`` edge once.
-
-    SELECT-checks first so re-referencing the same annotation across turns does
-    not pile up duplicate edges (db-design §2.4 / §3b)."""
-    existing = await repo_query(
-        "SELECT id FROM cites_annotation WHERE in = $s AND out = $a LIMIT 1",
-        {"s": ensure_record_id(full_session_id), "a": ensure_record_id(annotation_id)},
-    )
-    if not existing:
-        await repo_relate(full_session_id, "cites_annotation", annotation_id)
-
-
 async def _resolve_annotations_for_chat(
     source: Source, full_session_id: str, annotation_ids: List[str]
 ) -> tuple[str, List[dict]]:
     """Resolve referenced annotations into (context_section, annotation_refs).
 
-    For each annotation that belongs to ``source`` (invalid/foreign ids are
-    skipped, not fatal): records the ``cites_annotation`` edge, then — if the
-    annotation is block-anchored — fetches its block window (radius 3, one round
-    trip, db-design §3b) and renders the anchored block's content; otherwise falls
-    back to the stored quote + page. Returns the structured context block for the
-    prompt and a compact refs list for the UI pills.
+    Thin source-chat wrapper over the shared resolver (``api.annotation_refs``,
+    cross-study Decision #7): ownership is "the annotation's source IS this
+    source", and the single already-fetched ``source`` is reused for every ref
+    (no per-annotation refetch). Behavior-identical to the former inline resolver
+    apart from the additive ``source_id`` key on each ref (Decision #6).
     """
     src_id = str(source.id)
-    src_key = src_id.split(":", 1)[1] if ":" in src_id else src_id
-    parse_gen = source.parse_generation
 
-    resolved: List[dict] = []
-    refs: List[dict] = []
-    for raw_id in annotation_ids[:_MAX_ANNOTATION_REFS]:
-        annotation_id = ensure_prefix(raw_id, "source_annotation")
-        try:
-            annotation = await SourceAnnotation.get(annotation_id)
-        except NotFoundError:
-            logger.warning(f"Skipping unknown annotation ref {annotation_id}")
-            continue
-        if str(annotation.source) != src_id:
-            logger.warning(
-                f"Skipping annotation {annotation_id}: not part of source {src_id}"
-            )
-            continue
+    async def _owns(annotation) -> bool:
+        return str(annotation.source) == src_id
 
-        await _relate_citation(full_session_id, annotation_id)
+    async def _source_for(_annotation) -> Source:
+        return source
 
-        item = {
-            "section_path": [],
-            "content": annotation.quote or "",
-            "note": annotation.note,
-        }
-        if annotation.block_seq is not None and parse_gen is not None:
-            gen = annotation.anchor_gen if annotation.anchor_gen is not None else parse_gen
-            window = await blocks.get_window(
-                src_key, gen, annotation.block_seq, radius=3
-            )
-            block = next(
-                (b for b in window if b.get("seq") == annotation.block_seq), None
-            )
-            if block:
-                item["section_path"] = block.get("section_path") or []
-                item["content"] = annotation_block_content(block, annotation.quote)
-        resolved.append(item)
-        refs.append(
-            {
-                "id": annotation.id,
-                "quote": annotation.quote,
-                "block_seq": annotation.block_seq,
-                "page": annotation.page,
-            }
-        )
-
-    return build_annotation_context_section(resolved), refs
+    return await resolve_annotations_for_chat(
+        annotation_ids,
+        full_session_id,
+        check_ownership=_owns,
+        resolve_source=_source_for,
+    )
 
 
 @router.post(

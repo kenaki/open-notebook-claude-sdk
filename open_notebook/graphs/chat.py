@@ -65,6 +65,10 @@ class ThreadState(TypedDict):
     # This command's own record id, so the tool loop can stamp live progress
     # (phase + which tool) onto the job row. None when not run as a job.
     job_id: Optional[str]
+    # Pre-built REFERENCED-ANNOTATION section (cross-study B1): the router
+    # resolved the user's annotation_ids into this prompt block and forwarded it
+    # as typed state; the model-call node appends it to the assembled context.
+    annotation_context: Optional[str]
 
 
 def _media_to_data_uri(item: dict) -> Optional[str]:
@@ -473,7 +477,14 @@ async def _slim_agent_payload(payload: list, state: Optional[ThreadState]) -> li
         sources = await notebook.get_sources()  # cheap: omits full_text
         notes = await notebook.get_notes()  # cheap: omits content
         slim_state = dict(state)  # type: ignore[arg-type]
-        slim_state["context"] = build_agent_context_index(sources, notes)
+        slim_context = build_agent_context_index(sources, notes)
+        # Re-append the REFERENCED-ANNOTATION section (cross-study B1): this path
+        # rebuilds context from scratch, so the annotation block appended in
+        # call_model_with_messages would otherwise be dropped here.
+        annotation_ctx = (state or {}).get("annotation_context") or ""
+        if annotation_ctx:
+            slim_context = f"{slim_context}\n\n{annotation_ctx}"
+        slim_state["context"] = slim_context
         slim_prompt = Prompter(prompt_template="chat/system").render(
             data=slim_state  # type: ignore[arg-type]
         )
@@ -544,7 +555,20 @@ async def _generate_ai_message(
 
 def call_model_with_messages(state: ThreadState, config: RunnableConfig) -> dict:
     try:
-        system_prompt = Prompter(prompt_template="chat/system").render(data=state)  # type: ignore[arg-type]
+        # Append the pre-built REFERENCED-ANNOTATION section (cross-study B1) to
+        # the context the system prompt renders from, mirroring source_chat's
+        # context-assembly seam. The Esperanto path consumes this rendered prompt
+        # directly; the Claude-agent path re-appends the same section itself in
+        # _slim_agent_payload (which rebuilds context from scratch).
+        annotation_ctx = state.get("annotation_context") or ""
+        render_state = state
+        if annotation_ctx:
+            base_context = state.get("context") or ""
+            render_state = {
+                **state,
+                "context": f"{base_context}\n\n{annotation_ctx}".strip(),
+            }
+        system_prompt = Prompter(prompt_template="chat/system").render(data=render_state)  # type: ignore[arg-type]
         if state.get("quote"):
             logger.debug(
                 f"Chat system prompt rendered with SEED PASSAGE block:\n{system_prompt}"

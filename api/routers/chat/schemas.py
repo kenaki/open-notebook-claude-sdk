@@ -147,6 +147,26 @@ class RecallRef(BaseModel):
     similarity: float = Field(..., description="Vector similarity score")
 
 
+class AnnotationRef(BaseModel):
+    """A structured annotation reference attached to a notebook-chat message
+    (cross-interface-study Chunk B1).
+
+    Same shape as ``api.routers.source_chat.AnnotationRef`` (kept as a separate
+    model per this router's file ownership). ``source_id`` is present on both
+    chat paths (Decision #6): notebook-chat refs span sources, so each pill needs
+    its own per-ref jump target."""
+
+    id: str = Field(..., description="Annotation ID")
+    source_id: Optional[str] = Field(
+        None, description="Owning source id (per-ref jump target)"
+    )
+    quote: Optional[str] = Field(None, description="Highlighted quote text")
+    block_seq: Optional[int] = Field(
+        None, description="Anchored block seq (None if legacy)"
+    )
+    page: Optional[int] = Field(None, description="1-indexed page of the annotation")
+
+
 class MediaItem(BaseModel):
     type: Literal["image", "video"] = Field(..., description="Attachment kind")
     url: str = Field(..., description="Fetchable URL served by GET /chat/media/{file}")
@@ -182,6 +202,10 @@ class ChatMessage(BaseModel):
     recall_refs: Optional[List[RecallRef]] = Field(
         None,
         description="Structured recall references (past discussions/highlights) carried by this message",
+    )
+    annotation_refs: Optional[List[AnnotationRef]] = Field(
+        None,
+        description="Structured annotation references the user pointed this message at (cross-study B1)",
     )
 
 
@@ -229,6 +253,14 @@ class ExecuteChatRequest(BaseModel):
     )
     media: List[MediaItem] = Field(
         default_factory=list, description="Image/video attachments for this message"
+    )
+    annotation_ids: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Annotation IDs the user is referencing; each is ownership-checked "
+            "(source in this notebook), resolved into the AI context, and recorded "
+            "as a cites_annotation edge (cross-study B1)."
+        ),
     )
 
 

@@ -320,10 +320,18 @@ async def chat_completion_command(
             state_values["model_override"] = model_override
             state_values["quote"] = getattr(session, "quote", None)
             state_values["job_id"] = job_id
+            # Structured annotation refs (cross-study B1) travel as typed state,
+            # not in message content — mirroring the source branch: the resolved
+            # REFERENCED-ANNOTATION section goes into graph state and the compact
+            # refs list rides on the human message's additional_kwargs so the
+            # checkpoint (and session-GET) render pills.
+            state_values["annotation_context"] = input_data.annotation_context or ""
 
             additional_kwargs = {}
             if input_data.media:
                 additional_kwargs["media"] = input_data.media
+            if input_data.annotation_refs:
+                additional_kwargs["annotation_refs"] = input_data.annotation_refs
             state_values["messages"].append(
                 HumanMessage(
                     content=input_data.message, additional_kwargs=additional_kwargs

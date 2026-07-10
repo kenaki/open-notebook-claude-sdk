@@ -8,6 +8,7 @@ from open_notebook.database.repository import ensure_record_id, repo_query
 from open_notebook.domain.notebook import ChatMessageMedia
 
 from api.routers.chat.schemas import (
+    AnnotationRef,
     ChatMessage,
     Citation,
     MediaItem,
@@ -146,6 +147,22 @@ async def _resolve_citations(
     return clean, citations, followups
 
 
+def _parse_annotation_refs(extra: Dict[str, Any]) -> Optional[List[AnnotationRef]]:
+    """Parse ``additional_kwargs.annotation_refs`` into AnnotationRef models
+    (cross-interface-study B1 — symmetric with
+    ``api.routers.source_chat``'s human-message annotation surfacing). Rides on
+    the HUMAN turn only. Filters each raw ref dict down to the known AnnotationRef
+    fields (degrade-never-fail), silently dropping any unknown key rather than
+    raising. Absent/empty (older sessions, AI turns) -> None."""
+    raw_refs = extra.get("annotation_refs") if isinstance(extra, dict) else None
+    if not raw_refs:
+        return None
+    return [
+        AnnotationRef(**{k: v for k, v in ref.items() if k in AnnotationRef.model_fields})
+        for ref in raw_refs
+    ]
+
+
 def _parse_recall_refs(extra: Dict[str, Any]) -> Optional[List[RecallRef]]:
     """Parse ``additional_kwargs.recall_refs`` into contract-shaped RecallRef
     models (study-memory Track B, chunk B3 — symmetric with
@@ -196,6 +213,11 @@ async def _build_chat_message(msg: Any, fallback_index: int) -> ChatMessage:
     # human turns and on messages checkpointed before this change.
     recall_refs = _parse_recall_refs(extra) if isinstance(extra, dict) else None
 
+    # Structured annotation references (cross-study B1): ride on the HUMAN
+    # message's additional_kwargs (same seam as media); absent on AI turns and on
+    # messages checkpointed before this change.
+    annotation_refs = _parse_annotation_refs(extra) if isinstance(extra, dict) else None
+
     # Per-turn token usage (Claude Agent path only; Esperanto messages carry no
     # "usage" key → stays None → serializes as usage: null). The context window
     # is resolved server-side from the effective model id. Malformed payloads
@@ -242,4 +264,5 @@ async def _build_chat_message(msg: Any, fallback_index: int) -> ChatMessage:
         usage=usage,
         thinking=thinking,
         recall_refs=recall_refs,
+        annotation_refs=annotation_refs,
     )
