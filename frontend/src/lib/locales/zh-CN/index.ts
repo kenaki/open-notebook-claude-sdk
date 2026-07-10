@@ -354,6 +354,7 @@ export const zhCN = {
     details: "详情",
     detailsTitle: "来源详情",
     openInPanel: "在面板中打开",
+    openInWindow: "移到窗口",
     content: "内容",
     metadata: "元数据",
     type: {
@@ -609,6 +610,7 @@ export const zhCN = {
     readingNotebook: "正在读取笔记本…",
     usingTool: "正在使用工具…",
     newChat: "新对话",
+    popOutWindow: "在窗口中打开",
     dockBack: "停靠回去",
     passageEmptyTitle: "询问此段落",
     passageEmptyHelper: "询问有关高亮文本的任何问题。",

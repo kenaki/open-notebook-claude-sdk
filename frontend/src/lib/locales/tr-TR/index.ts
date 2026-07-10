@@ -354,6 +354,7 @@ export const trTR = {
     details: "Ayrıntılar",
     detailsTitle: "Kaynak Ayrıntıları",
     openInPanel: "Panelde aç",
+    openInWindow: "Pencereye taşı",
     content: "İçerik",
     metadata: "Meta Veri",
     type: {
@@ -609,6 +610,7 @@ export const trTR = {
     readingNotebook: "Not defteri okunuyor…",
     usingTool: "Bir araç kullanılıyor…",
     newChat: "Yeni sohbet",
+    popOutWindow: "Pencerede aç",
     dockBack: "Yeniden yerleştir",
     passageEmptyTitle: "Bu bölüm hakkında soru sorun",
     passageEmptyHelper: "Vurgulanan metin hakkında her şeyi sorun.",

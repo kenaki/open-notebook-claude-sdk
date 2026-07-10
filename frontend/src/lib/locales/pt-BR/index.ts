@@ -354,6 +354,7 @@ export const ptBR = {
     details: "Detalhes",
     detailsTitle: "Detalhes da Fonte",
     openInPanel: "Abrir no painel",
+    openInWindow: "Mover para janela",
     content: "Conteúdo",
     metadata: "Metadados",
     type: {
@@ -609,6 +610,7 @@ export const ptBR = {
     readingNotebook: "Lendo caderno…",
     usingTool: "Usando uma ferramenta…",
     newChat: "Novo chat",
+    popOutWindow: "Abrir em janela",
     dockBack: "Reacoplar",
     passageEmptyTitle: "Pergunte sobre este trecho",
     passageEmptyHelper: "Pergunte qualquer coisa sobre o texto destacado.",

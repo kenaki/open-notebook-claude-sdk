@@ -354,6 +354,7 @@ export const itIT = {
     details: "Dettagli",
     detailsTitle: "Dettagli fonte",
     openInPanel: "Apri nel pannello",
+    openInWindow: "Sposta in una finestra",
     content: "Contenuto",
     metadata: "Metadati",
     type: {
@@ -609,6 +610,7 @@ export const itIT = {
     readingNotebook: "Lettura del blocco note…",
     usingTool: "Utilizzo di uno strumento…",
     newChat: "Nuova chat",
+    popOutWindow: "Apri in una finestra",
     dockBack: "Riaggancia",
     passageEmptyTitle: "Chiedi di questo passaggio",
     passageEmptyHelper: "Chiedi qualsiasi cosa sul testo evidenziato.",

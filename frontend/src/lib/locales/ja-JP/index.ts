@@ -354,6 +354,7 @@ export const jaJP = {
     details: "詳細",
     detailsTitle: "ソース詳細",
     openInPanel: "パネルで開く",
+    openInWindow: "ウィンドウに移動",
     content: "コンテンツ",
     metadata: "メタデータ",
     type: {
@@ -609,6 +610,7 @@ export const jaJP = {
     readingNotebook: "ノートブックを読み込んでいます…",
     usingTool: "ツールを使用しています…",
     newChat: "新しいチャット",
+    popOutWindow: "ウィンドウで開く",
     dockBack: "ドックに戻す",
     passageEmptyTitle: "この一節について質問する",
     passageEmptyHelper: "ハイライトしたテキストについて何でも質問してください。",

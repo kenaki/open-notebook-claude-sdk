@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, usePathname } from 'next/navigation'
 import { toast } from 'sonner'
 import {
   DndContext,
@@ -12,7 +12,7 @@ import {
   type DragEndEvent,
 } from '@dnd-kit/core'
 import { SortableContext, arrayMove, horizontalListSortingStrategy } from '@dnd-kit/sortable'
-import { ArrowLeft, Plus } from 'lucide-react'
+import { ArrowLeft, AppWindow, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { NotebookHeader } from '@/app/(dashboard)/notebooks/components/NotebookHeader'
 import { ChatColumn } from '@/app/(dashboard)/notebooks/components/ChatColumn'
@@ -25,6 +25,7 @@ import { useNotebookColumnsStore } from '@/lib/stores/notebook-columns-store'
 import { useChatWorkspaceStore, SOURCE_PANEL_DEFAULT_WIDTH } from '@/lib/stores/chat-workspace-store'
 import { useNotebookWorkspaceStrict } from './NotebookWorkspaceProvider'
 import { useTranslation } from '@/lib/hooks/use-translation'
+import { openNamedWindow } from '@/lib/utils/windows'
 
 const DOCK = 'dock'
 
@@ -55,6 +56,7 @@ function composeTagPrompt(tag: string, quotes: string[]): string {
 export function DeepDiveWorkspace({ activeChatId }: { activeChatId: string }) {
   const { t } = useTranslation()
   const router = useRouter()
+  const pathname = usePathname()
   const {
     notebookId,
     notebook,
@@ -250,6 +252,14 @@ export function DeepDiveWorkspace({ activeChatId }: { activeChatId: string }) {
     }
   }
 
+  // Pop this whole workspace out into a named, chromeless (`?focus=1`) OS
+  // window (Chunk C3) — re-focused, never duplicated (`lib/utils/windows.ts`).
+  // Unlike the source-panel pop-out, this doesn't close anything locally: the
+  // workspace stays open here too, same as any other multi-window mirror.
+  const handlePopOutChat = () => {
+    openNamedWindow(`on-chat-${notebookId}`, `${pathname}?focus=1`)
+  }
+
   useEffect(() => {
     if (!pendingPopId) return
     if (wsChats[pendingPopId]) {
@@ -315,6 +325,7 @@ export function DeepDiveWorkspace({ activeChatId }: { activeChatId: string }) {
         >
           <SourceReaderPanel
             sourceId={token}
+            notebookId={notebookId}
             onClose={() => closeSourcePanel(token)}
             onChatAboutHighlight={handlePanelChatAboutHighlight}
             onChatAboutHighlights={handlePanelChatAboutHighlights}
@@ -383,6 +394,19 @@ export function DeepDiveWorkspace({ activeChatId }: { activeChatId: string }) {
               >
                 <Plus className="h-5 w-5" />
               </button>
+            )}
+            {!effectiveMax && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={handlePopOutChat}
+                title={t('chat.popOutWindow')}
+                aria-label={t('chat.popOutWindow')}
+                className="flex-shrink-0 self-start text-muted-foreground hover:text-foreground"
+              >
+                <AppWindow className="h-5 w-5" />
+              </Button>
             )}
           </PanelTrack>
           <PassageSelectionMenu onChatAboutPassage={handleCreateSubChat} />

@@ -354,6 +354,7 @@ export const bnIN = {
     details: "বিবরণ",
     detailsTitle: "উৎসের বিবরণ",
     openInPanel: "প্যানেলে খুলুন",
+    openInWindow: "উইন্ডোতে সরান",
     content: "কন্টেন্ট",
     metadata: "মেটাডেটা",
     type: {
@@ -609,6 +610,7 @@ export const bnIN = {
     readingNotebook: "নোটবুক পড়া হচ্ছে…",
     usingTool: "একটি টুল ব্যবহার করা হচ্ছে…",
     newChat: "নতুন চ্যাট",
+    popOutWindow: "উইন্ডোতে খুলুন",
     dockBack: "ডকে ফেরত দিন",
     passageEmptyTitle: "এই অংশ সম্পর্কে জিজ্ঞাসা করুন",
     passageEmptyHelper: "হাইলাইট করা টেক্সট সম্পর্কে যেকোনো কিছু জিজ্ঞাসা করুন।",

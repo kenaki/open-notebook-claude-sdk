@@ -354,6 +354,7 @@ export const esES = {
     details: "Detalles",
     detailsTitle: "Detalles de la fuente",
     openInPanel: "Abrir en el panel",
+    openInWindow: "Mover a una ventana",
     content: "Contenido",
     metadata: "Metadatos",
     type: {
@@ -609,6 +610,7 @@ export const esES = {
     readingNotebook: "Leyendo cuaderno…",
     usingTool: "Usando una herramienta…",
     newChat: "Nuevo chat",
+    popOutWindow: "Abrir en una ventana",
     dockBack: "Volver a acoplar",
     passageEmptyTitle: "Pregunta sobre este fragmento",
     passageEmptyHelper: "Pregunta lo que quieras sobre el texto resaltado.",

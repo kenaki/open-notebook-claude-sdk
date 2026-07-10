@@ -354,6 +354,7 @@ export const ruRU = {
     details: "Детали",
     detailsTitle: "Детали источника",
     openInPanel: "Открыть в панели",
+    openInWindow: "Переместить в окно",
     content: "Содержимое",
     metadata: "Метаданные",
     type: {
@@ -609,6 +610,7 @@ export const ruRU = {
     readingNotebook: "Чтение блокнота…",
     usingTool: "Использование инструмента…",
     newChat: "Новый чат",
+    popOutWindow: "Открыть в окне",
     dockBack: "Вернуть в панель",
     passageEmptyTitle: "Спросите об этом фрагменте",
     passageEmptyHelper: "Спрашивайте что угодно о выделенном тексте.",

@@ -354,6 +354,7 @@ export const zhTW = {
     details: "詳情",
     detailsTitle: "來源詳情",
     openInPanel: "在面板中開啟",
+    openInWindow: "移到視窗",
     content: "內容",
     metadata: "元資料",
     type: {
@@ -609,6 +610,7 @@ export const zhTW = {
     readingNotebook: "正在讀取筆記本…",
     usingTool: "正在使用工具…",
     newChat: "新對話",
+    popOutWindow: "在視窗中開啟",
     dockBack: "停靠回去",
     passageEmptyTitle: "詢問此段落",
     passageEmptyHelper: "詢問有關標示文字的任何問題。",

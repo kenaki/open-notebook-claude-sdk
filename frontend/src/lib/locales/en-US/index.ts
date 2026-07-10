@@ -354,6 +354,7 @@ export const enUS = {
     details: "Details",
     detailsTitle: "Source Details",
     openInPanel: "Open in panel",
+    openInWindow: "Move to window",
     content: "Content",
     metadata: "Metadata",
     type: {
@@ -594,6 +595,7 @@ export const enUS = {
     readingNotebook: "Reading notebook…",
     usingTool: "Using a tool…",
     newChat: "New chat",
+    popOutWindow: "Pop out to window",
     dockBack: "Dock back",
     passageEmptyTitle: "Ask about this passage",
     passageEmptyHelper: "Ask anything about the highlighted text.",

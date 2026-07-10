@@ -357,6 +357,7 @@ export const deDE = {
     details: "Details",
     detailsTitle: "Quellendetails",
     openInPanel: "Im Panel öffnen",
+    openInWindow: "In Fenster verschieben",
     content: "Inhalt",
     metadata: "Metadaten",
     type: {
@@ -612,6 +613,7 @@ export const deDE = {
     readingNotebook: "Notizbuch wird gelesen…",
     usingTool: "Ein Tool wird verwendet…",
     newChat: "Neuer Chat",
+    popOutWindow: "In Fenster öffnen",
     dockBack: "Wieder andocken",
     passageEmptyTitle: "Zu dieser Passage fragen",
     passageEmptyHelper: "Stelle beliebige Fragen zum markierten Text.",

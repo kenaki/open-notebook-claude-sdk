@@ -354,6 +354,7 @@ export const frFR = {
     details: "Détails",
     detailsTitle: "Détails de la source",
     openInPanel: "Ouvrir dans le panneau",
+    openInWindow: "Déplacer vers une fenêtre",
     content: "Contenu",
     metadata: "Métadonnées",
     type: {
@@ -609,6 +610,7 @@ export const frFR = {
     readingNotebook: "Lecture du carnet…",
     usingTool: "Utilisation d'un outil…",
     newChat: "Nouveau chat",
+    popOutWindow: "Ouvrir dans une fenêtre",
     dockBack: "Réancrer",
     passageEmptyTitle: "Poser une question sur ce passage",
     passageEmptyHelper: "Posez n'importe quelle question sur le texte surligné.",

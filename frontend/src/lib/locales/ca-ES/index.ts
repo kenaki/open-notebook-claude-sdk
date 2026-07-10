@@ -354,6 +354,7 @@ export const caES = {
     details: "Detalls",
     detailsTitle: "Detalls de la font",
     openInPanel: "Obre al panell",
+    openInWindow: "Mou a una finestra",
     content: "Contingut",
     metadata: "Metadades",
     type: {
@@ -609,6 +610,7 @@ export const caES = {
     readingNotebook: "Llegint el quadern…",
     usingTool: "S'està utilitzant una eina…",
     newChat: "Xat nou",
+    popOutWindow: "Obre en una finestra",
     dockBack: "Torna a acoblar",
     passageEmptyTitle: "Pregunta sobre aquest fragment",
     passageEmptyHelper: "Pregunta qualsevol cosa sobre el text destacat.",

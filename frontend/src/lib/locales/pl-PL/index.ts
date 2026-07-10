@@ -354,6 +354,7 @@ export const plPL = {
     details: "Szczegóły",
     detailsTitle: "Szczegóły źródła",
     openInPanel: "Otwórz w panelu",
+    openInWindow: "Przenieś do okna",
     content: "Treść",
     metadata: "Metadane",
     type: {
@@ -609,6 +610,7 @@ export const plPL = {
     readingNotebook: "Odczytywanie notatnika…",
     usingTool: "Używanie narzędzia…",
     newChat: "Nowy czat",
+    popOutWindow: "Otwórz w oknie",
     dockBack: "Zadokuj ponownie",
     passageEmptyTitle: "Zapytaj o ten fragment",
     passageEmptyHelper: "Zapytaj o cokolwiek dotyczącego zaznaczonego tekstu.",
