@@ -1049,6 +1049,10 @@ class SourceAnnotation(ObjectModel):
     anchor_end: Optional[int] = None
     anchor_gen: Optional[int] = None
     quote_hash: Optional[str] = None
+    # Study-memory embedding (migration 28): a highlight becomes searchable
+    # learner memory. Populated by the async `embed_annotation` command, not by
+    # save(); save() only fires the job. See coordinator decision 11.
+    embedding: Optional[List[float]] = None
     created: Optional[datetime] = None
     updated: Optional[datetime] = None
 
@@ -1062,6 +1066,38 @@ class SourceAnnotation(ObjectModel):
             data["source"] = ensure_record_id(data["source"])
         return data
 
+    async def save(self) -> Optional[str]:
+        """Save the annotation and submit an embedding command.
+
+        Overrides ObjectModel.save() to fire an async `embed_annotation`
+        command after saving (mirrors Note.save()) whenever the highlight
+        carries searchable text — a quote, a note, or tags. Re-runs on every
+        save so edits re-embed (coordinator decision 11).
+
+        Returns:
+            Optional[str]: the command_id if an embedding job was submitted,
+            otherwise None.
+        """
+        await super().save()
+
+        has_text = bool(
+            (self.quote and self.quote.strip())
+            or (self.note and self.note.strip())
+            or self.tags
+        )
+        if self.id and has_text:
+            command_id = submit_command(
+                "open_notebook",
+                "embed_annotation",
+                {"annotation_id": str(self.id)},
+            )
+            logger.debug(
+                f"Submitted embed_annotation command {command_id} for {self.id}"
+            )
+            return command_id
+
+        return None
+
     @classmethod
     async def get_for_source(cls, source_id: str) -> List["SourceAnnotation"]:
         """Return all annotations for a source, oldest first."""
@@ -1070,6 +1106,51 @@ class SourceAnnotation(ObjectModel):
             {"source_id": ensure_record_id(source_id)},
         )
         return [cls(**row) for row in results] if results else []
+
+
+class ChatExchange(ObjectModel):
+    """One completed chat turn, mirrored into queryable study memory.
+
+    Written fire-and-forget by the ``mirror_chat_exchange`` command
+    (study-memory Track A) after each chat turn completes. Denormalizes
+    ``scope``/``source``/``notebook`` at write time so recall search needs no
+    joins; the owning session's title is read LIVE in ``fn::recall_search``
+    (titles are renameable — coordinator decision 9). ``gist`` and ``embedding``
+    are filled in by the mirror command, not by ``save()`` — this class only
+    persists the record and coerces its record links.
+    """
+
+    table_name: ClassVar[str] = "chat_exchange"
+    nullable_fields: ClassVar[set[str]] = {"gist", "source", "notebook", "embedding"}
+    session: Optional[str] = None
+    scope: str = "notebook"
+    source: Optional[str] = None
+    notebook: Optional[str] = None
+    question: str = ""
+    gist: Optional[str] = None
+    message_id: str = ""
+    annotation_ids: List[str] = Field(default_factory=list)
+    embedding: Optional[List[float]] = None
+    created: Optional[datetime] = None
+    updated: Optional[datetime] = None
+
+    def _prepare_save_data(self) -> Dict[str, Any]:
+        # session / source / notebook are record<> links in the SCHEMAFULL
+        # chat_exchange table and annotation_ids is array<record<...>>;
+        # model_dump() emits them as plain strings, which SurrealDB rejects.
+        # Coerce to RecordID (mirrors SourceAnnotation._prepare_save_data).
+        data = super()._prepare_save_data()
+        if data.get("session") is not None:
+            data["session"] = ensure_record_id(data["session"])
+        if data.get("source") is not None:
+            data["source"] = ensure_record_id(data["source"])
+        if data.get("notebook") is not None:
+            data["notebook"] = ensure_record_id(data["notebook"])
+        if data.get("annotation_ids"):
+            data["annotation_ids"] = [
+                ensure_record_id(a) for a in data["annotation_ids"]
+            ]
+        return data
 
 
 class Note(ObjectModel):

@@ -1,0 +1,109 @@
+-- Migration 28: study-memory substrate (Track A, chunk A1).
+--
+-- Adds the learner-memory substrate consumed by recall breadcrumbs:
+--   * chat_exchange: one row per completed chat turn, mirrored fire-and-forget
+--     by the mirror_chat_exchange command (A2). Denormalizes scope/source/
+--     notebook at write time; session title is read LIVE via traversal in
+--     fn::recall_search (titles are renameable — coordinator decision 9).
+--   * source_annotation.embedding: highlights become searchable memory.
+--   * fn::recall_search: a SEPARATE search function (coordinator decision 2 /
+--     P-recall-fn) — regular fn::vector_search / Ask are untouched. It returns
+--     the RecallRef contract shape; cap + dedupe happen in Python (Track B).
+--
+-- Comments live on FULL LINES ONLY: the migration runner strips whole-line --
+-- comments but flattens everything else to one line, so an inline -- would
+-- comment out the rest of the statement.
+--
+-- Typed arrays are MANDATORY: a bare `TYPE array` silently stores [] in this
+-- SurrealDB build (bit migrations 22/23). Always array<T> or FLEXIBLE.
+-- SCHEMAFULL: every Pydantic field needs a matching DEFINE FIELD or the value
+-- is dropped on save.
+
+DEFINE TABLE IF NOT EXISTS chat_exchange SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS session        ON TABLE chat_exchange TYPE record<chat_session>;
+DEFINE FIELD IF NOT EXISTS scope          ON TABLE chat_exchange TYPE string ASSERT $value IN ['source', 'notebook'];
+DEFINE FIELD IF NOT EXISTS source         ON TABLE chat_exchange TYPE option<record<source>>;
+DEFINE FIELD IF NOT EXISTS notebook       ON TABLE chat_exchange TYPE option<record<notebook>>;
+DEFINE FIELD IF NOT EXISTS question       ON TABLE chat_exchange TYPE string;
+DEFINE FIELD IF NOT EXISTS gist           ON TABLE chat_exchange TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS message_id     ON TABLE chat_exchange TYPE string;
+DEFINE FIELD IF NOT EXISTS annotation_ids ON TABLE chat_exchange TYPE array<record<source_annotation>> DEFAULT [];
+DEFINE FIELD IF NOT EXISTS embedding      ON TABLE chat_exchange TYPE option<array<float>>;
+DEFINE FIELD IF NOT EXISTS created        ON TABLE chat_exchange TYPE datetime DEFAULT time::now();
+DEFINE FIELD IF NOT EXISTS updated        ON TABLE chat_exchange TYPE datetime DEFAULT time::now();
+
+DEFINE INDEX IF NOT EXISTS chat_exchange_session ON TABLE chat_exchange COLUMNS session;
+
+-- source_annotation gains an embedding so highlights are searchable memory.
+
+DEFINE FIELD IF NOT EXISTS embedding ON TABLE source_annotation TYPE option<array<float>>;
+
+-- fn::recall_search: two dimension-guarded arms (chat_exchange + source_annotation),
+-- unioned, ordered by cosine similarity. Mirrors fn::vector_search's LET/union/
+-- final-SELECT structure (migration 24). Returned keys match the RecallRef
+-- contract; both arms project the IDENTICAL key set in the IDENTICAL order so
+-- array::union yields a uniform row shape.
+
+DEFINE FUNCTION OVERWRITE fn::recall_search($query: array<float>, $match_count: int, $min_similarity: float) {
+    let $exchange_search = (
+        SELECT
+            id,
+            'exchange' AS kind,
+            session.id AS session_id,
+            session.title AS title,
+            scope,
+            source AS source_id,
+            notebook AS notebook_id,
+            message_id,
+            NONE AS annotation_id,
+            NONE AS page,
+            string::slice(question, 0, 200) AS quote,
+            vector::similarity::cosine(embedding, $query) AS similarity
+        FROM chat_exchange
+        WHERE embedding != NONE AND array::len(embedding) = array::len($query) AND vector::similarity::cosine(embedding, $query) >= $min_similarity
+        ORDER BY similarity DESC
+        LIMIT $match_count
+    );
+
+    let $annotation_search = (
+        SELECT
+            id,
+            'annotation' AS kind,
+            NONE AS session_id,
+            source.title AS title,
+            'source' AS scope,
+            source AS source_id,
+            NONE AS notebook_id,
+            NONE AS message_id,
+            id AS annotation_id,
+            page,
+            string::slice(quote ?? '', 0, 200) AS quote,
+            vector::similarity::cosine(embedding, $query) AS similarity
+        FROM source_annotation
+        WHERE embedding != NONE AND array::len(embedding) = array::len($query) AND vector::similarity::cosine(embedding, $query) >= $min_similarity
+        ORDER BY similarity DESC
+        LIMIT $match_count
+    );
+
+    let $all_results = array::union($exchange_search, $annotation_search);
+
+    RETURN (
+        SELECT
+            id,
+            kind,
+            session_id,
+            title,
+            scope,
+            source_id,
+            notebook_id,
+            message_id,
+            annotation_id,
+            page,
+            quote,
+            similarity
+        FROM $all_results
+        WHERE id IS NOT NONE
+        ORDER BY similarity DESC
+        LIMIT $match_count
+    );
+};

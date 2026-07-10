@@ -1,0 +1,9 @@
+-- Migration 28 DOWN: reverse the study-memory substrate (chunk A1).
+-- Removes fn::recall_search, the chat_exchange table (drops its index with it),
+-- and the source_annotation.embedding field. Comments on full lines only.
+
+REMOVE FUNCTION IF EXISTS fn::recall_search;
+
+REMOVE TABLE IF EXISTS chat_exchange;
+
+REMOVE FIELD IF EXISTS embedding ON source_annotation;
