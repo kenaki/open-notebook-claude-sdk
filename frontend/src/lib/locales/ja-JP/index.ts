@@ -353,6 +353,7 @@ export const jaJP = {
     insightsCount: "{count}件のインサイト",
     details: "詳細",
     detailsTitle: "ソース詳細",
+    openInPanel: "パネルで開く",
     content: "コンテンツ",
     metadata: "メタデータ",
     type: {

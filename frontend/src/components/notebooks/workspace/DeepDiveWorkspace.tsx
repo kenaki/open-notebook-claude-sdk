@@ -19,8 +19,9 @@ import { PanelTrack } from './PanelTrack'
 import { PanelCard } from './PanelCard'
 import { PoppedChatPanel } from '@/components/notebooks/chat/PoppedChatPanel'
 import { PassageSelectionMenu } from './PassageSelectionMenu'
+import { SourceReaderPanel } from './SourceReaderPanel'
 import { useNotebookColumnsStore } from '@/lib/stores/notebook-columns-store'
-import { useChatWorkspaceStore } from '@/lib/stores/chat-workspace-store'
+import { useChatWorkspaceStore, SOURCE_PANEL_DEFAULT_WIDTH } from '@/lib/stores/chat-workspace-store'
 import { useNotebookWorkspaceStrict } from './NotebookWorkspaceProvider'
 import { useTranslation } from '@/lib/hooks/use-translation'
 
@@ -61,10 +62,28 @@ export function DeepDiveWorkspace({ activeChatId }: { activeChatId: string }) {
   const closeChat = useChatWorkspaceStore((s) => s.closeChat)
   const setChatWidth = useChatWorkspaceStore((s) => s.setChatWidth)
   const reorderPanels = useChatWorkspaceStore((s) => s.reorderPanels)
+  // Source reader panels (Chunk A1) — opened elsewhere (e.g. SourcesColumn's
+  // "open in panel" button) via the same global store; this component only
+  // renders + resizes + closes them.
+  const sourcePanels = useChatWorkspaceStore((s) => s.sourcePanels)
+  const closeSourcePanel = useChatWorkspaceStore((s) => s.closeSourcePanel)
+  const setSourcePanelWidth = useChatWorkspaceStore((s) => s.setSourcePanelWidth)
+  const sourcePanelFocusToken = useChatWorkspaceStore((s) => s.sourcePanelFocusToken)
+  const clearSourcePanelFocus = useChatWorkspaceStore((s) => s.clearSourcePanelFocus)
 
   // Freshly-spawned side chat that should grab focus / be popped once it lands.
   const [pendingFocusId, setPendingFocusId] = useState<string | null>(null)
   const [pendingPopId, setPendingPopId] = useState<string | null>(null)
+
+  // A source panel opened (or re-focused) elsewhere signals focus via the
+  // store (it isn't reachable from local state, unlike the side-chat spawn
+  // flows below) — mirror it into the same `pendingFocusId` scroll-into-view
+  // mechanism and clear the transient store signal.
+  useEffect(() => {
+    if (!sourcePanelFocusToken) return
+    setPendingFocusId(sourcePanelFocusToken)
+    clearSourcePanelFocus()
+  }, [sourcePanelFocusToken, clearSourcePanelFocus])
 
   // Drive the active Main Chat from the route. If the routed id is a side chat,
   // dock its parent main and pop the side chat (once); otherwise dock the routed
@@ -100,9 +119,13 @@ export function DeepDiveWorkspace({ activeChatId }: { activeChatId: string }) {
     const childChatsOf = (token: string) =>
       panelOrder.filter((c) => poppedIdSet.has(c) && parentOf(c) === token)
 
-    const anchors = panelOrder.filter((tok) =>
-      tok === DOCK ? true : poppedIdSet.has(tok) && !hasPresentParent(tok)
-    )
+    const anchors = panelOrder.filter((tok) => {
+      // The dock and any open source reader panel (Chunk A1) are always-keep
+      // anchors, same as DOCK — a source token is never a chat session so it
+      // never has children/parents to consider.
+      if (tok === DOCK || tok.startsWith('source:')) return true
+      return poppedIdSet.has(tok) && !hasPresentParent(tok)
+    })
     const seq: string[] = []
     const visit = (tok: string) => {
       seq.push(tok)
@@ -211,6 +234,22 @@ export function DeepDiveWorkspace({ activeChatId }: { activeChatId: string }) {
             loading={chatLoading}
             error={dataError}
           />
+        </PanelCard>
+      )
+    }
+    if (token.startsWith('source:')) {
+      const panelState = sourcePanels[token]
+      return (
+        <PanelCard
+          key={token}
+          id={token}
+          width={panelState?.width ?? SOURCE_PANEL_DEFAULT_WIDTH}
+          onWidthChange={(w) => setSourcePanelWidth(token, w)}
+          maximized={fills}
+          onToggleMaximize={() => toggleMaximized(token)}
+          scrollIntoViewOnMount={pendingFocusId === token}
+        >
+          <SourceReaderPanel sourceId={token} onClose={() => closeSourcePanel(token)} />
         </PanelCard>
       )
     }

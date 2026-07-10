@@ -353,6 +353,7 @@ export const ruRU = {
     insightsCount: "Инсайтов: {count}",
     details: "Детали",
     detailsTitle: "Детали источника",
+    openInPanel: "Открыть в панели",
     content: "Содержимое",
     metadata: "Метаданные",
     type: {

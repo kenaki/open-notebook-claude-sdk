@@ -23,7 +23,8 @@ import {
   CheckCircle,
   AlertTriangle,
   Loader2,
-  Unlink
+  Unlink,
+  PanelRight
 } from 'lucide-react'
 import { useSourceStatus } from '@/lib/hooks/use-sources'
 import { useTranslation } from '@/lib/hooks/use-translation'
@@ -43,6 +44,12 @@ interface SourceCardProps {
   showRemoveFromNotebook?: boolean
   contextMode?: ContextMode
   onContextModeChange?: (mode: ContextMode) => void
+  /**
+   * Open this source as a resizable reader panel in the workspace track
+   * (cross-interface-study / Chunk A1). Omitted on non-workspace routes —
+   * the button hides itself when this is undefined.
+   */
+  onOpenInPanel?: () => void
 }
 
 const SOURCE_TYPE_ICONS = {
@@ -120,7 +127,8 @@ function SourceCardImpl({
   className,
   showRemoveFromNotebook = false,
   contextMode,
-  onContextModeChange
+  onContextModeChange,
+  onOpenInPanel
 }: SourceCardProps) {
   const { t } = useTranslation()
   const statusConfigMap = getStatusConfig(t)
@@ -337,6 +345,23 @@ function SourceCardImpl({
                 hasInsights={source.insights_count > 0}
                 onChange={onContextModeChange}
               />
+            )}
+
+            {/* Open in workspace reader panel - only on workspace routes */}
+            {onOpenInPanel && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onOpenInPanel()
+                }}
+                title={t('sources.openInPanel')}
+                aria-label={t('sources.openInPanel')}
+              >
+                <PanelRight className="h-4 w-4" />
+              </Button>
             )}
 
             {/* Actions dropdown */}

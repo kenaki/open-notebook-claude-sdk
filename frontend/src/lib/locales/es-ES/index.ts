@@ -353,6 +353,7 @@ export const esES = {
     insightsCount: "{count} análisis",
     details: "Detalles",
     detailsTitle: "Detalles de la fuente",
+    openInPanel: "Abrir en el panel",
     content: "Contenido",
     metadata: "Metadatos",
     type: {

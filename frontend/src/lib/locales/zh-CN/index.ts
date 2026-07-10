@@ -353,6 +353,7 @@ export const zhCN = {
     insightsCount: "{count} 条见解",
     details: "详情",
     detailsTitle: "来源详情",
+    openInPanel: "在面板中打开",
     content: "内容",
     metadata: "元数据",
     type: {

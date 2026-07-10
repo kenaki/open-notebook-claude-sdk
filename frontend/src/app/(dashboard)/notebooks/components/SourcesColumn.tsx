@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useCallback, useEffect } from 'react'
+import { usePathname } from 'next/navigation'
 import { SourceListResponse } from '@/lib/types/api'
 import { Button } from '@/components/ui/button'
 import {
@@ -21,6 +22,7 @@ import { useModalManager } from '@/lib/hooks/use-modal-manager'
 import { ContextMode } from '../[id]/page'
 import type { SourceBulkAction } from '@/lib/utils/source-context'
 import { useTranslation } from '@/lib/hooks/use-translation'
+import { useChatWorkspaceStore } from '@/lib/stores/chat-workspace-store'
 
 interface SourcesColumnProps {
   sources?: SourceListResponse[]
@@ -62,6 +64,12 @@ export function SourcesColumn({
   const deleteSource = useDeleteSource()
   const retrySource = useRetrySource()
   const removeFromNotebook = useRemoveSourceFromNotebook()
+  const openSourcePanel = useChatWorkspaceStore((s) => s.openSourcePanel)
+
+  // "Open in panel" only makes sense inside the Deep Dive workspace (the panel
+  // track lives there); elsewhere (gallery notebook page) the button hides.
+  const pathname = usePathname()
+  const inWorkspace = /\/notebooks\/[^/]+\/chat\//.test(pathname ?? '')
 
   // Scroll container ref for infinite scroll
   const scrollContainerRef = useRef<HTMLDivElement>(null)
@@ -214,6 +222,7 @@ export function SourcesColumn({
                     ? (mode) => onContextModeChange(source.id, mode)
                     : undefined
                   }
+                  onOpenInPanel={inWorkspace ? () => openSourcePanel(source.id) : undefined}
                 />
               ))}
               {/* Loading indicator for infinite scroll */}

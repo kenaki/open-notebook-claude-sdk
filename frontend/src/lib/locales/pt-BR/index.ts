@@ -353,6 +353,7 @@ export const ptBR = {
     insightsCount: "{count} insights",
     details: "Detalhes",
     detailsTitle: "Detalhes da Fonte",
+    openInPanel: "Abrir no painel",
     content: "Conteúdo",
     metadata: "Metadados",
     type: {

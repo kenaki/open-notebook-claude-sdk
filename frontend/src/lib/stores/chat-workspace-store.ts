@@ -25,6 +25,14 @@ export interface SyncChatSession {
 // Handoff default width for a popped-out chat panel (Chunk 8).
 export const POPPED_CHAT_DEFAULT_WIDTH = 480
 
+// Default width for a source opened as a workspace reader panel
+// (cross-interface-study / Chunk A1).
+export const SOURCE_PANEL_DEFAULT_WIDTH = 720
+
+// Normalize a bare or prefixed source id to its full record id — the panel
+// token. Mirrors SourceDialog's guard; cannot collide with `chat_session:` ids.
+const toSourceToken = (id: string) => (id.includes(':') ? id : `source:${id}`)
+
 // The three fixed (always-present) anchor panels. The display-order algorithm
 // (notebooks/[id]/page.tsx) seeds its anchor list from these; popped chats are
 // appended/removed as they pop/dock. These are opaque layout tokens — they are
@@ -56,6 +64,13 @@ interface ChatWorkspaceState {
   // The main chat currently shown in the dock body (only one at a time — there
   // are no tabs anymore). Null when no main is open (dock shows its empty state).
   activeChatId: string | null
+  // Sources opened as ephemeral reader panels in the track (Chunk A1), keyed by
+  // their full record id ("source:..."). Not persisted — mirrors popped chats'
+  // per-token width pattern rather than widening PanelId in the columns store.
+  sourcePanels: Record<string, { width: number }>
+  // Transient signal: a token that just (re)opened and should scroll into view.
+  // DeepDiveWorkspace mirrors this into its local `pendingFocusId` and clears it.
+  sourcePanelFocusToken: string | null
   // Reconcile the workspace with the live session list: keep existing entries'
   // state, create CLOSED entries for new sessions (sidebar redesign — sessions
   // no longer auto-open), and, when nothing is open, open the most-recent main
@@ -80,6 +95,13 @@ interface ChatWorkspaceState {
   removeChat: (id: string) => void
   setChatWidth: (id: string, width: number) => void
   reorderPanels: (panelOrder: string[]) => void
+  // Open (or re-focus, if already open) a source as a reader panel. Returns the
+  // normalized token. Creating a missing width entry preserves it across a
+  // close (panelOrder removal only) so reopening restores the prior width.
+  openSourcePanel: (sourceId: string) => string
+  closeSourcePanel: (token: string) => void
+  setSourcePanelWidth: (token: string, width: number) => void
+  clearSourcePanelFocus: () => void
 }
 
 export const useChatWorkspaceStore = create<ChatWorkspaceState>()((set) => ({
@@ -87,6 +109,8 @@ export const useChatWorkspaceStore = create<ChatWorkspaceState>()((set) => ({
   order: [],
   panelOrder: [...FIXED_PANEL_IDS],
   activeChatId: null,
+  sourcePanels: {},
+  sourcePanelFocusToken: null,
   syncChats: (sessions) =>
     set((state) => {
       const ids = sessions.map((s) => s.id)
@@ -120,10 +144,13 @@ export const useChatWorkspaceStore = create<ChatWorkspaceState>()((set) => ({
         ...state.order.filter((id) => ids.includes(id)),
         ...ids.filter((id) => !state.order.includes(id)),
       ]
-      // Track anchors = fixed panels + every OPEN popped chat.
+      // Track anchors = fixed panels + every OPEN popped chat + any open source
+      // reader panel (not a chat session, so it's whitelisted by id shape —
+      // without this clause the panel silently disappears on the next refetch).
       let panelOrder = state.panelOrder.filter(
         (id) =>
           FIXED.includes(id) ||
+          id.startsWith('source:') ||
           (ids.includes(id) && chats[id].open && chats[id].docked === false)
       )
       for (const id of ids) {
@@ -257,4 +284,28 @@ export const useChatWorkspaceStore = create<ChatWorkspaceState>()((set) => ({
       return { chats: { ...state.chats, [id]: { ...chat, width } } }
     }),
   reorderPanels: (panelOrder) => set({ panelOrder }),
+  openSourcePanel: (sourceId) => {
+    const token = toSourceToken(sourceId)
+    set((state) => ({
+      sourcePanels: state.sourcePanels[token]
+        ? state.sourcePanels
+        : { ...state.sourcePanels, [token]: { width: SOURCE_PANEL_DEFAULT_WIDTH } },
+      panelOrder: state.panelOrder.includes(token)
+        ? state.panelOrder
+        : [...state.panelOrder, token],
+      // Signal the workspace to scroll this panel into view whether it's fresh
+      // or already open (re-focus, not duplicate).
+      sourcePanelFocusToken: token,
+    }))
+    return token
+  },
+  closeSourcePanel: (token) =>
+    set((state) => ({ panelOrder: state.panelOrder.filter((id) => id !== token) })),
+  setSourcePanelWidth: (token, width) =>
+    set((state) => {
+      const panel = state.sourcePanels[token]
+      if (!panel) return {}
+      return { sourcePanels: { ...state.sourcePanels, [token]: { ...panel, width } } }
+    }),
+  clearSourcePanelFocus: () => set({ sourcePanelFocusToken: null }),
 }))

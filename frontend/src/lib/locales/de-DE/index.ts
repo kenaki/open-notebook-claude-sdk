@@ -356,6 +356,7 @@ export const deDE = {
     insightsCount: "{count} Erkenntnisse",
     details: "Details",
     detailsTitle: "Quellendetails",
+    openInPanel: "Im Panel öffnen",
     content: "Inhalt",
     metadata: "Metadaten",
     type: {

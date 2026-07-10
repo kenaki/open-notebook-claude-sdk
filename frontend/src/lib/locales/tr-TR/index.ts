@@ -353,6 +353,7 @@ export const trTR = {
     insightsCount: "{count} içgörü",
     details: "Ayrıntılar",
     detailsTitle: "Kaynak Ayrıntıları",
+    openInPanel: "Panelde aç",
     content: "İçerik",
     metadata: "Meta Veri",
     type: {

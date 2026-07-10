@@ -353,6 +353,7 @@ export const itIT = {
     insightsCount: "{count} approfondimenti",
     details: "Dettagli",
     detailsTitle: "Dettagli fonte",
+    openInPanel: "Apri nel pannello",
     content: "Contenuto",
     metadata: "Metadati",
     type: {

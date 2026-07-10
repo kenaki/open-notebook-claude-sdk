@@ -353,6 +353,7 @@ export const plPL = {
     insightsCount: "Wglądy: {count}",
     details: "Szczegóły",
     detailsTitle: "Szczegóły źródła",
+    openInPanel: "Otwórz w panelu",
     content: "Treść",
     metadata: "Metadane",
     type: {

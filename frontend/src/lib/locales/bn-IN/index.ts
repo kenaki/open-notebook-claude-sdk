@@ -353,6 +353,7 @@ export const bnIN = {
     insightsCount: "{count}টি অন্তর্দৃষ্টি",
     details: "বিবরণ",
     detailsTitle: "উৎসের বিবরণ",
+    openInPanel: "প্যানেলে খুলুন",
     content: "কন্টেন্ট",
     metadata: "মেটাডেটা",
     type: {

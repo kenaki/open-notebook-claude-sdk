@@ -353,6 +353,7 @@ export const zhTW = {
     insightsCount: "{count} 條見解",
     details: "詳情",
     detailsTitle: "來源詳情",
+    openInPanel: "在面板中開啟",
     content: "內容",
     metadata: "元資料",
     type: {

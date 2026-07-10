@@ -353,6 +353,7 @@ export const frFR = {
     insightsCount: "{count} aperçus",
     details: "Détails",
     detailsTitle: "Détails de la source",
+    openInPanel: "Ouvrir dans le panneau",
     content: "Contenu",
     metadata: "Métadonnées",
     type: {

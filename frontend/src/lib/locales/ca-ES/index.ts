@@ -353,6 +353,7 @@ export const caES = {
     insightsCount: "{count} anàlisis",
     details: "Detalls",
     detailsTitle: "Detalls de la font",
+    openInPanel: "Obre al panell",
     content: "Contingut",
     metadata: "Metadades",
     type: {
