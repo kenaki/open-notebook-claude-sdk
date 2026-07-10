@@ -20,7 +20,7 @@ Design notes:
 
 import asyncio
 import time
-from typing import Optional
+from typing import Optional, Tuple
 
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
@@ -31,8 +31,10 @@ from commands._heavy_lane import heavy_lane, is_heavy_model
 from open_notebook.domain.notebook import ChatSession, Notebook
 from open_notebook.graphs.chat import graph as chat_graph
 from open_notebook.graphs.source_chat import source_chat_graph
+from open_notebook.utils import clean_thinking_content
 from open_notebook.utils.error_classifier import classify_error
 from open_notebook.utils.job_progress import append_job_event
+from open_notebook.utils.text_utils import extract_text_content
 
 
 class ChatCompletionInput(CommandInput):
@@ -95,6 +97,94 @@ def _new_ai_message_id(graph_result) -> Optional[str]:
             if isinstance(mid, str) and mid.startswith("ai-"):
                 return mid
     return None
+
+
+def _last_ai_message_text_and_id(
+    graph_result,
+) -> Tuple[Optional[str], Optional[str]]:
+    """Return ``(content, id)`` of the final AI message this turn produced.
+
+    Unlike ``_new_ai_message_id`` (which only accepts the stable ``ai-``
+    form the notebook chat graph stamps), this accepts whatever id the
+    message actually carries — the source-chat graph does not stamp a
+    stable id and study-memory's mirror hook may not edit graphs
+    (coordinator decision 6), so it must work with either. Returns
+    ``(None, None)`` if the graph result carries no AI message.
+    """
+    if not isinstance(graph_result, dict):
+        return None, None
+    for msg in reversed(graph_result.get("messages") or []):
+        if getattr(msg, "type", None) == "ai":
+            content = extract_text_content(getattr(msg, "content", None))
+            mid = getattr(msg, "id", None)
+            return content, (mid if isinstance(mid, str) else None)
+    return None, None
+
+
+async def _maybe_mirror_chat_exchange(
+    input_data: "ChatCompletionInput", graph_result, full_session_id: str
+) -> None:
+    """Fire-and-forget the ``mirror_chat_exchange`` study-memory job.
+
+    Runs for BOTH notebook and source chats (coordinator decision 6: one
+    mirror command, submitted post-``graph.invoke`` in both branches, no
+    graph edits). Skipped entirely when the turn produced no usable AI
+    content — a mirror failure (or absence) must never affect the chat
+    turn, and failed/empty turns are not worth mirroring. The whole thing
+    is wrapped by the caller in try/except as an extra safety net.
+    """
+    answer, message_id = _last_ai_message_text_and_id(graph_result)
+    if not answer or not answer.strip():
+        logger.debug("mirror_chat_exchange: no AI content produced; skipping")
+        return
+
+    # Defensive: the graph nodes already strip thinking into
+    # additional_kwargs before this point, but guarantee it here too.
+    answer = clean_thinking_content(answer)
+    if not answer.strip():
+        logger.debug("mirror_chat_exchange: content was thinking-only; skipping")
+        return
+
+    scope = "source" if input_data.kind == "source" else "notebook"
+    source_id = (
+        _prefixed(input_data.source_id, "source")
+        if scope == "source" and input_data.source_id
+        else None
+    )
+    notebook_id = (
+        _prefixed(input_data.notebook_id, "notebook")
+        if scope == "notebook" and input_data.notebook_id
+        else None
+    )
+    annotation_ids = (
+        [ref["id"] for ref in input_data.annotation_refs]
+        if scope == "source" and input_data.annotation_refs
+        else []
+    )
+
+    # Ensure the command is registered before submitting (submit_command
+    # validates against the local registry — mirror the illustration
+    # trigger below).
+    import commands.study_memory_commands  # noqa: F401
+
+    command_id = submit_command(
+        "open_notebook",
+        "mirror_chat_exchange",
+        {
+            "session_id": full_session_id,
+            "scope": scope,
+            "source_id": source_id,
+            "notebook_id": notebook_id,
+            "question": input_data.message,
+            "answer": answer,
+            "message_id": message_id or "",
+            "annotation_ids": annotation_ids,
+        },
+    )
+    logger.info(
+        f"mirror_chat_exchange: submitted job {command_id} "
+        f"for session {full_session_id} (scope={scope})"
+    )
 
 
 async def _maybe_trigger_illustration(
@@ -246,6 +336,15 @@ async def chat_completion_command(
 
         # Touch the session's updated timestamp (mirrors the old endpoint).
         await session.save()
+
+        # Study-memory mirror (Track A, Chunk A3): fire-and-forget
+        # mirror_chat_exchange for BOTH notebook and source chats
+        # (coordinator decision 6). Best-effort — any failure is logged and
+        # swallowed so it can never fail the chat turn.
+        try:
+            await _maybe_mirror_chat_exchange(input_data, graph_result, full_session_id)
+        except Exception as e:
+            logger.warning(f"mirror_chat_exchange trigger skipped (swallowed): {e}")
 
         # Auto-illustrate trigger (chat-foundation W1, frozen contract #6 v2):
         # fire-and-forget the enrichment job BEFORE returning. Best-effort — any
