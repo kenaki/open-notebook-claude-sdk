@@ -517,6 +517,7 @@ export const plPL = {
       expandSidebar: "Rozwiń zaznaczenia",
       unsectioned: "Bez sekcji",
       jumpLegacyPdf: "Otwarto plik PDF, aby pokazać to zaznaczenie.",
+      linkedChats: "Powiązane czaty",
     },
     rawContent: {
       open: "Pokaż surową treść",

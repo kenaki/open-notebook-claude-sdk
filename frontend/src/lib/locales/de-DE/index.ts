@@ -520,6 +520,7 @@ export const deDE = {
       expandSidebar: "Markierungen ausklappen",
       unsectioned: "Ohne Abschnitt",
       jumpLegacyPdf: "PDF geöffnet, um diese Markierung anzuzeigen.",
+      linkedChats: "Verknüpfte Chats",
     },
     rawContent: {
       open: "Rohinhalt anzeigen",

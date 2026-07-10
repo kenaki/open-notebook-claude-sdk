@@ -517,6 +517,7 @@ export const jaJP = {
       expandSidebar: "ハイライトを展開",
       unsectioned: "セクションなし",
       jumpLegacyPdf: "このハイライトを表示するためにPDFを開きました。",
+      linkedChats: "リンクされたチャット",
     },
     rawContent: {
       open: "元のテキストを表示",

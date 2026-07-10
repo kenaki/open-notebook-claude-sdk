@@ -517,6 +517,7 @@ export const ruRU = {
       expandSidebar: "Развернуть выделения",
       unsectioned: "Без раздела",
       jumpLegacyPdf: "PDF открыт, чтобы показать это выделение.",
+      linkedChats: "Связанные чаты",
     },
     rawContent: {
       open: "Показать исходный текст",

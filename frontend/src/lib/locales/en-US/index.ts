@@ -517,6 +517,7 @@ export const enUS = {
       expandSidebar: "Expand highlights",
       unsectioned: "Unsectioned",
       jumpLegacyPdf: "Opened the PDF to show this highlight.",
+      linkedChats: "Linked chats",
     },
     rawContent: {
       open: "View raw content",

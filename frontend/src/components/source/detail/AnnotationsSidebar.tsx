@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Layers, PanelRightClose, PanelRightOpen, Sparkles } from 'lucide-react'
+import { Layers, MessageSquare, PanelRightClose, PanelRightOpen, Sparkles } from 'lucide-react'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { cn } from '@/lib/utils'
 import { resolveTagColorKey, tagColorStyle } from '@/lib/utils/tag-colors'
 import { sourcesApi } from '@/lib/api/sources'
+import { useAnnotationCitingCounts } from '@/lib/hooks/use-annotation-citations'
 import {
   GLOBAL_SIDEBAR_KEY,
   useAnnotationsSidebarStore,
@@ -58,9 +59,12 @@ function chapterTitleForPage(topLevel: SourceSectionNode[], page: number): strin
 function AnnotationRow({
   annotation,
   onJumpTo,
+  citingCount = 0,
 }: {
   annotation: Annotation
   onJumpTo: (annotation: Annotation) => void
+  /** Number of chat sessions citing this highlight (Track B4) — badge only. */
+  citingCount?: number
 }) {
   const { t } = useTranslation()
   return (
@@ -97,6 +101,15 @@ function AnnotationRow({
           </span>
         )}
       </span>
+      {citingCount > 0 && (
+        <span
+          title={t('sources.annotations.linkedChats')}
+          className="mt-0.5 flex shrink-0 items-center gap-0.5 text-[10px] text-muted-foreground"
+        >
+          <MessageSquare className="h-3 w-3" aria-hidden="true" />
+          {citingCount}
+        </span>
+      )}
     </button>
   )
 }
@@ -121,6 +134,11 @@ export function AnnotationsSidebar({
     () => [...new Set(annotations.flatMap((a) => a.tags ?? []))],
     [annotations]
   )
+
+  // Bulk citing counts for this source (Track B4) → per-row "linked chats"
+  // badge. One request per source; badge is display-only. Absent → no badge.
+  const { data: citingCountsData } = useAnnotationCitingCounts(sourceId)
+  const citingCounts = citingCountsData?.counts
 
   // Chapter tree — fetched lazily, only while group-by-section is on. Under the
   // ['sources', id, …] tree so a broad source invalidation refreshes it.
@@ -314,13 +332,23 @@ export function AnnotationsSidebar({
                 {title}
               </div>
               {group.map((annotation) => (
-                <AnnotationRow key={annotation.id} annotation={annotation} onJumpTo={onJumpTo} />
+                <AnnotationRow
+                  key={annotation.id}
+                  annotation={annotation}
+                  onJumpTo={onJumpTo}
+                  citingCount={citingCounts?.[annotation.id] ?? 0}
+                />
               ))}
             </div>
           ))
         ) : (
           visible.map((annotation) => (
-            <AnnotationRow key={annotation.id} annotation={annotation} onJumpTo={onJumpTo} />
+            <AnnotationRow
+              key={annotation.id}
+              annotation={annotation}
+              onJumpTo={onJumpTo}
+              citingCount={citingCounts?.[annotation.id] ?? 0}
+            />
           ))
         )}
       </div>

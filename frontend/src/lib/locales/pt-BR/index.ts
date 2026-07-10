@@ -517,6 +517,7 @@ export const ptBR = {
       expandSidebar: "Expandir destaques",
       unsectioned: "Sem seção",
       jumpLegacyPdf: "PDF aberto para mostrar este destaque.",
+      linkedChats: "Chats vinculados",
     },
     rawContent: {
       open: "Ver conteúdo bruto",

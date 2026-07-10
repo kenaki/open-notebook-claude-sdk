@@ -517,6 +517,7 @@ export const caES = {
       expandSidebar: "Desplega els subratllats",
       unsectioned: "Sense secció",
       jumpLegacyPdf: "S'ha obert el PDF per mostrar aquest subratllat.",
+      linkedChats: "Xats enllaçats",
     },
     rawContent: {
       open: "Mostra el contingut en brut",

@@ -517,6 +517,7 @@ export const bnIN = {
       expandSidebar: "হাইলাইট প্যানেল প্রসারিত করুন",
       unsectioned: "বিভাগহীন",
       jumpLegacyPdf: "এই হাইলাইটটি দেখাতে PDF খোলা হয়েছে।",
+      linkedChats: "সংযুক্ত চ্যাট",
     },
     rawContent: {
       open: "কাঁচা বিষয়বস্তু দেখুন",

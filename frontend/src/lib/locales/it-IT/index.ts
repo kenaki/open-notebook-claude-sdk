@@ -517,6 +517,7 @@ export const itIT = {
       expandSidebar: "Espandi evidenziazioni",
       unsectioned: "Senza sezione",
       jumpLegacyPdf: "PDF aperto per mostrare questa evidenziazione.",
+      linkedChats: "Chat collegate",
     },
     rawContent: {
       open: "Visualizza contenuto grezzo",

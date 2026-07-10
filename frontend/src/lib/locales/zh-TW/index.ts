@@ -517,6 +517,7 @@ export const zhTW = {
       expandSidebar: "展開重點",
       unsectioned: "無章節",
       jumpLegacyPdf: "已開啟 PDF 以顯示此標註。",
+      linkedChats: "關聯對話",
     },
     rawContent: {
       open: "檢視原始內容",

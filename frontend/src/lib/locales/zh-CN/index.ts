@@ -517,6 +517,7 @@ export const zhCN = {
       expandSidebar: "展开高亮",
       unsectioned: "无章节",
       jumpLegacyPdf: "已打开 PDF 以显示此高亮。",
+      linkedChats: "关联对话",
     },
     rawContent: {
       open: "查看原始内容",

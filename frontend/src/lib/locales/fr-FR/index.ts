@@ -517,6 +517,7 @@ export const frFR = {
       expandSidebar: "Développer les surlignages",
       unsectioned: "Sans section",
       jumpLegacyPdf: "PDF ouvert pour afficher ce surlignage.",
+      linkedChats: "Discussions liées",
     },
     rawContent: {
       open: "Afficher le contenu brut",

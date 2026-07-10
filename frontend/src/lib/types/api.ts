@@ -397,6 +397,27 @@ export interface AnnotationRef {
   page?: number | null
 }
 
+// A chat session that cites a given annotation, for the reverse "linked chats"
+// view (cross-interface-study Track B4). Mirrors the backend
+// `CitingSessionResponse`. `scope` is a strict union — orphan sessions with no
+// `refers_to` edge are omitted server-side. `notebook_id`/`source_id` are the
+// navigation targets (notebook-scope deep-links to the session; source-scope
+// only navigates to the source, per study-memory's session-level nav depth).
+export interface CitingSession {
+  session_id: string
+  title: string
+  scope: 'notebook' | 'source'
+  notebook_id?: string | null
+  source_id?: string | null
+  updated?: string | null
+}
+
+// Bulk per-annotation citing counts for a source's sidebar badges
+// (cross-interface-study Track B4). Keys are full annotation record ids.
+export interface CitingCountsResponse {
+  counts: Record<string, number>
+}
+
 // One recall breadcrumb carried by an AI chat message (study-memory Track
 // C1/B3). Mirrors the backend `RecallRef` contract (coordinator.md's
 // Reconciliation section) verbatim: a metadata-only pointer to a prior chat

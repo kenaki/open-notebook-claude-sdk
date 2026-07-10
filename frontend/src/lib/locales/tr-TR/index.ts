@@ -517,6 +517,7 @@ export const trTR = {
       expandSidebar: "Vurguları genişlet",
       unsectioned: "Bölümsüz",
       jumpLegacyPdf: "Bu vurguyu göstermek için PDF açıldı.",
+      linkedChats: "Bağlantılı sohbetler",
     },
     rawContent: {
       open: "Ham içeriği görüntüle",

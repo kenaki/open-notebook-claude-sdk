@@ -517,6 +517,7 @@ export const esES = {
       expandSidebar: "Expandir resaltados",
       unsectioned: "Sin sección",
       jumpLegacyPdf: "Se abrió el PDF para mostrar este resaltado.",
+      linkedChats: "Chats vinculados",
     },
     rawContent: {
       open: "Ver contenido sin formato",

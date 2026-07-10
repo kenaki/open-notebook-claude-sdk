@@ -2,13 +2,16 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, Clock, Plus, Sparkles, StickyNote, Tag as TagIcon, Trash2, Unlink, X } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { Check, Clock, FileText, MessageSquare, Notebook, Plus, Sparkles, StickyNote, Tag as TagIcon, Trash2, Unlink, X } from 'lucide-react'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { cn } from '@/lib/utils'
 import { resolveTagColorKey, tagColorStyle } from '@/lib/utils/tag-colors'
 import { useBlock } from '@/lib/hooks/use-source-blocks'
+import { useAnnotationCitations } from '@/lib/hooks/use-annotation-citations'
+import { formatRelative } from '@/lib/utils/format'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import type { AnchorState, Annotation } from '@/lib/types/api'
+import type { AnchorState, Annotation, CitingSession } from '@/lib/types/api'
 
 /**
  * Fixed starter tags offered as one-click quick-adds (hybrid model: freeform
@@ -174,7 +177,8 @@ export function AnnotationHighlightPopover({
   allTags,
   startInNoteMode = false,
 }: AnnotationHighlightPopoverProps) {
-  const { t } = useTranslation()
+  const { t, language } = useTranslation()
+  const router = useRouter()
   const [note, setNote] = useState(annotation.note ?? '')
   const [tagDraft, setTagDraft] = useState('')
 
@@ -185,6 +189,22 @@ export function AnnotationHighlightPopover({
     enabled: !!sourceId && blockSeq != null && anchorState !== 'legacy',
   })
   const sectionPath = block?.section_path?.filter(Boolean) ?? []
+
+  // Reverse "linked chats": which chat sessions cite this highlight. Fetched
+  // while the popover is mounted (mount == open — there's no open prop). Empty
+  // → the section is hidden entirely (no noise while reading).
+  const { data: citingSessions } = useAnnotationCitations(annotation.id, {
+    enabled: !!annotation.id,
+  })
+  const openSession = (session: CitingSession) => {
+    if (session.scope === 'notebook' && session.notebook_id) {
+      router.push(`/notebooks/${session.notebook_id}/chat/${session.session_id}`)
+    } else if (session.source_id) {
+      // Source-scope sessions aren't deep-linkable — session-level nav only.
+      router.push(`/sources/${session.source_id}`)
+    }
+    onClose()
+  }
 
   const addTag = (raw: string) => {
     const value = raw.trim()
@@ -392,6 +412,42 @@ export function AnnotationHighlightPopover({
           {t('common.delete')}
         </button>
       </div>
+
+      {/* Reverse "linked chats": chat sessions that cite this highlight. Each
+          row navigates — notebook-scope deep-links to the session; source-scope
+          only reaches the source (session-level nav). Hidden when none exist. */}
+      {citingSessions && citingSessions.length > 0 && (
+        <div className="space-y-1 border-t border-border pt-2">
+          <div className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+            <MessageSquare className="h-3.5 w-3.5" aria-hidden="true" />
+            {t('sources.annotations.linkedChats')}
+          </div>
+          <div className="space-y-0.5">
+            {citingSessions.map((session) => {
+              const ScopeIcon = session.scope === 'notebook' ? Notebook : FileText
+              return (
+                <button
+                  key={session.session_id}
+                  type="button"
+                  onClick={() => openSession(session)}
+                  className="flex w-full items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-xs transition-colors hover:bg-muted"
+                >
+                  <ScopeIcon
+                    className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+                    aria-hidden="true"
+                  />
+                  <span className="min-w-0 flex-1 truncate">{session.title}</span>
+                  {session.updated && (
+                    <span className="shrink-0 text-[10px] text-muted-foreground">
+                      {formatRelative(session.updated, language)}
+                    </span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
     </div>,
     document.body
   )
