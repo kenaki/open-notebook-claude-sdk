@@ -13,6 +13,10 @@ from .illustrate_commands import illustrate_message_command
 from .podcast_commands import generate_podcast_command
 from .section_commands import backfill_sections_command, build_sections_command
 from .source_commands import process_source_command
+from .study_memory_commands import (
+    embed_annotation_command,
+    mirror_chat_exchange_command,
+)
 from .summary_commands import generate_source_abstract, summarize_section
 from .verify_commands import verify_clean_section, verify_clean_source
 
@@ -35,6 +39,9 @@ __all__ = [
     "generate_source_abstract",
     # Chat illustration enrichment command
     "illustrate_message_command",
+    # Study-memory substrate commands
+    "embed_annotation_command",
+    "mirror_chat_exchange_command",
     # Other commands
     "chat_completion_command",
     "generate_podcast_command",
