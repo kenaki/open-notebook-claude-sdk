@@ -10,7 +10,11 @@ import { Button } from '@/components/ui/button'
 import { useAuth } from '@/lib/hooks/use-auth'
 import { useSidebarStore } from '@/lib/stores/sidebar-store'
 import { useUtilityDrawerStore } from '@/lib/stores/utility-drawer-store'
-import { useNotebookWorkspace } from '@/components/notebooks/workspace'
+// Import the hook from its own module, NOT the workspace barrel: the barrel
+// re-exports DeepDiveWorkspace, which transitively pulls in the PDF viewer
+// (SourceReaderPanel → SourceDetailContent), and this light layout component
+// (and its test) must not drag that heavy CSS graph in.
+import { useNotebookWorkspace } from '@/components/notebooks/workspace/NotebookWorkspaceProvider'
 import { useCreateDialogs } from '@/lib/hooks/use-create-dialogs'
 import {
   Tooltip,
