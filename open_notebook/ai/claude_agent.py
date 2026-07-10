@@ -343,6 +343,49 @@ def _build_usage_kwargs(usage: Optional[dict], model: Optional[str]) -> Optional
     return info or None
 
 
+def _extract_recall_refs(tool_uses: list) -> list:
+    """Scan agent-path ``tool_uses`` for ``search_past_discussions`` results
+    and collect them into deduped/capped RecallRef dicts (study-memory B2).
+
+    MCP tool names are prefixed (e.g.
+    ``mcp__open_notebook__search_past_discussions``), so this matches on a
+    suffix, not an exact name. ``tool_result`` is the stringified MCP text
+    payload (JSON) — parsed defensively; a missing/malformed result is
+    skipped rather than raised, since a bad recall payload must never break
+    the turn. Mirrors the Esperanto tool-loop capture in
+    ``open_notebook.graphs.chat._run_tool_loop``.
+    """
+    collected: list = []
+    for disclosure in tool_uses or []:
+        tool_name = (disclosure or {}).get("tool_name") or ""
+        if not tool_name.endswith("search_past_discussions"):
+            continue
+        if disclosure.get("is_error"):
+            continue
+        raw = disclosure.get("tool_result")
+        if not raw:
+            continue
+        try:
+            parsed = json.loads(raw)
+        except (TypeError, ValueError):
+            logger.warning(
+                f"search_past_discussions tool_result was not valid JSON: {raw!r}"
+            )
+            continue
+        if not isinstance(parsed, dict):
+            continue
+        refs = parsed.get("results")
+        if isinstance(refs, list):
+            collected.extend(r for r in refs if isinstance(r, dict))
+    if not collected:
+        return []
+    # Lazy import keeps this module import-light (recall.py pulls in the
+    # domain/DB layer) — same rationale as the claude_agent_tools import above.
+    from open_notebook.domain.recall import dedupe_and_cap_recall_refs
+
+    return dedupe_and_cap_recall_refs(collected)
+
+
 async def generate_with_claude_agent(
     payload: list,
     thread_id: Optional[str] = None,
@@ -396,6 +439,12 @@ async def generate_with_claude_agent(
         additional_kwargs["usage"] = usage_kwargs
     if thinking_texts:
         additional_kwargs["thinking"] = "\n\n".join(thinking_texts)
+    # Study-memory recall refs (chunk B2): same additional_kwargs seam as the
+    # Esperanto tool-loop capture in graphs/chat.py; only attached when
+    # search_past_discussions actually returned something.
+    recall_refs = _extract_recall_refs(tool_uses)
+    if recall_refs:
+        additional_kwargs["recall_refs"] = recall_refs
     return AIMessage(content=text, additional_kwargs=additional_kwargs)
 
 

@@ -24,6 +24,7 @@ from open_notebook.domain.notebook import (
     SourceSection,
     text_search,
 )
+from open_notebook.domain.recall import get_exchange_content, recall_search
 
 MCP_SERVER_NAME = "open_notebook"
 
@@ -240,6 +241,43 @@ async def get_section(args: dict) -> dict:
     )
 
 
+@tool(
+    "search_past_discussions",
+    "Search the user's PAST chat discussions and highlighted annotations for "
+    "ones related to the current topic (study-memory recall). Returns "
+    "METADATA ONLY — titles, snippets, and similarity scores that point at "
+    "prior study sessions and highlights. These are pointers, NOT their "
+    "content: you may cite them (e.g. \"we touched on this before in ...\") "
+    "but you must NEVER restate, paraphrase, or guess what was concluded "
+    "there from the metadata alone — you do not actually know. If the user "
+    "asks what was said/concluded/highlighted, call get_past_discussion with "
+    "the ref's id from these results to fetch the real content first.",
+    {"query": str, "limit": int},
+)
+async def search_past_discussions(args: dict) -> dict:
+    try:
+        limit = int(args.get("limit") or 5)
+    except (TypeError, ValueError):
+        limit = 5
+    refs = await recall_search(args["query"], limit=limit)
+    return _result({"results": refs, "count": len(refs)})
+
+
+@tool(
+    "get_past_discussion",
+    "Fetch the FULL content of ONE past discussion or highlight, by the "
+    "``id`` of a result from search_past_discussions (e.g. "
+    "\"chat_exchange:abc\" or \"source_annotation:xyz\"). Use this ONLY when "
+    "the user explicitly asks what was discussed, decided, or highlighted "
+    "before — never call it speculatively just because search_past_discussions "
+    "found something related.",
+    {"ref_id": str},
+)
+async def get_past_discussion(args: dict) -> dict:
+    content = await get_exchange_content(args["ref_id"])
+    return _result(content)
+
+
 def build_open_notebook_mcp_server():
     """Build the in-process MCP server exposing the Open Notebook data tools."""
     return create_sdk_mcp_server(
@@ -254,5 +292,7 @@ def build_open_notebook_mcp_server():
             get_section,
             get_note,
             search,
+            search_past_discussions,
+            get_past_discussion,
         ],
     )

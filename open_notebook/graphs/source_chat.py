@@ -19,7 +19,13 @@ from open_notebook.ai.provision import provision_langchain_model
 from open_notebook.config import LANGGRAPH_CHECKPOINT_FILE
 from open_notebook.domain.notebook import Source, SourceInsight
 from open_notebook.exceptions import OpenNotebookError
-from open_notebook.graphs.chat import _stream_model, extract_thinking, format_index_line
+from open_notebook.ai.chat_tools import CHAT_TOOLS
+from open_notebook.graphs.chat import (
+    _run_tool_loop,
+    _stream_model,
+    extract_thinking,
+    format_index_line,
+)
 from open_notebook.utils.context_builder import ContextBuilder
 from open_notebook.utils.error_classifier import classify_error
 from open_notebook.utils.graph_utils import run_async_in_node
@@ -197,6 +203,14 @@ async def _generate_source_chat_message(
     lets both branches emit live tool/thinking events the same way
     ``chat.py`` does; it defaults to ``None`` so callers that don't run as a
     job (or older tests) are unaffected.
+
+    Esperanto branch (study-memory B2): mirrors
+    ``chat.py._generate_ai_message`` — binds ``CHAT_TOOLS`` (search/outline/
+    section + the two recall tools) when the model supports tool calling, then
+    runs ``_run_tool_loop`` so it can navigate a document and capture
+    ``recall_refs`` the same way notebook chat does. Models that don't support
+    ``bind_tools`` fall back to the original bare ``_stream_model`` call,
+    unchanged.
     """
     if await is_claude_agent_selected(model_id):
         thread_id = config.get("configurable", {}).get("thread_id")
@@ -216,7 +230,16 @@ async def _generate_source_chat_message(
     model = await provision_langchain_model(
         str(payload), model_id, "chat", max_tokens=8192, reasoning=True
     )
-    return await _stream_model(model, payload, job_id)
+    try:
+        model_with_tools = model.bind_tools(CHAT_TOOLS)
+    except NotImplementedError:
+        logger.debug(
+            f"Model {model_id!r} does not support tool calling; plain source chat"
+        )
+        return await _stream_model(model, payload, job_id)
+
+    first_response = await _stream_model(model_with_tools, payload, job_id)
+    return await _run_tool_loop(model_with_tools, payload, first_response, job_id)
 
 
 def call_model_with_source_context(
