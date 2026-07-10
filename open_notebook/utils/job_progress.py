@@ -84,3 +84,21 @@ async def report_job_progress(job_id: Optional[str], phase: str, **extra: Any) -
     swallow-errors behavior are unchanged — existing callers keep working.
     """
     await append_job_event(job_id, "phase", phase=phase, label=phase, **extra)
+
+
+async def report_job_warning(
+    job_id: Optional[str], message: str, **extra: Any
+) -> None:
+    """Record a non-fatal problem on the job's event log.
+
+    For work a job deliberately declined to do while still completing: a verify
+    proof rejected as truncated, a section skipped as too large. These used to be
+    written as ``verify_flag`` source insights, which put them in the LLM prompt
+    and in vector search (migration 27). The job's own log is where they belong —
+    the run that produced the problem is the run that explains it.
+
+    ``progress.phase`` is deliberately NOT stamped: a warning is an event in the
+    timeline, not a change of what the job is currently doing, and clobbering the
+    phase would leave the tray showing "rejected" as a live status forever.
+    """
+    await append_job_event(job_id, "warning", message=message, **extra)

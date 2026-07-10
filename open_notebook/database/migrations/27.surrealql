@@ -1,0 +1,24 @@
+-- Migration 27: verify verdict fields on `source_section`.
+-- verify_clean_section used to record its verdict as a `verify_flag`
+-- source_insight. That was the wrong table: Notebook.get_context() injects every
+-- insight into the LLM prompt verbatim and uncapped, so ~114K chars of vision-model
+-- proofreading notes rode into every chat turn on a 472-section textbook, and
+-- create_insight_command embedded each one into vector search. Diagnostics about
+-- how well we read the book are not knowledge about the book.
+-- The verdict now lives on the section it describes: queryable ("which chapters
+-- are still on the raw parse?"), badgeable in the reader, and invisible to the
+-- LLM -- get_outline() selects an explicit column list, so new fields here are
+-- structurally unable to leak back into context.
+-- `option<string>` is mandatory on both: source_section is SCHEMAFULL and every
+-- pre-existing row has neither field, so a non-optional TYPE would make every
+-- later UPDATE of those rows fail schema validation (see migration 26).
+-- verify_status is one of 'clean' | 'rejected' | 'skipped'; NONE means verify
+-- never reached this section.
+-- Comments live on full lines ONLY (the runner strips whole-line -- comments but
+-- flattens everything else to one line).
+
+DEFINE FIELD IF NOT EXISTS verify_status ON TABLE source_section TYPE option<string>;
+
+DEFINE FIELD IF NOT EXISTS verify_reason ON TABLE source_section TYPE option<string>;
+
+UPDATE source_section SET verify_status = 'clean' WHERE verify_status = NONE AND cleaned_content != NONE AND cleaned_content != '';

@@ -100,6 +100,7 @@ async def get_source_parse_status(source_id: str):
             parser_version=source.parser_version or header.parser_version,
             block_count=header.block_count,
             page_count=header.page_count,
+            page_index=header.page_index,
             section_index=header.section_index,
             error=header.error,
         )

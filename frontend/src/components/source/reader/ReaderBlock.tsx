@@ -2,10 +2,14 @@
 
 import { useMemo } from 'react'
 import katex from 'katex'
+// `lib/common` (~40 languages) instead of the full bundle — it's the same entry
+// lowlight/rehype-highlight already pulls in for the chat renderer.
+import hljs from 'highlight.js/lib/common'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import type { Annotation, Block } from '@/lib/types/api'
+import { CodeBlockShell } from '../chat/MarkdownCodeBlock'
 import { annotationsForBlock, segmentText } from './reader-highlight-utils'
 
 /**
@@ -200,7 +204,7 @@ function EquationBlock({ block, hl }: { block: Block; hl?: ReaderHighlightContex
 
   if (!rendered.ok) {
     return (
-      <pre data-seq={block.seq} {...handlers} style={style} className="overflow-x-auto rounded-md border border-border bg-muted/40 p-3 font-mono text-xs">
+      <pre data-seq={block.seq} {...handlers} style={style} className="overflow-x-auto rounded-md border border-border bg-muted/40 p-3 font-mono text-[0.85em]">
         {latex}
       </pre>
     )
@@ -213,6 +217,57 @@ function EquationBlock({ block, hl }: { block: Block; hl?: ReaderHighlightContex
       className="overflow-x-auto py-1"
       dangerouslySetInnerHTML={{ __html: rendered.html as string }}
     />
+  )
+}
+
+/** Below this hljs relevance score the source is more likely prose or pseudo-code
+ * than a real language, and mis-tokenized colors read worse than none. Measured
+ * against short snippets: a one-line SQL query scores 3, prose 1, pseudo-code 2. */
+const HLJS_MIN_RELEVANCE = 3
+
+/**
+ * A `code` block: syntax-highlighted, in the same chrome (copy button over a
+ * dark surface) the chat renderer uses for fenced blocks.
+ *
+ * Docling's `CodeItem` leaves `code_language` unset unless its optional code
+ * enrichment model ran, so the language has to be auto-detected. Detection is
+ * reliable enough to TOKENIZE with (the keyword/string/comment families overlap
+ * across similar languages) but not to NAME — hljs routinely calls Python "ruby"
+ * and C "csharp" on short snippets — so the bar shows the neutral "code" rather
+ * than the guess (and rather than the shell's "text" fallback, which would be
+ * wrong on a block docling already classified as code).
+ *
+ * When an anchored annotation covers the block we render the plain highlightable
+ * text instead: `<mark>` segmentation works on character offsets into
+ * `block.text`, which the tokenized `<span>` tree no longer exposes. The user's
+ * own highlights win over syntax colors.
+ */
+function CodeBlock({ block, hl }: { block: Block; hl?: ReaderHighlightContext }) {
+  const text = block.text ?? ''
+  const annotated = hl ? annotationsForBlock(block.seq, hl.annotations).length > 0 : false
+
+  const highlighted = useMemo(() => {
+    if (!text || annotated) return null
+    try {
+      const result = hljs.highlightAuto(text)
+      return result.relevance >= HLJS_MIN_RELEVANCE ? result.value : null
+    } catch {
+      return null
+    }
+  }, [text, annotated])
+
+  return (
+    <div data-seq={block.seq} className="not-prose">
+      <CodeBlockShell language="code" copyText={text}>
+        {highlighted ? (
+          <code className="hljs" dangerouslySetInnerHTML={{ __html: highlighted }} />
+        ) : (
+          <code>
+            <HighlightableText text={text} seq={block.seq} hl={hl} />
+          </code>
+        )}
+      </CodeBlockShell>
+    </div>
   )
 }
 
@@ -271,12 +326,12 @@ function FigureBlock({ block, caption, hl }: { block: Block; caption?: Block; hl
           className="max-w-full rounded border border-border"
         />
       ) : (
-        <div className="rounded border border-dashed border-border bg-muted/30 px-3 py-6 text-center text-xs text-muted-foreground">
+        <div className="rounded border border-dashed border-border bg-muted/30 px-3 py-6 text-center text-[0.85em] text-muted-foreground">
           {t('sources.reader.figureMissing')}
         </div>
       )}
       {caption && (
-        <figcaption data-seq={caption.seq} className="mt-1 text-xs italic text-muted-foreground">
+        <figcaption data-seq={caption.seq} className="mt-1 text-[0.85em] italic text-muted-foreground">
           {caption.text}
         </figcaption>
       )}
@@ -289,27 +344,21 @@ function BlockByType({ block, hl }: { block: Block; hl?: ReaderHighlightContext 
     case 'heading':
       return <HeadingBlock block={block} hl={hl} />
     case 'code':
-      return (
-        <pre data-seq={block.seq} className="overflow-x-auto rounded-md border border-border bg-muted/40 p-3">
-          <code className="font-mono text-xs">
-            <HighlightableText text={block.text ?? ''} seq={block.seq} hl={hl} />
-          </code>
-        </pre>
-      )
+      return <CodeBlock block={block} hl={hl} />
     case 'table':
       return <TableBlock block={block} hl={hl} />
     case 'equation':
       return <EquationBlock block={block} hl={hl} />
     case 'footnote':
       return (
-        <p data-seq={block.seq} className="text-xs text-muted-foreground">
+        <p data-seq={block.seq} className="text-[0.85em] text-muted-foreground">
           <HighlightableText text={block.text ?? ''} seq={block.seq} hl={hl} />
         </p>
       )
     case 'caption':
       // Only reached for an orphan caption (no matching figure in this span).
       return (
-        <p data-seq={block.seq} className="text-xs italic text-muted-foreground">
+        <p data-seq={block.seq} className="text-[0.85em] italic text-muted-foreground">
           <HighlightableText text={block.text ?? ''} seq={block.seq} hl={hl} />
         </p>
       )

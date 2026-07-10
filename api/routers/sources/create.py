@@ -78,6 +78,40 @@ def parse_source_form_data(
     return source_data, file
 
 
+# SurrealDB reports optimistic-concurrency failures as plain text on a generic
+# exception, so the conflict has to be matched on the message.
+_TX_CONFLICT_MARKERS = (
+    "read or write conflict",
+    "failed transaction",
+    "this transaction can be retried",
+)
+
+
+def _is_tx_conflict(exc: BaseException) -> bool:
+    """True when ``exc`` is a retriable SurrealDB transaction conflict."""
+    return any(marker in str(exc).lower() for marker in _TX_CONFLICT_MARKERS)
+
+
+async def _link_command_to_source(
+    source: Source, command_id: str, attempts: int = 5
+) -> None:
+    """Point ``source.command`` at ``command_id``, retrying transaction conflicts.
+
+    Two concurrent submits for the same source — a double-clicked Retry — both
+    write this row and one loses the optimistic-concurrency check. The write is
+    idempotent, so a bounded backoff is all the loser needs.
+    """
+    for attempt in range(attempts):
+        try:
+            source.command = ensure_record_id(command_id)
+            await source.save()
+            return
+        except Exception as e:
+            if not _is_tx_conflict(e) or attempt == attempts - 1:
+                raise
+            await asyncio.sleep(0.05 * (2**attempt))
+
+
 async def _submit_source_command(
     source: Source,
     content_state: dict,
@@ -100,8 +134,24 @@ async def _submit_source_command(
         "process_source",
         command_input.model_dump(),
     )
-    source.command = ensure_record_id(command_id)
-    await source.save()
+
+    # The row is live the moment it is submitted — the worker's LIVE query
+    # dispatches it regardless of what happens next here. So a failure to link it
+    # back must cancel it, or the caller is told "failed to queue" while a full
+    # re-parse runs anyway, detached from source.command.
+    try:
+        await _link_command_to_source(source, command_id)
+    except Exception:
+        logger.error(
+            f"Failed to link command {command_id} to source {source.id}; "
+            f"canceling the orphaned job"
+        )
+        try:
+            await CommandService.cancel_command_job(command_id)
+        except Exception as cancel_exc:
+            logger.error(f"Could not cancel orphaned command {command_id}: {cancel_exc}")
+        raise
+
     return command_id
 
 
@@ -331,16 +381,33 @@ async def retry_source_processing(source_id: str):
         if not source:
             raise HTTPException(status_code=404, detail="Source not found")
 
+        # Authoritative duplicate guard: any non-terminal process_source row for
+        # this source, not just the one source.command happens to point at. Two
+        # rapid Retry clicks otherwise queue two full re-parses of the same PDF,
+        # and build_sections is delete-then-rebuild, so they race each other's
+        # blocks. Checked before the status probe because it cannot throw.
+        if await command_in_flight(source_id, "process_source"):
+            raise HTTPException(
+                status_code=409,
+                detail="Source is already processing. Cannot retry while processing is active.",
+            )
+
         if source.command:
             try:
                 status = await source.get_status()
+            except Exception as e:
+                # A status probe failure must not block a retry — that is the one
+                # case where a stuck source most needs one.
+                logger.warning(f"Failed to check current status for source {source_id}: {e}")
+            else:
+                # Raised outside the try: an HTTPException in it would be caught
+                # by the `except Exception` above and downgraded to a warning,
+                # letting the duplicate submit through.
                 if status in ["running", "queued"]:
                     raise HTTPException(
-                        status_code=400,
+                        status_code=409,
                         detail="Source is already processing. Cannot retry while processing is active.",
                     )
-            except Exception as e:
-                logger.warning(f"Failed to check current status for source {source_id}: {e}")
 
         references = await repo_query(
             "SELECT VALUE out FROM reference WHERE in = $source_id",

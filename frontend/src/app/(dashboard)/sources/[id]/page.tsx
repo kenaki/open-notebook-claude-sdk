@@ -4,7 +4,7 @@ import { useRouter, useParams } from 'next/navigation'
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
-import { ArrowLeft, MessageSquare } from 'lucide-react'
+import { ArrowLeft, MessageSquare, Quote, X } from 'lucide-react'
 import { useSourceChat } from '@/lib/hooks/useSourceChat'
 import { ChatPanel } from '@/components/source/chat'
 import { useNavigation } from '@/lib/hooks/use-navigation'
@@ -62,11 +62,62 @@ export default function SourceDetailPage() {
     })
   }, [])
 
+  // "Ask AI" stages a prompt into the composer rather than sending it, so the
+  // user can edit it first and choose to send it into a fresh chat. `askRefs`
+  // are the structured annotation ids that ride along with the staged draft;
+  // they attach to whatever the user finally sends, and only clear on a
+  // successful send (a failed one restores the draft, so the refs must survive).
+  const [draft, setDraft] = useState('')
+  const [askRefs, setAskRefs] = useState<string[] | null>(null)
+  const [focusSignal, setFocusSignal] = useState(0)
+
+  const stageAsk = useCallback((text: string, annotationIds: string[]) => {
+    setChatOpen(true)
+    setDraft(text)
+    setAskRefs(annotationIds)
+    setFocusSignal((n) => n + 1)
+  }, [])
+
   const handleBack = useCallback(() => {
     const returnPath = navigation.getReturnPath()
     router.push(returnPath)
     navigation.clearReturnTo()
   }, [navigation, router])
+
+  // Shown above the composer while an Ask-AI prompt is staged: what's attached,
+  // an escape hatch, and the option to route this question into a new chat.
+  const composerHeader = askRefs ? (
+    <div className="flex items-center gap-1.5 rounded-md border border-border bg-muted/40 px-2 py-1.5">
+      <Quote className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" aria-hidden="true" />
+      <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+        {askRefs.length > 0
+          ? t('chat.askDraft.attached').replace('{count}', String(askRefs.length))
+          : t('chat.askDraft.attachedQuote')}
+      </span>
+      {chat.pendingNewSession ? (
+        <span className="flex-shrink-0 text-xs font-medium text-primary">
+          {t('chat.askDraft.newChatReady')}
+        </span>
+      ) : (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 flex-shrink-0 px-2 text-xs"
+          onClick={chat.startNewSession}
+        >
+          {t('chat.askDraft.newChat')}
+        </Button>
+      )}
+      <button
+        type="button"
+        onClick={() => setAskRefs(null)}
+        aria-label={t('chat.askDraft.dismiss')}
+        className="flex-shrink-0 rounded p-0.5 text-muted-foreground hover:bg-background"
+      >
+        <X className="h-3 w-3" aria-hidden="true" />
+      </button>
+    </div>
+  ) : undefined
 
   const chatLabel = t('chat.chatWith').replace('{name}', t('navigation.sources'))
 
@@ -104,30 +155,24 @@ export default function SourceDetailPage() {
           showChatButton={false}
           onClose={handleBack}
           onChatAboutHighlight={(quote, annotationId) => {
-            setChatOpen(true)
             // D8: an existing highlight → structured annotation ref + short text;
             // a fresh un-saved selection (no id) → quote-paste fallback.
             if (annotationId) {
-              chat.sendMessage(t('chat.askAboutHighlight'), undefined, {
-                annotationIds: [annotationId],
-              })
+              stageAsk(t('chat.askAboutHighlight'), [annotationId])
             } else {
-              chat.sendMessage(`Tell me about this highlighted passage: "${quote}"`)
+              stageAsk(`Tell me about this highlighted passage: "${quote}"`, [])
             }
           }}
           onChatAboutHighlights={(quotes, tag, annotationIds) => {
-            setChatOpen(true)
             const ids = annotationIds ?? []
             if (ids.length > 0) {
               const capped = ids.slice(0, MAX_TAG_ANNOTATION_IDS)
               if (ids.length > MAX_TAG_ANNOTATION_IDS) {
                 toast.info(t('chat.tagAskTruncated').replace('{tag}', tag))
               }
-              chat.sendMessage(t('chat.askAboutTag').replace('{tag}', tag), undefined, {
-                annotationIds: capped,
-              })
+              stageAsk(t('chat.askAboutTag').replace('{tag}', tag), capped)
             } else {
-              chat.sendMessage(composeTagPrompt(tag, quotes))
+              stageAsk(composeTagPrompt(tag, quotes), [])
             }
           }}
         />
@@ -153,7 +198,24 @@ export default function SourceDetailPage() {
           // can find this session's in-flight job.
           chatScopeId={chat.currentSessionId ?? undefined}
           contextIndicators={chat.contextIndicators}
-          onSendMessage={(message, model) => chat.sendMessage(message, model)}
+          draft={draft}
+          onDraftChange={setDraft}
+          focusSignal={focusSignal}
+          composerHeader={composerHeader}
+          // Attach any staged annotation refs to whatever the user actually
+          // sends — they may have edited the prompt first. Cleared only on
+          // success; ChatPanel restores the draft on failure, so the refs must
+          // still be there for the retry.
+          onSendMessage={async (message, model) => {
+            const ids = askRefs
+            const outcome = await chat.sendMessage(
+              message,
+              model,
+              ids?.length ? { annotationIds: ids } : undefined
+            )
+            if (outcome.ok) setAskRefs(null)
+            return outcome
+          }}
           modelOverride={chat.currentSession?.model_override}
           onModelChange={(model) => {
             if (chat.currentSessionId) {

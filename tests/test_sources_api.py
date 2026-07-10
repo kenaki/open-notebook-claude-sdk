@@ -143,12 +143,14 @@ class TestRetrySourceProcessing:
     edge's in/out columns, not a non-existent `source` column (#861)."""
 
     @pytest.mark.asyncio
+    @patch("api.routers.sources.create.command_in_flight", new_callable=AsyncMock)
     @patch("api.routers.sources.create.CommandService.submit_command_job", new_callable=AsyncMock)
     @patch("api.routers.sources.create.repo_query", new_callable=AsyncMock)
     @patch("api.routers.sources.create.Source.get", new_callable=AsyncMock)
     async def test_retry_finds_notebooks_and_requeues(
-        self, mock_get, mock_repo_query, mock_submit, client
+        self, mock_get, mock_repo_query, mock_submit, mock_in_flight, client
     ):
+        mock_in_flight.return_value = False
         source = MagicMock()
         source.id = "source:1"
         source.command = None
@@ -180,11 +182,13 @@ class TestRetrySourceProcessing:
         assert str(source.command).startswith("command:")
 
     @pytest.mark.asyncio
+    @patch("api.routers.sources.create.command_in_flight", new_callable=AsyncMock)
     @patch("api.routers.sources.create.repo_query", new_callable=AsyncMock)
     @patch("api.routers.sources.create.Source.get", new_callable=AsyncMock)
     async def test_retry_400_only_when_truly_unlinked(
-        self, mock_get, mock_repo_query, client
+        self, mock_get, mock_repo_query, mock_in_flight, client
     ):
+        mock_in_flight.return_value = False
         source = MagicMock()
         source.id = "source:1"
         source.command = None
@@ -195,6 +199,126 @@ class TestRetrySourceProcessing:
 
         assert response.status_code == 400
         assert "not associated with any notebooks" in response.json()["detail"]
+
+    @pytest.mark.asyncio
+    @patch("api.routers.sources.create.CommandService.submit_command_job", new_callable=AsyncMock)
+    @patch("api.routers.sources.create.command_in_flight", new_callable=AsyncMock)
+    @patch("api.routers.sources.create.Source.get", new_callable=AsyncMock)
+    async def test_retry_rejects_duplicate_while_process_source_in_flight(
+        self, mock_get, mock_in_flight, mock_submit, client
+    ):
+        """A second Retry click must not queue a second full re-parse.
+
+        build_sections is delete-then-rebuild, so two concurrent process_source
+        runs race each other's blocks.
+        """
+        source = MagicMock()
+        source.id = "source:1"
+        source.command = None
+        mock_get.return_value = source
+        mock_in_flight.return_value = True  # a process_source row is already live
+
+        response = client.post("/api/sources/source:1/retry")
+
+        assert response.status_code == 409
+        assert "already processing" in response.json()["detail"]
+        mock_submit.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @patch("api.routers.sources.create.command_in_flight", new_callable=AsyncMock)
+    @patch("api.routers.sources.create.Source.get", new_callable=AsyncMock)
+    async def test_retry_survives_a_failing_status_probe(
+        self, mock_get, mock_in_flight, client
+    ):
+        """A throwing get_status() must not be downgraded into a silent pass.
+
+        It previously sat inside a bare `except Exception` alongside the
+        already-processing HTTPException, so the guard could never fire.
+        """
+        source = MagicMock()
+        source.id = "source:1"
+        source.command = "command:old"
+        source.get_status = AsyncMock(side_effect=RuntimeError("db down"))
+        mock_get.return_value = source
+        mock_in_flight.return_value = False
+
+        with patch("api.routers.sources.create.repo_query", new_callable=AsyncMock) as q:
+            q.return_value = []  # no notebooks -> 400, proving we got past the probe
+            response = client.post("/api/sources/source:1/retry")
+
+        assert response.status_code == 400
+        assert "not associated with any notebooks" in response.json()["detail"]
+
+    @pytest.mark.asyncio
+    @patch("api.routers.sources.create.command_in_flight", new_callable=AsyncMock)
+    @patch("api.routers.sources.create.Source.get", new_callable=AsyncMock)
+    async def test_retry_rejects_when_status_probe_reports_running(
+        self, mock_get, mock_in_flight, client
+    ):
+        source = MagicMock()
+        source.id = "source:1"
+        source.command = "command:old"
+        source.get_status = AsyncMock(return_value="running")
+        mock_get.return_value = source
+        mock_in_flight.return_value = False  # force the probe to be the guard
+
+        response = client.post("/api/sources/source:1/retry")
+
+        assert response.status_code == 409
+        assert "already processing" in response.json()["detail"]
+
+
+class TestSubmitSourceCommandLinkBack:
+    """A submitted command row is live immediately; the link-back must not leak it."""
+
+    @pytest.mark.asyncio
+    async def test_tx_conflict_on_link_is_retried(self):
+        from api.routers.sources.create import _submit_source_command
+
+        source = MagicMock()
+        source.id = "source:1"
+        # First save loses the optimistic-concurrency check, second wins.
+        source.save = AsyncMock(
+            side_effect=[
+                Exception("Failed to commit transaction due to a read or write conflict"),
+                None,
+            ]
+        )
+
+        with patch(
+            "api.routers.sources.create.CommandService.submit_command_job",
+            new_callable=AsyncMock,
+        ) as submit:
+            submit.return_value = "command:123"
+            command_id = await _submit_source_command(source, {}, ["notebook:1"], [], True)
+
+        assert command_id == "command:123"
+        assert source.save.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_unrecoverable_link_failure_cancels_the_queued_job(self):
+        """Otherwise the caller sees 'failed to queue' while the job runs anyway."""
+        from api.routers.sources.create import _submit_source_command
+
+        source = MagicMock()
+        source.id = "source:1"
+        source.save = AsyncMock(side_effect=ValueError("schema exploded"))
+
+        with (
+            patch(
+                "api.routers.sources.create.CommandService.submit_command_job",
+                new_callable=AsyncMock,
+            ) as submit,
+            patch(
+                "api.routers.sources.create.CommandService.cancel_command_job",
+                new_callable=AsyncMock,
+            ) as cancel,
+        ):
+            submit.return_value = "command:123"
+            with pytest.raises(ValueError):
+                await _submit_source_command(source, {}, ["notebook:1"], [], True)
+
+        cancel.assert_awaited_once_with("command:123")
 
 
 class TestGetSourceNotFound:

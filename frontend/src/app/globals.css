@@ -288,6 +288,52 @@
   border-radius: var(--radius);
 }
 
+/* --- Reader typography ----------------------------------------------------- */
+/* User-tunable text sizing for the block reader (ReaderTypographyMenu). The
+   container's `font-size`/`line-height` are set inline, which beats the root
+   sizing of `prose-sm` without depending on stylesheet order.
+
+   Headings need their own ramp. Tailwind Typography sizes them in `em`, so they
+   would only ever scale *with* the body text — but the point of the control is
+   to size headings independently. So we replace that ramp with the one below
+   and multiply it by `--reader-heading-scale`: `em` keeps each heading relative
+   to the chosen body size, and the scale then moves headings on top of that.
+
+   The class is doubled to reach specificity (0,2,1). The reader container also
+   carries `.chat-markdown`, whose `h1..h4` (in rem, so unscalable) and `p`/`li`
+   line-heights are (0,1,1) — a single `.reader-typography h1` ties with those
+   and loses on source order. Doubling wins outright, and unlike ordering it
+   can't be silently broken by moving this block. */
+.reader-typography {
+  --reader-heading-scale: 1;
+}
+.reader-typography.reader-typography h1 {
+  font-size: calc(2em * var(--reader-heading-scale));
+}
+.reader-typography.reader-typography h2 {
+  font-size: calc(1.6em * var(--reader-heading-scale));
+}
+.reader-typography.reader-typography h3 {
+  font-size: calc(1.35em * var(--reader-heading-scale));
+}
+.reader-typography.reader-typography h4 {
+  font-size: calc(1.15em * var(--reader-heading-scale));
+}
+.reader-typography.reader-typography h5 {
+  font-size: calc(1.05em * var(--reader-heading-scale));
+}
+.reader-typography.reader-typography h6 {
+  font-size: calc(1em * var(--reader-heading-scale));
+}
+.reader-typography.reader-typography :is(h1, h2, h3, h4, h5, h6) {
+  line-height: 1.25;
+}
+/* Body elements inherit the container's chosen line-height instead of the fixed
+   ones `.chat-markdown` and `prose` pin on them. */
+.reader-typography.reader-typography :is(p, li, blockquote) {
+  line-height: inherit;
+}
+
 /* Right side-chat (popped panel): looser, more readable body text so long
    deep-context passages are easier on the eyes. Scoped to .sidechat-body so the
    main chat is unaffected; beats the prose utilities via the descendant rule. */

@@ -87,6 +87,17 @@ interface PDFViewerProps {
    * reference pill can scroll the PDF to a highlight while the PDF tab is active.
    */
   jumpApiRef?: React.MutableRefObject<((annotation: Annotation) => void) | null>
+  /**
+   * Reports the current page (1-based) as the user scrolls, so the Reader tab
+   * can open at it. The viewer echoes `initialPage` here on mount rather than
+   * page 1, so a restored page survives.
+   */
+  onPageChange?: (page: number) => void
+  /**
+   * Page-sync bridge: filled with a `(page) => jumpToPage(...)` fn so the
+   * parent can move the PDF to the page the Reader tab was left on.
+   */
+  pageJumpApiRef?: React.MutableRefObject<((page: number) => void) | null>
 }
 
 // memo: the parent's tab-switch state changes must not re-render the viewer —
@@ -99,6 +110,8 @@ export const PDFViewer = memo(function PDFViewer({
   onChatAboutHighlight,
   onChatAboutHighlights,
   jumpApiRef,
+  onPageChange,
+  pageJumpApiRef,
 }: PDFViewerProps) {
   const { t } = useTranslation()
   const layoutPlugin = defaultLayoutPlugin()
@@ -292,6 +305,20 @@ export const PDFViewer = memo(function PDFViewer({
     }
   })
 
+  // Page sync. `jumpToPage` is reachable through the layout plugin's toolbar,
+  // so keeping the two tabs on the same page needs no extra plugin (and no
+  // direct dependency on @react-pdf-viewer/page-navigation, which ships only as
+  // a transitive dep of default-layout). `layoutPlugin` is recreated every
+  // render, so refill the ref each render — as the jump bridge above does.
+  const { jumpToPage } = layoutPlugin.toolbarPluginInstance.pageNavigationPluginInstance
+  useEffect(() => {
+    if (!pageJumpApiRef) return
+    pageJumpApiRef.current = (page: number) => jumpToPage(Math.max(0, page - 1))
+    return () => {
+      if (pageJumpApiRef) pageJumpApiRef.current = null
+    }
+  })
+
   // The blob lives in the TanStack cache under a root key deliberately OUTSIDE
   // the ['sources'] tree: source mutations broadly invalidate ['sources'], and
   // that must never re-download a multi-MB file. The uploaded asset is
@@ -339,6 +366,7 @@ export const PDFViewer = memo(function PDFViewer({
             fileUrl={pdfUrl}
             plugins={[layoutPlugin, highlightPluginInstance]}
             initialPage={initialPage}
+            onPageChange={(e) => onPageChange?.(e.currentPage + 1)}
           />
         </div>
       </Worker>

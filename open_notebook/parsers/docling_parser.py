@@ -14,9 +14,13 @@ Converter config (db-design §5, B1 spec):
   Nemotron OCR is the deferred fix.)
 - ``do_table_structure=True`` — table cell grid → ``table_data``.
 - ``do_formula_enrichment=True`` — formula items expose LaTeX in ``.text``.
+- ``generate_parsed_pages=True`` — retains each page's text cells so code blocks
+  can be re-lineated (see ``_rebuild_code_lines``). Measured at ~0 extra peak
+  RSS: the cells are dwarfed by the enrichment models already resident.
 
-The config participates in ``parser_version`` (``docling-<ver>+tables+formula``)
-so a config change bumps the version and triggers a re-parse generation.
+The config participates in ``parser_version``
+(``docling-<ver>+tables+formula+codelines``) so a config change bumps the version
+and triggers a re-parse generation.
 
 Callers run :func:`~open_notebook.parsers.base.finalize` on the result to fill
 contiguous ``seq``, ``subtree_end``, ``section_path``, ``page_index`` and
@@ -50,11 +54,11 @@ def _docling_version() -> str:
 
 
 def parser_version() -> str:
-    """``docling-<libver>+tables+formula`` — the config-derived version string.
+    """``docling-<libver>+tables+formula+codelines`` — the config-derived version.
 
     Any change to the enrichment config here MUST change this string so a
     re-parse produces a new generation (db-design §4/§5)."""
-    return f"{PARSER_NAME}-{_docling_version()}+tables+formula"
+    return f"{PARSER_NAME}-{_docling_version()}+tables+formula+codelines"
 
 
 def _normalized_bbox(prov: Any, page_w: float, page_h: float) -> Optional[BBox]:
@@ -98,6 +102,98 @@ def _normalized_bbox(prov: Any, page_w: float, page_h: float) -> Optional[BBox]:
         return None
 
 
+# Two text cells belong to the same visual line when their vertical centres are
+# within this many points. Body text here is ~9pt on ~12pt leading, so 3pt
+# separates "same line" from "next line" with margin on both sides.
+_LINE_Y_TOL = 3.0
+
+# Fallback advance width (points per character) when a block has no fragment long
+# enough to measure one from. Only reached on degenerate single-glyph blocks.
+_FALLBACK_CHAR_W = 6.0
+
+
+def _cells_in_bbox(page: Any, bbox: Any, page_h: float) -> List[tuple]:
+    """The page's text cells whose centre falls inside ``bbox``.
+
+    ``bbox`` is a Docling BOTTOMLEFT-origin box (item provenance); the cells are
+    TOPLEFT — hence the flip. Returns ``(cy, x0, x1, text)`` tuples.
+    """
+    parsed = getattr(page, "parsed_page", None)
+    if parsed is None:
+        return []
+    top = page_h - bbox.t
+    bottom = page_h - bbox.b
+    out: List[tuple] = []
+    for cell in getattr(parsed, "textline_cells", None) or []:
+        rect = cell.rect
+        cx = (rect.r_x0 + rect.r_x1) / 2
+        cy = (rect.r_y0 + rect.r_y2) / 2
+        if bbox.l - 1 <= cx <= bbox.r + 1 and top - 1 <= cy <= bottom + 1:
+            out.append((cy, rect.r_x0, rect.r_x1, cell.text))
+    return out
+
+
+def _rebuild_code_lines(page: Any, bbox: Any, page_h: float) -> Optional[str]:
+    """Recover a code block's line breaks and indentation from PDF text geometry.
+
+    Docling flattens a ``CodeItem`` into a single space-joined line — the layout
+    model reads a code region as one text blob — which makes every code block in
+    the reader render as one unreadable line. Its ``do_code_enrichment`` option
+    does restore the newlines, but by re-transcribing an image crop with a VLM:
+    on our own pages that pulled in neighbouring prose and duplicated a caption.
+    Since block text feeds ``full_text``, embeddings and annotation offsets, a
+    lossy transcription is the wrong trade.
+
+    Code is set monospace, so the original layout is recoverable exactly and
+    deterministically: group the page's text cells into visual lines by their y
+    centre, then convert x gaps into spaces using the measured advance width.
+
+    Returns ``None`` when the result isn't a faithful re-flow of Docling's own
+    text (same characters, different whitespace) — the caller then keeps
+    Docling's flat text rather than risk corrupting the block.
+    """
+    cells = _cells_in_bbox(page, bbox, page_h)
+    if not cells:
+        return None
+
+    cells.sort(key=lambda c: (c[0], c[1]))
+    lines: List[List[tuple]] = [[cells[0]]]
+    for cell in cells[1:]:
+        if abs(cell[0] - lines[-1][0][0]) <= _LINE_Y_TOL:
+            lines[-1].append(cell)
+        else:
+            lines.append([cell])
+
+    # Median advance width over fragments long enough to measure reliably.
+    widths = sorted(
+        (x1 - x0) / len(text)
+        for _cy, x0, x1, text in cells
+        if text.strip() and len(text) > 3
+    )
+    char_w = widths[len(widths) // 2] if widths else _FALLBACK_CHAR_W
+    if char_w <= 0:
+        return None
+    left = min(c[1] for c in cells)
+
+    rendered: List[str] = []
+    for line in lines:
+        line.sort(key=lambda c: c[1])
+        buf = " " * max(0, round((line[0][1] - left) / char_w))
+        prev_x1: Optional[float] = None
+        for _cy, x0, x1, text in line:
+            if prev_x1 is not None:
+                buf += " " * max(0, round((x0 - prev_x1) / char_w))
+            buf += text
+            prev_x1 = x1
+        rendered.append(buf.rstrip())
+    return "\n".join(rendered)
+
+
+def _reflows_to(rebuilt: str, original: Optional[str]) -> bool:
+    """True when ``rebuilt`` is ``original`` with only whitespace rearranged."""
+    return "".join(rebuilt.split()) == "".join((original or "").split())
+
+
 class DoclingBlockParser:
     """Turns a born-digital PDF into a typed :class:`ParseResult` via Docling."""
 
@@ -116,6 +212,10 @@ class DoclingBlockParser:
         opts.do_ocr = False
         opts.do_table_structure = True
         opts.do_formula_enrichment = True
+        # Retains per-page text cells for `_rebuild_code_lines`. Deliberately NOT
+        # `do_code_enrichment`: that fixes the same symptom with a VLM re-read of
+        # the crop, which mis-transcribes (see `_rebuild_code_lines` docstring).
+        opts.generate_parsed_pages = True
         return DocumentConverter(
             format_options={
                 InputFormat.PDF: PdfFormatOption(pipeline_options=opts)
@@ -161,6 +261,37 @@ class DoclingBlockParser:
             except Exception:
                 return None
 
+    @staticmethod
+    def _code_text(
+        item: Any,
+        prov: Any,
+        backend_pages: Dict[int, Any],
+        page_h: float,
+        fallback: Optional[str],
+    ) -> Optional[str]:
+        """Docling's flat code text, re-lineated from page geometry where possible.
+
+        Any failure — missing backend page, no cells, or a rebuild that isn't a
+        faithful re-flow — keeps ``fallback`` (Docling's own text). A code block
+        rendered on one line is a cosmetic problem; a corrupted one is not.
+        """
+        if prov is None or not fallback:
+            return fallback
+        page = backend_pages.get(int(getattr(prov, "page_no", 0) or 0))
+        if page is None or page_h <= 0:
+            return fallback
+        try:
+            rebuilt = _rebuild_code_lines(page, prov.bbox, page_h)
+        except Exception as exc:  # pragma: no cover - defensive, geometry edge
+            logger.warning(f"code line rebuild failed: {exc}")
+            return fallback
+        if not rebuilt or not _reflows_to(rebuilt, fallback):
+            logger.debug(
+                f"code line rebuild rejected on page {getattr(prov, 'page_no', '?')}"
+            )
+            return fallback
+        return rebuilt
+
     # -- main ------------------------------------------------------------- #
     def parse(self, pdf_path: Path) -> ParseResult:
         # Lazy imports keep Docling out of the import graph until a PDF arrives
@@ -180,6 +311,12 @@ class DoclingBlockParser:
         converter = self._build_converter()
         result = converter.convert(str(pdf_path))
         doc = result.document
+
+        # Backend pages carry the text cells `_rebuild_code_lines` needs; they're
+        # keyed by the same 1-based page_no as item provenance.
+        backend_pages: Dict[int, Any] = {
+            int(page.page_no): page for page in (getattr(result, "pages", None) or [])
+        }
 
         page_sizes = self._page_sizes(doc)
         page_count = len(page_sizes) or getattr(doc, "num_pages", lambda: 0)()
@@ -236,6 +373,7 @@ class DoclingBlockParser:
             elif isinstance(item, CodeItem):
                 btype = BlockType.code
                 text = getattr(item, "text", None)
+                text = self._code_text(item, prov, backend_pages, page_h, text)
             elif isinstance(item, SectionHeaderItem):
                 btype = BlockType.heading
                 text = getattr(item, "text", None)

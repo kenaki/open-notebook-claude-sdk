@@ -52,7 +52,7 @@ const POLL_INTERVAL_IDLE = 10_000
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /** Map a server command `name` + its `args` to our client-side `JobKind`. */
-function deriveKind(name: string, args: Record<string, unknown> | null | undefined): JobKind {
+export function deriveKind(name: string, args: Record<string, unknown> | null | undefined): JobKind {
   switch (name) {
     case 'chat_completion':
       return (args?.kind as string) === 'source' ? 'source_chat' : 'notebook_chat'
@@ -86,7 +86,7 @@ function deriveKind(name: string, args: Record<string, unknown> | null | undefin
 }
 
 /** Cast the server status string to our JobStatus union (defaulting to 'new'). */
-function coerceStatus(raw: string | undefined): JobStatus {
+export function coerceStatus(raw: string | undefined): JobStatus {
   if (raw === 'running' || raw === 'completed' || raw === 'failed' || raw === 'canceled') return raw
   return 'new'
 }

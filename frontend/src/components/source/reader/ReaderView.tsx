@@ -14,6 +14,7 @@ import {
   useDeleteAnnotation,
 } from '@/lib/hooks/use-source-annotations'
 import { sourcesApi } from '@/lib/api/sources'
+import { buildPageSpans, firstSeqFromPage, nextChunkWindow, pageForSeq } from '@/lib/utils/page-index'
 import type { Annotation, Block } from '@/lib/types/api'
 import { AnnotationHighlightPopover, DEFAULT_HIGHLIGHT_COLOR } from '@/components/source/detail/AnnotationHighlightPopover'
 import {
@@ -24,6 +25,9 @@ import {
   ReaderHighlightContext,
 } from './ReaderBlock'
 import { ReaderOutline } from './ReaderOutline'
+import { ReaderPageNav } from './ReaderPageNav'
+import { ReaderTypographyMenu } from './ReaderTypographyMenu'
+import { useReaderTypography } from '@/lib/hooks/use-reader-typography'
 import { ReaderSelectionToolbar } from './ReaderSelectionToolbar'
 
 /** Nearest ancestor element carrying a `data-seq` (D6's DOM contract), or null. */
@@ -96,6 +100,9 @@ export function ReaderView({
   onChatAboutHighlight,
   onReprocess,
   jumpApiRef,
+  initialPage,
+  onPageChange,
+  pageJumpApiRef,
 }: {
   sourceId: string
   /**
@@ -118,8 +125,21 @@ export function ReaderView({
    * tab.
    */
   jumpApiRef?: React.MutableRefObject<((seq: number) => void) | null>
+  /**
+   * The page to open at (1-based) — the last page the user read in this source,
+   * in either tab. Applied once, before the first scroll report.
+   */
+  initialPage?: number | null
+  /** Reports the scrolled page (1-based) so the PDF tab can open at it. */
+  onPageChange?: (page: number) => void
+  /**
+   * Page-sync bridge: filled with `handleJumpToPage` so the parent can move the
+   * reader to the page the PDF tab was left on.
+   */
+  pageJumpApiRef?: React.MutableRefObject<((page: number) => void) | null>
 }) {
   const { t } = useTranslation()
+  const { typography, setSetting, reset: resetTypography } = useReaderTypography()
   const parseStatus = useParseStatus(sourceId)
   const gen = parseStatus.data?.gen
   const pageCount = parseStatus.data?.page_count ?? 0
@@ -128,6 +148,16 @@ export function ReaderView({
     [parseStatus.data?.section_index]
   )
   const totalChunks = Math.max(1, Math.ceil((pageCount || SPAN_SIZE) / SPAN_SIZE))
+
+  // Compacted `page -> [seq_lo, seq_hi]` spans from the parse header. Resolves
+  // seq -> page (outline page numbers, jump targets) and page -> seq
+  // (jump-to-page) with no extra fetch. Empty for a source parsed before
+  // `page_index` was served, which degrades each consumer to its old behavior.
+  const pageSpans = useMemo(
+    () => buildPageSpans(parseStatus.data?.page_index),
+    [parseStatus.data?.page_index]
+  )
+  const pageOfSeq = useCallback((seq: number) => pageForSeq(pageSpans, seq), [pageSpans])
 
   // Which ~10-page chunks (by index) are currently loaded. Resets to the
   // first chunk whenever the generation changes (a re-parse invalidates
@@ -280,6 +310,8 @@ export function ReaderView({
   const topSentinelRef = useRef<HTMLDivElement>(null)
   const bottomSentinelRef = useRef<HTMLDivElement>(null)
   const [pendingScrollSeq, setPendingScrollSeq] = useState<number | null>(null)
+  // The page the reader is scrolled to, mirrored into the page-nav field.
+  const [currentPage, setCurrentPage] = useState<number | null>(null)
 
   // Top/bottom scroll sentinels grow the loaded chunk window.
   useEffect(() => {
@@ -313,8 +345,20 @@ export function ReaderView({
     return () => observer.disconnect()
   }, [totalChunks, gen])
 
-  // Outline jump: scroll if the target is already rendered; otherwise resolve
-  // its page via a point-get, load that chunk, and scroll once it lands.
+  /**
+   * Ensure the ~10-page chunk containing `page` is in the loaded window,
+   * keeping that window contiguous — see `nextChunkWindow`. A jump far from
+   * what's loaded relocates the window rather than appending a disjoint chunk.
+   */
+  const loadChunkForPage = useCallback((page: number) => {
+    const chunkIndex = Math.floor((page - 1) / SPAN_SIZE)
+    setLoadedChunks((prev) => nextChunkWindow(prev, chunkIndex))
+  }, [])
+
+  // Outline / chat-pill jump: scroll if the target is already rendered; else
+  // resolve its page, load that chunk, and scroll once it lands. `page_index`
+  // usually answers the page locally; the point-get is the fallback for a
+  // source parsed before it was served.
   const handleJump = useCallback(
     async (seq: number) => {
       const existing = containerRef.current?.querySelector(`[data-seq="${seq}"]`)
@@ -322,18 +366,38 @@ export function ReaderView({
         existing.scrollIntoView({ behavior: 'smooth', block: 'start' })
         return
       }
-      try {
-        const block = await sourcesApi.getBlock(sourceId, seq)
-        if (typeof block.page === 'number') {
-          const chunkIndex = Math.floor((block.page - 1) / SPAN_SIZE)
-          setLoadedChunks((prev) => (prev.includes(chunkIndex) ? prev : [...prev, chunkIndex]))
+      let page = pageOfSeq(seq)
+      if (page == null) {
+        try {
+          const block = await sourcesApi.getBlock(sourceId, seq)
+          page = typeof block.page === 'number' ? block.page : null
+        } catch {
+          // Nothing resolvable — fall through and hope the seq is in a
+          // neighbouring chunk the sentinels will load.
         }
-      } catch {
-        // Nothing resolvable — no-op.
+      }
+      if (page != null) loadChunkForPage(page)
+      setPendingScrollSeq(seq)
+    },
+    [sourceId, pageOfSeq, loadChunkForPage]
+  )
+
+  // Jump-to-page: the page's first block seq, or the next non-empty page's when
+  // the requested page holds no blocks (a full-bleed image page, say).
+  const handleJumpToPage = useCallback(
+    (page: number) => {
+      const seq = firstSeqFromPage(pageSpans, page)
+      if (seq == null) return
+      setCurrentPage(page)
+      loadChunkForPage(page)
+      const existing = containerRef.current?.querySelector(`[data-seq="${seq}"]`)
+      if (existing) {
+        existing.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        return
       }
       setPendingScrollSeq(seq)
     },
-    [sourceId]
+    [pageSpans, loadChunkForPage]
   )
 
   useEffect(() => {
@@ -344,6 +408,46 @@ export function ReaderView({
       setPendingScrollSeq(null)
     }
   }, [pendingScrollSeq, blocks])
+
+  // Reflect the scroll position back into the page-nav field: the last page
+  // marker at or above the container's top edge. Markers only exist for loaded
+  // spans, which is exactly the range the user can be scrolled within.
+  const syncCurrentPage = useCallback(() => {
+    const root = containerRef.current
+    if (!root) return
+    const markers = root.querySelectorAll<HTMLElement>('[data-page]')
+    if (!markers.length) return
+    const threshold = root.getBoundingClientRect().top + 8
+    let page: number | null = null
+    for (const marker of markers) {
+      if (marker.getBoundingClientRect().top > threshold) break
+      const value = Number(marker.dataset.page)
+      if (Number.isFinite(value)) page = value
+    }
+    // Scrolled above the first marker — we're still on its page.
+    if (page == null) {
+      const first = Number(markers[0].dataset.page)
+      page = Number.isFinite(first) ? first : null
+    }
+    setCurrentPage((prev) => (prev === page ? prev : page))
+  }, [])
+
+  const scrollRaf = useRef<number | null>(null)
+  const handleScroll = useCallback(() => {
+    if (scrollRaf.current != null) return
+    scrollRaf.current = requestAnimationFrame(() => {
+      scrollRaf.current = null
+      syncCurrentPage()
+    })
+  }, [syncCurrentPage])
+
+  useEffect(() => {
+    syncCurrentPage()
+    return () => {
+      if (scrollRaf.current != null) cancelAnimationFrame(scrollRaf.current)
+      scrollRaf.current = null
+    }
+  }, [blocks, syncCurrentPage])
 
   // D8: hand `handleJump` to the parent so a chat pill can scroll the reader to
   // a block while the Reader tab is active.
@@ -356,6 +460,38 @@ export function ReaderView({
       if (jumpApiRef) jumpApiRef.current = null
     }
   }, [jumpApiRef, handleJump])
+
+  // Open at the last page the user read. Runs before any page is reported back
+  // out, so the restore can't be overwritten by the initial scroll position.
+  // A source parsed before `page_index` was served has no spans to resolve the
+  // page against — it opens at the top, as it did before.
+  const pageRestoredRef = useRef(false)
+  useEffect(() => {
+    if (pageRestoredRef.current || !parseStatus.data) return
+    pageRestoredRef.current = true
+    if (initialPage != null && initialPage > 1 && pageSpans.length) {
+      handleJumpToPage(initialPage)
+    }
+  }, [parseStatus.data, initialPage, pageSpans, handleJumpToPage])
+
+  // Report the scrolled page up, so switching to the PDF tab lands on it.
+  // Chunk 0 always loads first, so a jump to a later page transiently reports
+  // page 1 as those blocks render; `pendingScrollSeq` marks a jump that hasn't
+  // landed yet, and we stay quiet until it does.
+  useEffect(() => {
+    if (!pageRestoredRef.current || currentPage == null) return
+    if (pendingScrollSeq != null) return
+    onPageChange?.(currentPage)
+  }, [currentPage, pendingScrollSeq, onPageChange])
+
+  // Page-sync bridge: the parent moves the reader to the PDF tab's page.
+  useEffect(() => {
+    if (!pageJumpApiRef) return
+    pageJumpApiRef.current = handleJumpToPage
+    return () => {
+      if (pageJumpApiRef) pageJumpApiRef.current = null
+    }
+  }, [pageJumpApiRef, handleJumpToPage])
 
   // D8 stale-highlight CTA: highlights anchored to an older parse generation
   // (§2.3) don't render inline; surface a count + a re-process action so the
@@ -393,7 +529,24 @@ export function ReaderView({
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col">
       <div className="mb-2 flex flex-shrink-0 items-center gap-2">
-        <ReaderOutline sections={sectionIndex} onJump={handleJump} />
+        <ReaderOutline
+          sections={sectionIndex}
+          onJump={handleJump}
+          pageOfSeq={pageOfSeq}
+          currentPage={currentPage}
+        />
+        {pageSpans.length > 0 && (
+          <ReaderPageNav
+            currentPage={currentPage}
+            pageCount={pageCount}
+            onJumpToPage={handleJumpToPage}
+          />
+        )}
+        <ReaderTypographyMenu
+          typography={typography}
+          onChange={setSetting}
+          onReset={resetTypography}
+        />
         {staleCount > 0 && onReprocess && (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -411,7 +564,11 @@ export function ReaderView({
           </Tooltip>
         )}
       </div>
-      <div ref={containerRef} className="min-h-0 flex-1 overflow-y-auto pr-1">
+      <div
+        ref={containerRef}
+        onScroll={handleScroll}
+        className="min-h-0 flex-1 overflow-y-auto pr-1"
+      >
         <div ref={topSentinelRef} className="h-1" />
         {topLoading && (
           <div className="flex justify-center py-2">
@@ -421,7 +578,16 @@ export function ReaderView({
         <div
           ref={contentRef}
           onMouseUp={handleMouseUp}
-          className="chat-markdown prose prose-sm prose-neutral dark:prose-invert max-w-none break-words"
+          // Inline font-size/line-height beat prose-sm's root sizing without
+          // relying on stylesheet order; the heading ramp reads the CSS var.
+          style={
+            {
+              fontSize: `${typography.fontSize}px`,
+              lineHeight: typography.lineHeight,
+              '--reader-heading-scale': typography.headingScale,
+            } as React.CSSProperties
+          }
+          className="chat-markdown reader-typography prose prose-sm prose-neutral dark:prose-invert max-w-none break-words"
         >
           {renderItems.length === 0 && (
             <p className="text-sm text-muted-foreground">{t('sources.reader.empty')}</p>
@@ -435,6 +601,7 @@ export function ReaderView({
                 {showPageMarker && (
                   <div
                     aria-hidden="true"
+                    data-page={page}
                     className="not-prose my-3 flex items-center gap-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
                   >
                     <span className="rounded-full border border-border px-1.5 py-0.5">

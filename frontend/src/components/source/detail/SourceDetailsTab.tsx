@@ -16,6 +16,7 @@ import { formatRelative } from '@/lib/utils/format'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { SourceDetailResponse } from '@/lib/types/api'
 import { NotebookAssociations } from './NotebookAssociations'
+import { SourceRawContentDialog } from './SourceRawContentDialog'
 
 interface SourceDetailsTabProps {
   source: SourceDetailResponse
@@ -50,7 +51,10 @@ export function SourceDetailsTab({
     <>
       <Card>
         <CardHeader>
-          <CardTitle>{t('sources.details')}</CardTitle>
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle>{t('sources.details')}</CardTitle>
+            <SourceRawContentDialog sourceId={sourceId} />
+          </div>
         </CardHeader>
         <CardContent className="space-y-6">
           {/* Embedding Alert */}

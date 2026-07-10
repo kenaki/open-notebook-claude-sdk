@@ -7,6 +7,32 @@ from open_notebook.exceptions import ConfigurationError
 from open_notebook.utils import token_count
 
 
+def apply_reasoning_flag(
+    langchain_model: BaseChatModel, reasoning: bool
+) -> BaseChatModel:
+    """Set the provider's reasoning/think switch when the model supports it.
+
+    Currently only ``langchain_ollama.ChatOllama`` exposes a ``reasoning``
+    field (duck-checked via ``model_fields`` so ChatOllama is never imported
+    here and other providers pass through untouched). ``False`` sends
+    ``think: false`` to Ollama, disabling the reasoning prelude entirely —
+    batch transformation jobs need this because a thinking model can spend its
+    ENTIRE ``max_tokens`` budget reasoning and return empty content (observed
+    live on vision verify: ``eval_count == max_tokens``, ``done_reason:
+    'length'``, empty reply, 3.5 GPU-minutes wasted per job).
+    """
+    model_fields = getattr(type(langchain_model), "model_fields", {})
+    if "reasoning" in model_fields:
+        try:
+            return langchain_model.model_copy(update={"reasoning": reasoning})
+        except Exception as e:
+            logger.warning(
+                f"Could not set reasoning={reasoning} on "
+                f"{type(langchain_model).__name__}: {e}"
+            )
+    return langchain_model
+
+
 async def provision_langchain_model(
     content, model_id, default_type, *, reasoning: bool = False, **kwargs
 ) -> BaseChatModel:
@@ -69,15 +95,6 @@ async def provision_langchain_model(
     langchain_model = model.to_langchain()
 
     if reasoning:
-        model_fields = getattr(type(langchain_model), "model_fields", {})
-        if "reasoning" in model_fields:
-            try:
-                langchain_model = langchain_model.model_copy(
-                    update={"reasoning": True}
-                )
-            except Exception as e:
-                logger.warning(
-                    f"Could not enable reasoning on {type(langchain_model).__name__}: {e}"
-                )
+        langchain_model = apply_reasoning_flag(langchain_model, True)
 
     return langchain_model

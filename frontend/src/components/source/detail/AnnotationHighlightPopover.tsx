@@ -339,12 +339,15 @@ export function AnnotationHighlightPopover({
 
       {noteMode ? (
         <div className="space-y-1">
+          {/* Roomy enough for a real note, and draggable taller from the corner
+              — `resize-y` only, so it can't outgrow the popover's width. */}
           <textarea
             ref={noteRef}
             value={note}
             onChange={(e) => setNote(e.target.value)}
             placeholder={t('sources.annotations.notePlaceholder')}
-            className="h-16 w-full resize-none rounded-sm border border-border bg-background p-1.5 text-xs"
+            rows={6}
+            className="min-h-32 w-full resize-y rounded-sm border border-border bg-background p-2 text-sm leading-relaxed"
           />
           {noteChanged && (
             <button

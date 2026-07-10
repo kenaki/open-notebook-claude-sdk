@@ -110,8 +110,13 @@ class CommandService:
     ) -> List[Dict[str, Any]]:
         """List command jobs with optional filtering.
 
-        status_filter="active" expands to status IN ['new','running'].
+        status_filter="active" expands to status IN ['new','running']; any other
+        value matches a single status exactly ("failed", "completed", …).
         command_filter filters by command name (exact match).
+
+        Rows written before migration 26 have no `created`, so ordering
+        coalesces it to the epoch: timestamped rows come back newest-first and
+        the undated legacy rows sort last instead of scrambling the whole list.
         """
         from open_notebook.database.repository import repo_query
 
@@ -134,9 +139,10 @@ class CommandService:
         safe_limit = max(1, min(int(limit), 1000))
 
         query = (
-            "SELECT id, app, name, args, status, result, error_message, created, updated, progress "
+            "SELECT id, app, name, args, status, result, error_message, created, updated, progress, "
+            "(created ?? d\"1970-01-01T00:00:00Z\") AS sort_ts "
             f"FROM command {where_clause} "
-            f"ORDER BY created DESC LIMIT {safe_limit}"
+            f"ORDER BY sort_ts DESC LIMIT {safe_limit}"
         )
 
         try:
@@ -169,6 +175,30 @@ class CommandService:
         except Exception as e:
             logger.error(f"Failed to list command jobs: {e}")
             raise
+
+    @staticmethod
+    async def count_command_jobs() -> Dict[str, int]:
+        """Per-status row counts across the whole command table.
+
+        The activity board's list endpoint is capped (LIMIT), so `len(rows)`
+        saturates at the cap and reads as frozen while jobs churn underneath.
+        This returns the real totals: one entry per status plus an `all` sum.
+        Legacy rows spell cancellation both ways ('canceled'/'cancelled');
+        they're folded into 'canceled'.
+        """
+        from open_notebook.database.repository import repo_query
+
+        rows = await repo_query(
+            "SELECT status, count() AS n FROM command GROUP BY status"
+        )
+        counts: Dict[str, int] = {}
+        for row in rows:
+            status = str(row.get("status") or "unknown")
+            if status == "cancelled":
+                status = "canceled"
+            counts[status] = counts.get(status, 0) + int(row.get("n") or 0)
+        counts["all"] = sum(counts.values())
+        return counts
 
     @staticmethod
     async def cancel_command_job(job_id: str) -> bool:

@@ -58,6 +58,12 @@ function findSectionById(nodes: SourceSectionNode[], id: string): SourceSectionN
 
 interface SourceContentTabProps {
   source: SourceDetailResponse
+  /**
+   * Card heading. Defaults to "Content". The Reader tab renders this component
+   * for sources with no block substrate (URLs, transcripts, unparsed PDFs), and
+   * passes its own label so the card doesn't contradict the tab.
+   */
+  title?: string
 }
 
 // memo: with keep-alive tabs this stays mounted while the user switches tabs;
@@ -65,6 +71,7 @@ interface SourceContentTabProps {
 // active chapter. `source` is a stable state object from useSourceDetail.
 export const SourceContentTab = memo(function SourceContentTab({
   source,
+  title,
 }: SourceContentTabProps) {
   const { t } = useTranslation()
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null)
@@ -157,7 +164,7 @@ export const SourceContentTab = memo(function SourceContentTab({
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           {isYouTubeUrl && <Youtube className="h-5 w-5" />}
-          {t('sources.content')}
+          {title ?? t('sources.content')}
         </CardTitle>
         {source.asset?.url && !isYouTubeUrl && (
           <CardDescription className="flex items-center gap-2">

@@ -187,6 +187,9 @@ export interface ParseStatusResponse {
   parser_version?: string
   block_count?: number
   page_count?: number
+  // `page -> [first_seq, last_seq]`, indexed by `page - 1` (empty pages hold the
+  // inverted range [0, -1]). See `lib/utils/page-index.ts` for the lookups.
+  page_index?: number[][]
   section_index?: SectionIndexEntry[]
   error?: string
 }
@@ -594,6 +597,13 @@ export interface CommandJobSummary {
   progress?: { phase?: string; tool_name?: string; tool_input?: Record<string, unknown> } | null
 }
 
+// Per-status job totals from GET /commands/jobs/counts — real table-wide
+// counts (the list endpoint is capped, so row lengths saturate at the cap).
+// Keys are backend statuses ('new' | 'running' | 'completed' | 'failed' |
+// 'canceled') plus an 'all' sum; open-ended so a new backend status can't
+// break the client.
+export type JobCounts = Record<string, number>
+
 // Agent console (agent-console B1): one entry of `progress.events[]` — mirrors
 // the backend event contract exactly (see .claude/plans/agent-console/
 // coordinator.md "Event contract"). JSON primitives only; append-only, capped
@@ -604,6 +614,10 @@ export type JobEvent = { t: string } & (
   | { type: 'tool_result'; tool_name: string; preview?: string; is_error?: boolean }
   | { type: 'thinking'; text: string }
   | { type: 'context'; chars?: number; preview?: string }
+  // Non-fatal: work the job declined to do while still completing (a verify
+  // proof rejected as truncated, a section skipped as too large). The job's
+  // status stays `completed`, so this event is the only signal in the console.
+  | { type: 'warning'; message: string }
 )
 
 // Detail payload from GET /commands/jobs/{job_id} (agent-console B1). The

@@ -20,6 +20,12 @@ export function useSourceChat(sourceId: string) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
+  // The user asked for a fresh chat but hasn't sent the first message yet. No
+  // session row exists yet — `sendMessage`'s auto-create makes one, titled from
+  // that message. This flag only exists to hold `currentSessionId` at null: the
+  // auto-select effect below would otherwise snap straight back to the most
+  // recent session on the very next render.
+  const [pendingNewSession, setPendingNewSession] = useState(false)
   // Per-session in-flight flag for the brief submit round-trip (before the job
   // is registered in the store). After registration, isStreaming derives from
   // useJobsStore — no stale local state.
@@ -58,14 +64,15 @@ export function useSourceChat(sourceId: string) {
        ))
     : false
 
-  // Auto-select most recent session when sessions are loaded
+  // Auto-select most recent session when sessions are loaded, unless the user
+  // deliberately asked for a new one (then null means "new", not "none yet").
   useEffect(() => {
-    if (sessions.length > 0 && !currentSessionId) {
+    if (sessions.length > 0 && !currentSessionId && !pendingNewSession) {
       // Find most recent session (sessions are sorted by created date desc from API)
       const mostRecentSession = sessions[0]
       setCurrentSessionId(mostRecentSession.id)
     }
-  }, [sessions, currentSessionId])
+  }, [sessions, currentSessionId, pendingNewSession])
 
   // Patch a single session's cached message list (optimistic updates + placeholder).
   const patchSourceSessionMessages = useCallback(
@@ -88,6 +95,7 @@ export function useSourceChat(sourceId: string) {
     onSuccess: (newSession) => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.sourceChatSessions(sourceId) })
       setCurrentSessionId(newSession.id)
+      setPendingNewSession(false)
       toast.success(t('chat.sessionCreated'))
     },
     onError: (err: unknown) => {
@@ -147,6 +155,7 @@ export function useSourceChat(sourceId: string) {
         const newSession = await sourceChatApi.createSession(sourceId, { title: defaultTitle })
         sessionId = newSession.id
         setCurrentSessionId(sessionId)
+        setPendingNewSession(false)
         queryClient.invalidateQueries({ queryKey: QUERY_KEYS.sourceChatSessions(sourceId) })
       } catch (err: unknown) {
         toastApiError(err, t, 'apiErrors.failedToCreateSession')
@@ -214,7 +223,19 @@ export function useSourceChat(sourceId: string) {
 
   // Switch session
   const switchSession = useCallback((sessionId: string) => {
+    setPendingNewSession(false)
     setCurrentSessionId(sessionId)
+  }, [])
+
+  /**
+   * Target a fresh chat without creating an empty session row. The next
+   * `sendMessage` auto-creates one and titles it from that message, so a user
+   * who changes their mind leaves no debris behind. Deselecting is also what
+   * empties the message list, which is how the panel shows it's a new chat.
+   */
+  const startNewSession = useCallback(() => {
+    setPendingNewSession(true)
+    setCurrentSessionId(null)
   }, [])
 
   // Create session
@@ -241,12 +262,14 @@ export function useSourceChat(sourceId: string) {
     isStreaming,
     contextIndicators,
     loadingSessions,
+    pendingNewSession,
 
     // Actions
     createSession,
     updateSession,
     deleteSession,
     switchSession,
+    startNewSession,
     sendMessage,
     refetchSessions
   }

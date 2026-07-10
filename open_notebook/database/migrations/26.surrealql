@@ -1,0 +1,19 @@
+-- Migration 26: creation/update timestamps on `command` rows.
+-- surreal-commands' own db.create() writes only app/name/args/context/status, so
+-- `created` never existed on any of the 1200+ rows. `list_command_jobs` ordered
+-- by that missing field, which made job history come back in arbitrary order —
+-- the agent console's history view needs newest-first to be usable.
+-- `option<datetime>` rather than `datetime` is mandatory: rows written before
+-- this migration have no `created`, and a non-optional TYPE would make every
+-- later UPDATE of those rows (progress/event appends) fail schema validation.
+-- The backfill recovers a start time for old rows that carry an event log —
+-- every event is stamped with an ISO timestamp, so the first one is a lower
+-- bound. Rows with no events keep `created = NONE` and sort last.
+-- Comments live on full lines ONLY (the runner strips whole-line -- comments but
+-- flattens everything else to one line).
+
+DEFINE FIELD IF NOT EXISTS created ON TABLE command TYPE option<datetime> DEFAULT time::now();
+
+DEFINE FIELD IF NOT EXISTS updated ON TABLE command TYPE option<datetime> VALUE time::now();
+
+UPDATE command SET created = type::datetime(progress.events[0].t) WHERE created = NONE AND progress.events != NONE AND array::len(progress.events) > 0;

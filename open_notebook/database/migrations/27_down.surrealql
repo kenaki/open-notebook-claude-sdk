@@ -1,0 +1,10 @@
+-- Migration 27 DOWN: drop the verify verdict fields.
+-- The backfilled 'clean' statuses are dropped with the field and are recoverable
+-- by re-running the up migration (it derives them from cleaned_content, which is
+-- untouched). Rejection reasons written after the migration are NOT recoverable
+-- -- they only exist here and in the worker log; re-run verify-clean to rebuild.
+-- Comments live on full lines ONLY.
+
+REMOVE FIELD IF EXISTS verify_reason ON TABLE source_section;
+
+REMOVE FIELD IF EXISTS verify_status ON TABLE source_section;

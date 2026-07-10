@@ -439,9 +439,15 @@ class SourceSection(ObjectModel):
     page_start: Optional[int] = None
     page_end: Optional[int] = None
     token_count: Optional[int] = None
+    # Verify verdict (migration 27): 'clean' | 'rejected' | 'skipped', or None if
+    # verify never reached this section. Deliberately NOT surfaced through
+    # get_outline() — these are diagnostics about how well we parsed the section,
+    # not content, and get_outline() feeds the LLM prompt.
+    verify_status: Optional[str] = None
+    verify_reason: Optional[str] = None
     created: Optional[datetime] = None
     updated: Optional[datetime] = None
-    nullable_fields = ["parent", "cleaned_content", "summary", "page_start", "page_end", "token_count", "created", "updated"]
+    nullable_fields = ["parent", "cleaned_content", "summary", "page_start", "page_end", "token_count", "verify_status", "verify_reason", "created", "updated"]
 
     def _prepare_save_data(self) -> Dict[str, Any]:
         # `source` (record<source>) and `parent` (option<record<source_section>>)

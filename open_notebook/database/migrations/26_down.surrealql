@@ -1,0 +1,8 @@
+-- Migration 26 DOWN: drop the `command` timestamps.
+-- Backfilled `created` values are dropped with the field; they are recoverable
+-- by re-running the up migration (the event log they derive from is untouched).
+-- Comments live on full lines ONLY.
+
+REMOVE FIELD IF EXISTS updated ON TABLE command;
+
+REMOVE FIELD IF EXISTS created ON TABLE command;

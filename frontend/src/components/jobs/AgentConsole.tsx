@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Brain, ExternalLink, Wrench, X } from 'lucide-react'
+import { AlertTriangle, Brain, ExternalLink, Wrench, X } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { describeTool, detailFor } from '@/components/source/chat/ToolUseDisclosure'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { useAgentConsole } from '@/lib/hooks/use-agent-console'
+import { deriveKind } from '@/lib/hooks/use-jobs-poller'
 import { useAgentConsoleStore } from '@/lib/stores/agent-console-store'
 import { KIND_ICONS } from './JobTrayItem'
 import { JobStatusBadge } from './JobStatusBadge'
@@ -35,6 +36,7 @@ type ConsoleRow =
   | { key: string; kind: 'tool_result'; toolName: string; preview?: string; isError?: boolean }
   | { key: string; kind: 'thinking'; text: string }
   | { key: string; kind: 'context'; chars?: number; preview?: string }
+  | { key: string; kind: 'warning'; message: string }
 
 export function coalesceEvents(events: JobEvent[]): ConsoleRow[] {
   const rows: ConsoleRow[] = []
@@ -67,6 +69,8 @@ export function coalesceEvents(events: JobEvent[]): ConsoleRow[] {
       })
     } else if (event.type === 'context') {
       rows.push({ key: `${event.t}-${index}`, kind: 'context', chars: event.chars, preview: event.preview })
+    } else if (event.type === 'warning') {
+      rows.push({ key: `${event.t}-${index}`, kind: 'warning', message: event.message })
     }
   })
   return rows
@@ -113,6 +117,29 @@ function ConsoleRowView({ row, t }: { row: ConsoleRow; t: (key: string) => strin
         <span className="h-px flex-1 bg-border" />
         {row.label}
         <span className="h-px flex-1 bg-border" />
+      </div>
+    )
+  }
+
+  // Amber, not destructive: the job completed. Something inside it was declined
+  // (a truncated proof rejected, an oversized section skipped) and the raw parse
+  // was kept instead — degraded, not failed. The message is shown in full rather
+  // than truncated; it is the only place the reason appears in the UI.
+  if (row.kind === 'warning') {
+    return (
+      <div className="my-1 flex items-start gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/5 px-2.5 py-2 text-xs leading-snug">
+        <AlertTriangle
+          className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-amber-600 dark:text-amber-500"
+          aria-hidden="true"
+        />
+        <span className="min-w-0 flex-1">
+          <span className="block text-[11px] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-500">
+            {t('console.warning')}
+          </span>
+          <span className="mt-0.5 block whitespace-pre-wrap break-words text-foreground">
+            {row.message}
+          </span>
+        </span>
       </div>
     )
   }
@@ -253,8 +280,17 @@ export function AgentConsole() {
 
   if (!openJobId) return null
 
-  const Icon = job ? KIND_ICONS[job.kind] : Wrench
-  const title = job?.label?.trim() ? job.label : job ? t(KIND_LABEL_KEY[job.kind]) : (detail?.name ?? '')
+  // A job opened from the Activity page isn't in the live tray store (the tray
+  // forgets terminal jobs after a minute), so fall back to deriving its kind
+  // from the detail payload — otherwise history rows would all read as a raw
+  // command name behind a generic wrench.
+  const kind = job?.kind ?? (detail?.name ? deriveKind(detail.name, detail.args) : undefined)
+  const Icon = kind ? KIND_ICONS[kind] : Wrench
+  const title = job?.label?.trim()
+    ? job.label
+    : kind
+      ? t(KIND_LABEL_KEY[kind])
+      : (detail?.name ?? '')
   const status = detail?.status ?? job?.status
 
   return (

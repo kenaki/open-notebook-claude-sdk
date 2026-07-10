@@ -58,7 +58,10 @@ from commands._job_guards import (
 )
 from commands.verify_commands import _flatten_section_titles
 from open_notebook.ai.models import model_manager
-from open_notebook.ai.provision import provision_langchain_model
+from open_notebook.ai.provision import (
+    apply_reasoning_flag,
+    provision_langchain_model,
+)
 from open_notebook.database.repository import ensure_record_id, repo_query
 from open_notebook.domain.notebook import Source, SourceSection
 from open_notebook.exceptions import ConfigurationError, NotFoundError
@@ -124,10 +127,16 @@ class GenerateSourceAbstractOutput(CommandOutput):
     error_message: Optional[str] = None
 
 
-# to-fix/003 defense-in-depth: hard cap on summarizer input. ~300K chars is
-# ≈75K tokens — comfortable headroom in a 100K-token context. After the
-# section-bounding fix in commands/section_commands.py nothing should hit it.
-_MAX_SUMMARY_INPUT_CHARS = 300_000
+# Context window for the local transformation model. Esperanto's ChatOllama
+# wrapper defaults num_ctx to 8192 — real chapters (level-1 median ~72K chars
+# ≈ 18K tokens) silently overflowed it and Ollama truncated the input.
+_SUMMARY_NUM_CTX = 32768
+
+# to-fix/003 defense-in-depth: hard cap on summarizer input, sized to actually
+# fit _SUMMARY_NUM_CTX: ~120K chars ≈ 30K tokens, leaving room for the prompt
+# and the (small) reply. Anything longer is explicitly truncated with a logged
+# warning — for a routing blurb the opening of the section carries the signal.
+_MAX_SUMMARY_INPUT_CHARS = 120_000
 
 # Tiered-summary policy (2026-07-05): summaries exist for ROUTING — they earn
 # their keep where reading the real text is expensive (level 1 chapters avg
@@ -139,13 +148,48 @@ _MAX_SUMMARY_INPUT_CHARS = 300_000
 # requests still work).
 _MAX_SUMMARY_LEVEL = 2
 
+# Size bound (to-fix/004 Finding 3): depth is a bad proxy for size — 17% of one
+# book's level-≤2 sections were under 2,000 chars. A section that small costs
+# ~500 tokens to just read, so summarizing it to a 300-char routing blurb saves
+# nothing while spending a full serialized 35B generation: the section IS its
+# own summary. Applied by the fan-out, the stamped per-section job, and BOTH
+# abstract readiness gates (`_remaining_unsummarized` and the pending check in
+# `generate_source_abstract`) — if any gate expected a summary the others never
+# produce, the abstract would retry to exhaustion and fail.
+_MIN_SUMMARY_CHARS = 2000
+
+# Consumers show at most 300 chars of a summary (get_outline summary_chars=300
+# in chat_tools / claude_agent_tools) — summaries exist purely to route the
+# agent to the right get_section call. Prompting for an unbounded "concise"
+# summary generated prose at a 998-char median (12K max), ~80% of it truncated
+# away on every read (to-fix/004 Finding 3). The prompt bounds the answer.
+_SUMMARY_INSTRUCTION = (
+    "Write a 1-2 sentence summary (300 characters at most) of the document "
+    "section below. It is a routing blurb in a table of contents, read only to "
+    "decide whether to open the section — state what the section covers, not "
+    "the details. Output only the summary."
+)
+
+
+def _section_text_len(node: Dict) -> int:
+    """Effective text length of a tree node — cleaned layer when present, else
+    the raw parse; the same preference order ``summarize_section`` reads."""
+    text = node.get("cleaned_content") or node.get("content") or ""
+    return len(text.strip())
+
 
 def _summary_target_ids(nodes: List[Dict]) -> List[str]:
-    """Depth-first ids of nodes at level ≤ ``_MAX_SUMMARY_LEVEL``."""
+    """Depth-first ids of nodes at level ≤ ``_MAX_SUMMARY_LEVEL`` with at
+    least ``_MIN_SUMMARY_CHARS`` of text (smaller sections are their own
+    summary — see the bound's comment)."""
     ids: List[str] = []
     for node in nodes:
         nid = node.get("id")
-        if nid and (node.get("level") or 1) <= _MAX_SUMMARY_LEVEL:
+        if (
+            nid
+            and (node.get("level") or 1) <= _MAX_SUMMARY_LEVEL
+            and _section_text_len(node) >= _MIN_SUMMARY_CHARS
+        ):
             ids.append(str(nid))
         ids.extend(_summary_target_ids(node.get("children") or []))
     return ids
@@ -159,21 +203,20 @@ def _summary_target_ids(nodes: List[Dict]) -> List[str]:
 def _flatten_sections_for_abstract(nodes: List[Dict]) -> List[Dict]:
     """Depth-first flatten of a ``get_sections()`` tree into ordered rows.
 
-    Each row carries ``title``, ``summary``, and ``has_text`` (whether the
-    section has any raw text worth summarizing — ``cleaned_content`` or
-    ``content``, non-blank). Used both to build the roll-up prompt and to
-    gate readiness without deadlocking on structural (heading-only) parent
-    nodes that never receive a summary by design.
+    Each row carries ``title``, ``summary``, and ``text_len`` (effective text
+    size — ``cleaned_content`` or ``content``). Used both to build the roll-up
+    prompt and to gate readiness without deadlocking on nodes that never
+    receive a summary by design: structural (heading-only) parents and
+    sections under ``_MIN_SUMMARY_CHARS``.
     """
     flat: List[Dict] = []
     for node in nodes:
-        text = node.get("cleaned_content") or node.get("content") or ""
         flat.append(
             {
                 "title": node.get("title") or "(untitled)",
                 "level": node.get("level") or 1,
                 "summary": node.get("summary"),
-                "has_text": bool(text.strip()),
+                "text_len": _section_text_len(node),
             }
         )
         flat.extend(_flatten_sections_for_abstract(node.get("children") or []))
@@ -181,29 +224,37 @@ def _flatten_sections_for_abstract(nodes: List[Dict]) -> List[Dict]:
 
 
 async def _remaining_unsummarized(source_id: str) -> int:
-    """Count text-bearing sections of a source that still lack a summary.
+    """Count sections of a source that still need (and lack) a summary.
 
-    Mirrors ``generate_source_abstract``'s readiness gate (``has_text`` =
-    non-blank ``cleaned_content`` or ``content``; heading-only nodes never get
-    a summary and never count; level > ``_MAX_SUMMARY_LEVEL`` nodes are outside
-    the tiered-summary policy and never count either). Used by the
-    event-driven abstract trigger in ``summarize_section``.
+    Mirrors ``generate_source_abstract``'s readiness gate: a section needs a
+    summary only when it is at level ≤ ``_MAX_SUMMARY_LEVEL`` AND its effective
+    text (``cleaned_content`` when non-blank, else ``content``) reaches
+    ``_MIN_SUMMARY_CHARS`` — heading-only nodes and sub-threshold sections
+    never get one by design. Used by the event-driven abstract trigger in
+    ``summarize_section``.
+
+    The cleaned-else-raw preference is computed here in Python (SurrealQL's
+    ``??`` only handles NONE, not blank strings, and inline IF expressions are
+    dialect-sensitive); the query ships lengths, not content.
     """
     rows = await repo_query(
         """
-        SELECT count() AS n FROM source_section
-        WHERE source = $src
-          AND level <= $max_level
-          AND (
-              string::len(string::trim(cleaned_content ?? '')) > 0
-              OR string::len(string::trim(content ?? '')) > 0
-          )
-          AND string::len(string::trim(summary ?? '')) == 0
-        GROUP ALL
+        SELECT
+            string::len(string::trim(cleaned_content ?? '')) AS clean_len,
+            string::len(string::trim(content ?? '')) AS raw_len,
+            string::len(string::trim(summary ?? '')) AS summary_len
+        FROM source_section
+        WHERE source = $src AND level <= $max_level
         """,
         {"src": ensure_record_id(source_id), "max_level": _MAX_SUMMARY_LEVEL},
     )
-    return int(rows[0].get("n", 0)) if rows else 0
+    remaining = 0
+    for row in rows or []:
+        clean_len = int(row.get("clean_len") or 0)
+        text_len = clean_len if clean_len > 0 else int(row.get("raw_len") or 0)
+        if text_len >= _MIN_SUMMARY_CHARS and int(row.get("summary_len") or 0) == 0:
+            remaining += 1
+    return remaining
 
 
 # ---------------------------------------------------------------------------
@@ -271,6 +322,22 @@ async def summarize_section(
         )
         return SummarizeSectionOutput(summary=None)
 
+    # Size bound, re-checked at the job (fan-out already filters): jobs queued
+    # before the bound existed — or requeued across it — must not spend a
+    # serialized heavy-slot generation on a section that is its own summary.
+    # Stamped jobs only: an explicitly requested (unstamped) single-section
+    # summary still runs regardless of size.
+    if (
+        input_data.parse_generation is not None
+        and len(text.strip()) < _MIN_SUMMARY_CHARS
+    ):
+        logger.info(
+            f"summarize_section: section {section.id} has {len(text.strip())} "
+            f"chars (< {_MIN_SUMMARY_CHARS}) — small enough to read directly; "
+            f"skipping"
+        )
+        return SummarizeSectionOutput(summary=None)
+
     if len(text) > _MAX_SUMMARY_INPUT_CHARS:
         logger.warning(
             f"summarize_section: section {section.id} text ({len(text)} chars) "
@@ -279,8 +346,17 @@ async def summarize_section(
         )
         text = text[:_MAX_SUMMARY_INPUT_CHARS] + "\n\n[…truncated for length]"
 
-    model = await provision_langchain_model(
-        text, None, "transformation", max_tokens=8192
+    # Reasoning OFF (apply_reasoning_flag): a routing blurb needs no thinking
+    # prelude, and a thinking model can burn its whole token budget reasoning
+    # and return empty content (observed live on vision verify). With thinking
+    # disabled, max_tokens=1024 is ample for a ≤300-char blurb while cutting
+    # the old unbounded 8192 budget 8×.
+    model = apply_reasoning_flag(
+        await provision_langchain_model(
+            text, None, "transformation",
+            max_tokens=1024, num_ctx=_SUMMARY_NUM_CTX,
+        ),
+        False,
     )
 
     # Shares the Ollama gate's single heavy slot with vision verify — see the
@@ -296,7 +372,7 @@ async def summarize_section(
         async with lane:
             await report_job_progress(job_id, "Summarizing section")
             response = await model.ainvoke(
-                [HumanMessage(content=f"Summarize this document section concisely:\n\n{text}")]
+                [HumanMessage(content=f"{_SUMMARY_INSTRUCTION}\n\n{text}")]
             )
     except Exception as e:
         # BLOCKED, not BROKEN: the heavy slot was busy. This command's retry
@@ -438,14 +514,34 @@ async def summarize_source(
         )
 
     tree = await source.get_sections()
-    # Tiered-summary policy: fan out only for level ≤ _MAX_SUMMARY_LEVEL —
-    # deeper nodes fit in a single get_section call and don't need summaries.
-    section_ids = _summary_target_ids(tree)
-
-    if not section_ids:
+    if not tree:
         raise RuntimeError(
             f"No sections yet for source {input_data.source_id} — "
             f"chaptering may still be running; will retry"
+        )
+
+    # Tiered-summary policy: fan out only for level ≤ _MAX_SUMMARY_LEVEL nodes
+    # holding ≥ _MIN_SUMMARY_CHARS of text — deeper or smaller sections fit in
+    # a single get_section call and don't need summaries.
+    section_ids = _summary_target_ids(tree)
+
+    if not section_ids:
+        # A real (non-empty) tree where nothing qualifies — every section is
+        # small enough to read directly. Nothing will event-trigger the
+        # abstract, and with zero summaries it would skip anyway; this is a
+        # completed run, not a retryable wait.
+        note = (
+            f"No section of source {input_data.source_id} needs a summary "
+            f"(each is deeper than level {_MAX_SUMMARY_LEVEL} or under "
+            f"{_MIN_SUMMARY_CHARS} chars); nothing to do."
+        )
+        logger.info(f"summarize_source: {note}")
+        return SummarizeSourceOutput(
+            success=True,
+            source_id=input_data.source_id,
+            sections_found=0,
+            jobs_submitted=0,
+            error_message=note,
         )
 
     await report_job_progress(
@@ -541,10 +637,15 @@ async def generate_source_abstract(
     # expected to have summaries (readiness) or contribute to the roll-up
     # (deeper summaries may exist from older runs — routing never reads them).
     tier_rows = [r for r in rows if r["level"] <= _MAX_SUMMARY_LEVEL]
+    # Only sections that summarize_source actually fans out over are awaited:
+    # level ≤ _MAX_SUMMARY_LEVEL AND ≥ _MIN_SUMMARY_CHARS of text. Waiting on
+    # anything else (heading-only parents, sub-threshold sections) would retry
+    # to exhaustion for summaries that never come.
     pending = [
         r["title"]
         for r in tier_rows
-        if r["has_text"] and not (r["summary"] and r["summary"].strip())
+        if r["text_len"] >= _MIN_SUMMARY_CHARS
+        and not (r["summary"] and r["summary"].strip())
     ]
     if pending:
         raise RuntimeError(
@@ -569,8 +670,15 @@ async def generate_source_abstract(
         f"document.\n\n{rollup_text}"
     )
     await report_job_progress(job_id, "Generating abstract")
-    model = await provision_langchain_model(
-        rollup_text, None, "transformation", max_tokens=8192
+    # Same knobs as summarize_section: the roll-up over ~170 blurbs (~13K
+    # tokens) overflows the 8192 default num_ctx, and a thinking prelude risks
+    # eating the output budget (empty abstract).
+    model = apply_reasoning_flag(
+        await provision_langchain_model(
+            rollup_text, None, "transformation",
+            max_tokens=8192, num_ctx=_SUMMARY_NUM_CTX,
+        ),
+        False,
     )
     try:
         response = await model.ainvoke([HumanMessage(content=prompt)])

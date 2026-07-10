@@ -121,10 +121,64 @@ describe('AgentConsole', () => {
     expect(screen.getByText('What does this paper argue?')).toBeInTheDocument()
   })
 
+  // A rejected verify proof does NOT fail its job — the job completes and the
+  // raw parse is kept. This warning row is the only place the reason surfaces in
+  // the UI (it used to be a `verify_flag` insight, which also fed it to the LLM).
+  it('renders a warning event in full on an otherwise-completed job', () => {
+    const reason =
+      "Section 'Exercises' verify output rejected: the model returned 7716 chars " +
+      'for a 11208-char section (69% kept, below the 80% sanity floor).'
+    openConsoleFor({
+      ...detailFixture,
+      status: 'completed',
+      progress: {
+        events: [
+          { t: '2026-07-09T10:00:00Z', type: 'phase', label: 'Running vision verify' },
+          { t: '2026-07-09T10:00:01Z', type: 'warning', message: reason },
+        ],
+      },
+    })
+    render(<AgentConsole />)
+
+    expect(screen.getByText('console.warning')).toBeInTheDocument()
+    // Shown in full, not truncated — it is the whole explanation.
+    expect(screen.getByText(reason)).toBeInTheDocument()
+  })
+
   it('shows the empty state when a job has no events yet', () => {
     openConsoleFor({ ...detailFixture, status: 'new', progress: { events: [] } })
     render(<AgentConsole />)
 
     expect(screen.getByText('console.empty')).toBeInTheDocument()
+  })
+
+  // A job opened from the Activity page is absent from the tray store: the tray
+  // only holds active jobs and drops each one a minute after it terminates.
+  // The console must still replay it from the detail payload alone.
+  it('replays a historical job that is not in the tray store', () => {
+    mockUseAgentConsole.mockReturnValue({
+      data: {
+        ...detailFixture,
+        name: 'verify_clean_section',
+        status: 'failed',
+        error_message: 'Vision verify failed',
+      },
+      isLoading: false,
+    })
+    act(() => {
+      useJobsStore.setState({ jobs: [] })
+      useAgentConsoleStore.setState({ openJobId: JOB_ID })
+    })
+    render(<AgentConsole />)
+
+    // Its event log renders...
+    expect(screen.getByText('Extracting text')).toBeInTheDocument()
+    // ...the failure banner surfaces the postmortem...
+    expect(screen.getByText('console.jobFailed')).toBeInTheDocument()
+    expect(screen.getByText('Vision verify failed')).toBeInTheDocument()
+    // ...the title comes from the command name, not a raw string or a wrench...
+    expect(screen.getByText('jobs.kind.verify')).toBeInTheDocument()
+    // ...and there is no origin to navigate to.
+    expect(screen.queryByText('console.goToOrigin')).not.toBeInTheDocument()
   })
 })

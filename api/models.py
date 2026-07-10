@@ -569,6 +569,11 @@ class ParseStatusResponse(BaseModel):
     parser_version: Optional[str] = None
     block_count: Optional[int] = None
     page_count: Optional[int] = None
+    # `page -> [first_seq, last_seq]`, indexed by `page - 1`. An empty page holds
+    # the inverted range [0, -1]. The reader uses it both ways: seq -> page (to
+    # label outline entries) and page -> seq (to jump). Already stored on every
+    # parse header, so it needs no re-parse.
+    page_index: Optional[List[List[int]]] = None
     section_index: Optional[List[Any]] = None
     error: Optional[str] = None
 

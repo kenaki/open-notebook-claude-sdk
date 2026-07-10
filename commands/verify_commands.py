@@ -11,8 +11,9 @@ Two commands:
   - ``verify_clean_section`` : per-section verify-clean (one section per job so the
     model's context resets between chapters by design).
   - ``verify_clean_source``  : fan-out orchestrator — one ``verify_clean_section``
-    job per section of a source. Wrapped per-section so one section's submit
-    failure can't poison the rest.
+    job per LEAF section of a source (leaves partition the document; proofing
+    parent nodes too re-emitted the book 2.6× over — to-fix/004 Finding 1).
+    Wrapped per-section so one section's submit failure can't poison the rest.
 
 Design notes:
   - Decision #6: uses the configured ``default_vision_model`` (deployed Ollama
@@ -23,8 +24,26 @@ Design notes:
     slicing.
   - B1 pilot: this thinking-capable vision model silently returns empty content
     when ``max_tokens`` is unset — we pass ``max_tokens=8192`` explicitly
-    (mandatory). Low-confidence output is routed to a ``verify_flag`` insight
-    rather than blind-overwriting anything.
+    (mandatory). Low-confidence output is rejected rather than blind-overwriting
+    anything.
+  - to-fix/004 Finding 2: output that is implausibly shorter than the input
+    (length-stop or below ``_MIN_CLEANED_RATIO``) is REJECTED — recorded, never
+    written — because every reader prefers ``cleaned_content`` over the raw
+    parse, so a truncated proof silently shortens the chapter everywhere.
+
+Where the verdict goes (migration 27). Every outcome here is a *diagnostic about
+how well we parsed the book*, never *content of the book*, so none of it may
+reach an LLM. It used to: these were written as ``verify_flag`` source insights,
+and ``Notebook.get_context()`` injects every insight into the prompt verbatim and
+uncapped (~114K chars on a 472-section textbook) while ``create_insight_command``
+embeds each one into vector search. Now:
+  - the per-section verdict lands on ``source_section.verify_status`` /
+    ``verify_reason`` — queryable, badgeable, and structurally unreachable from
+    the prompt because ``get_outline()`` selects an explicit column list;
+  - a human-readable copy lands on the job's own event log as a ``warning``
+    event, visible in the agent console at /activity;
+  - the vision model's freeform discrepancy narration — the bulk of the old
+    volume, and the least actionable part of it — is logged and dropped.
 """
 import re
 import time
@@ -46,13 +65,14 @@ from commands._job_guards import (
     submit_command_once,
 )
 from open_notebook.ai.models import model_manager
+from open_notebook.ai.provision import apply_reasoning_flag
 from open_notebook.ai.vision_utils import provision_vision_message
 from open_notebook.database.repository import ensure_record_id, repo_query
 from open_notebook.domain.notebook import Source, SourceSection
 from open_notebook.exceptions import ConfigurationError, NotFoundError
 from open_notebook.utils import clean_thinking_content
 from open_notebook.utils.error_classifier import classify_error
-from open_notebook.utils.job_progress import report_job_progress
+from open_notebook.utils.job_progress import report_job_progress, report_job_warning
 from open_notebook.utils.text_utils import extract_text_content
 
 
@@ -79,9 +99,25 @@ _RENDER_ZOOM = 2.0
 # (headingless PDF that fell back to one section in A3) would otherwise render
 # hundreds of page images into one vision call and blow the context window. When
 # a section exceeds this many pages we SKIP the vision pass and record a
-# verify_flag rather than truncating (truncation would silently drop content).
+# 'skipped' verdict rather than truncating (truncation would silently drop content).
 # Real chapters are comfortably under this bound.
 _MAX_VERIFY_PAGES = 50
+
+# Output-sanity floor (to-fix/004 Finding 2): verify must not shrink a section.
+# The prompt forbids paraphrase/summary, so legitimate proofs come back at
+# ~100-177% of the raw parse (repairing hyphenation/tables adds characters). A
+# reply much shorter than the input means the model truncated (hit max_tokens)
+# or quietly summarized — observed live: a 22,532-char Preface "proofed" down to
+# 506 chars and every reader silently preferred it. Below this ratio the proof
+# is rejected: cleaned_content stays unset and verify_status='rejected' records why.
+_MIN_CLEANED_RATIO = 0.8
+
+# Context window for the vision call. Esperanto's ChatOllama wrapper defaults
+# num_ctx to 8192, which doesn't even hold the OUTPUT budget (max_tokens=8192)
+# plus a one-page prompt (~2.6K tokens observed) — Ollama then silently rolls
+# the window during generation. 32K covers the largest verifiable leaf
+# (~14K tokens of text + a handful of page images + the 8K reply).
+_VERIFY_NUM_CTX = 32768
 
 # Instruction handed to the vision model alongside the page images + parsed text.
 _VERIFY_INSTRUCTION = (
@@ -213,15 +249,90 @@ def _split_cleaned_and_discrepancies(
     return (cleaned or None), discrepancies
 
 
-def _flatten_section_ids(nodes: List[dict]) -> List[str]:
-    """Depth-first flatten of a ``get_sections()`` tree into a list of ids."""
+def _output_truncation_reason(
+    cleaned: Optional[str], content: Optional[str], response
+) -> Optional[str]:
+    """Why the verify output should be REJECTED as truncated, or None if sane.
+
+    Two failure modes, both observed live (to-fix/004 Finding 2):
+      - the reply hit the mandatory ``max_tokens`` cap (Ollama reports
+        ``done_reason='length'``; OpenAI-compatible providers use
+        ``finish_reason``) — 32/472 sections of a real textbook exceed the
+        ~32K-char output budget;
+      - the model simply returned far less text than went in, cap or no cap
+        (the Preface case: 22,532 chars in, 506 out, no length stop).
+
+    Nothing here writes or raises — the caller records a non-None reason via
+    :func:`_record_verify_verdict` and leaves ``cleaned_content`` unset.
+    """
+    meta = getattr(response, "response_metadata", None) or {}
+    stop_reason = str(
+        meta.get("done_reason") or meta.get("finish_reason") or ""
+    ).lower()
+    if stop_reason == "length":
+        return (
+            "the model stopped at its max_tokens output cap "
+            "(stop reason 'length'), so the tail of the section is missing"
+        )
+
+    raw_len = len(content or "")
+    if cleaned is not None and raw_len:
+        kept = len(cleaned) / raw_len
+        if kept < _MIN_CLEANED_RATIO:
+            return (
+                f"the model returned {len(cleaned)} chars for a "
+                f"{raw_len}-char section ({kept:.0%} kept, below the "
+                f"{_MIN_CLEANED_RATIO:.0%} sanity floor)"
+            )
+    return None
+
+
+async def _record_verify_verdict(
+    section: SourceSection,
+    status: str,
+    reason: Optional[str],
+    job_id: Optional[str],
+) -> None:
+    """Persist this section's verify verdict and mirror it to the job's log.
+
+    ``status`` is 'clean' | 'rejected' | 'skipped' (migration 27). The DB field is
+    the durable, queryable record — "which chapters are still on the raw parse?"
+    is one SELECT. The ``warning`` event is the per-run explanation, and it fires
+    only for the non-clean verdicts: a rejected or skipped section leaves the job
+    otherwise indistinguishable from a successful one, because neither outcome
+    fails it.
+
+    The section save is best-effort-free: it must NOT be swallowed. If we can't
+    record that a proof was rejected, the raw parse silently looks proofed, which
+    is the exact failure this whole change exists to prevent — so let it raise and
+    let the job retry.
+    """
+    section.verify_status = status
+    section.verify_reason = reason
+    await section.save()
+
+    if status != "clean" and reason:
+        await report_job_warning(job_id, reason)
+
+
+def _leaf_section_ids(nodes: List[dict]) -> List[str]:
+    """Depth-first ids of LEAF sections only (nodes with no children).
+
+    Verify fans out over leaves, not the whole tree: sections nest, so a
+    parent's page range covers its children's and proofing every node re-emits
+    the document once per tree level — measured 2.6× the book's characters and
+    ~2.3 renders per page on a real textbook (to-fix/004 Finding 1). Verify is
+    output-bound ("preserve all content"), so that overlap is pure cost. Leaves
+    partition the document: full coverage, zero overlap, and far fewer sections
+    over the max_tokens output budget (32 → 1 on the same book).
+    """
     ids: List[str] = []
     for node in nodes:
-        nid = node.get("id")
-        if nid:
-            ids.append(str(nid))
         children = node.get("children") or []
-        ids.extend(_flatten_section_ids(children))
+        if children:
+            ids.extend(_leaf_section_ids(children))
+        elif node.get("id"):
+            ids.append(str(node["id"]))
     return ids
 
 
@@ -327,7 +438,8 @@ async def _verify_clean_section_impl(
     Renders the section's physical pages, sends them + the parsed ``content`` to
     the vision model, and writes the corrected text to ``cleaned_content``.
     NEVER touches ``section.content`` or ``Source.full_text`` (immutable raw).
-    Any flagged discrepancies are stored as a ``verify_flag`` SourceInsight.
+    The verdict lands on ``verify_status``/``verify_reason``; the model's freeform
+    discrepancy narration is logged and dropped (see the module docstring).
 
     Skips gracefully (cleaned_content=None, no crash) when: no PDF file, not a
     PDF, no page range, section too large, vision model unconfigured, or an
@@ -385,7 +497,7 @@ async def _verify_clean_section_impl(
         )
         return VerifyCleanSectionOutput(cleaned_content=None, discrepancies=None)
 
-    # --- Guard pathological page spans (skip-with-flag, never truncate) ---
+    # --- Guard pathological page spans (skip-and-record, never truncate) ---
     span = (section.page_end or section.page_start) - section.page_start + 1
     if span > _MAX_VERIFY_PAGES:
         note = (
@@ -394,7 +506,7 @@ async def _verify_clean_section_impl(
             f"verify; skipped. Re-chapter into smaller sections to clean it."
         )
         logger.warning(f"verify_clean_section: {note}")
-        await source.add_insight("verify_flag", note)
+        await _record_verify_verdict(section, "skipped", note, job_id)
         return VerifyCleanSectionOutput(cleaned_content=None, discrepancies=note)
 
     # --- Render pages to PNG ground-truth images ---
@@ -441,7 +553,9 @@ async def _verify_clean_section_impl(
     # None instead of raising. max_tokens=8192 is MANDATORY (B1 pilot: unset ->
     # silent empty output on this thinking model).
     try:
-        vision_model = await model_manager.get_vision_model(max_tokens=8192)
+        vision_model = await model_manager.get_vision_model(
+            max_tokens=8192, num_ctx=_VERIFY_NUM_CTX
+        )
     except ConfigurationError as exc:
         note = f"Vision model misconfigured — verify-clean skipped: {exc}"
         logger.warning(f"verify_clean_section: {note}")
@@ -456,7 +570,12 @@ async def _verify_clean_section_impl(
         return VerifyCleanSectionOutput(cleaned_content=None, discrepancies=note)
 
     # --- Invoke ---
-    lc_model = vision_model.to_langchain()
+    # Reasoning OFF: verify is verbatim reproduction — thinking adds nothing,
+    # and this model intermittently reasons through the ENTIRE 8192-token
+    # output budget without ever starting the answer (observed live:
+    # eval_count == max_tokens, done_reason 'length', empty content, ~3.5 min
+    # of GPU per no-op job).
+    lc_model = apply_reasoning_flag(vision_model.to_langchain(), False)
 
     # The gate admits ONE heavy generation at a time and refuses the rest with a
     # 503 after a 30s lock timeout. A 35B vision pass over page images runs for
@@ -500,34 +619,77 @@ async def _verify_clean_section_impl(
         # stays permanent via stop_on.
         exc_class, err_message = classify_error(e)
         raise exc_class(f"Vision verify failed: {err_message}") from e
-    raw = clean_thinking_content(extract_text_content(response.content))
+    pre_clean = extract_text_content(response.content)
+    raw = clean_thinking_content(pre_clean)
 
     if not raw or not raw.strip():
+        # Diagnose, don't just skip: "empty" can be a genuinely empty reply, a
+        # reply that was 100% thinking (token cap hit mid-think shows up as a
+        # 'length' stop with an unterminated <think> block), or a provider that
+        # moved the answer out of `content`. Log enough to tell which.
+        meta = getattr(response, "response_metadata", None) or {}
+        extras = getattr(response, "additional_kwargs", None) or {}
         note = (
-            "Vision model returned empty content — cleaned_content left unset "
-            "(raw parse preserved)."
+            f"Section '{section.title}' verify output rejected: the vision model "
+            f"returned empty content (it can spend its entire output budget on the "
+            f"thinking prelude — to-fix/004 Finding 4). cleaned_content left unset "
+            f"(raw parse preserved). Re-run verify-clean to retry."
         )
-        logger.warning(f"verify_clean_section: section {section.id}: {note}")
+        logger.warning(
+            f"verify_clean_section: section {section.id}: {note} "
+            f"[pre-clean len={len(pre_clean)}, "
+            f"pre-clean head={pre_clean[:200]!r}, "
+            f"response_metadata={meta!r}, "
+            f"additional_kwargs keys={list(extras.keys())!r}]"
+        )
+        # Same class of failure as a truncated proof: the model produced nothing
+        # usable and the section stays on the raw parse. Without a verdict it would
+        # be indistinguishable from a section verify never reached — which is how 8
+        # sections of the test book went unaccounted for.
+        await _record_verify_verdict(section, "rejected", note, job_id)
         return VerifyCleanSectionOutput(cleaned_content=None, discrepancies=note)
 
     cleaned, discrepancies = _split_cleaned_and_discrepancies(raw)
+
+    # --- Output-sanity guard: never persist a truncated proof ---
+    # A short reply used to be written straight to cleaned_content, and every
+    # reader (chat context, summaries, agent tools) prefers that layer — so a
+    # truncation silently shortened the chapter everywhere. Reject instead:
+    # flag it, keep the raw parse authoritative.
+    truncation = _output_truncation_reason(cleaned, section.content, response)
+    if truncation:
+        note = (
+            f"Section '{section.title}' verify output rejected: {truncation}. "
+            f"cleaned_content left unset (raw parse preserved). Split the "
+            f"section into smaller ones or re-run verify-clean to retry."
+        )
+        logger.warning(f"verify_clean_section: section {section.id}: {note}")
+        await _record_verify_verdict(section, "rejected", note, job_id)
+        return VerifyCleanSectionOutput(cleaned_content=None, discrepancies=note)
 
     # --- Persist: cleaned layer only; raw is immutable ---
     await report_job_progress(job_id, "Saving cleaned content")
     if cleaned:
         section.cleaned_content = cleaned
-        await section.save()
         logger.info(
             f"verify_clean_section: wrote cleaned_content ({len(cleaned)} chars) "
             f"for section {section.id}"
         )
+    # One save for both the cleaned layer and the verdict. 'clean' is recorded even
+    # when the model returned no cleaned text (a no-op proof of an already-correct
+    # section): the point of the field is to distinguish "verify ran and was happy"
+    # from "verify never reached this section" (NONE).
+    await _record_verify_verdict(section, "clean", None, job_id)
 
     if discrepancies:
-        # Low-confidence / unreconcilable items → verify_flag insight, never a
-        # blind overwrite of the raw text.
-        await source.add_insight("verify_flag", discrepancies)
+        # The model's freeform narration about what it saw. It is NOT a verdict —
+        # the proof was accepted, and this text is the model thinking out loud
+        # about a comparison that already returned an answer. It used to become a
+        # verify_flag insight, i.e. ~107K chars across this book that rode into
+        # every chat turn and into vector search. Log it and drop it.
         logger.info(
-            f"verify_clean_section: recorded verify_flag for section {section.id}"
+            f"verify_clean_section: section {section.id} discrepancy note "
+            f"({len(discrepancies)} chars): {discrepancies}"
         )
 
     return VerifyCleanSectionOutput(
@@ -556,10 +718,12 @@ async def _verify_clean_section_impl(
 async def verify_clean_source(
     input_data: VerifyCleanSourceInput,
 ) -> VerifyCleanSourceOutput:
-    """Fan out one ``verify_clean_section`` job per section of a source.
+    """Fan out one ``verify_clean_section`` job per LEAF section of a source.
 
-    Callable both fire-and-forget from the ingest graph (after chaptering) and
-    as a manual re-run path. Per-section submit is wrapped so one failure can't
+    Leaves only — parents' page ranges duplicate their children's, and verify
+    re-emits every character it is shown (see ``_leaf_section_ids``). Callable
+    both fire-and-forget from the ingest graph (after chaptering) and as a
+    manual re-run path. Per-section submit is wrapped so one failure can't
     poison the others. If no sections exist yet (build_sections still in flight)
     we raise so the job retries — a qualifying PDF always yields >= 1 section.
     """
@@ -598,7 +762,9 @@ async def verify_clean_source(
         )
 
     tree = await source.get_sections()
-    section_ids = _flatten_section_ids(tree)
+    # Leaf sections only — see _leaf_section_ids. Every non-empty tree has
+    # leaves, so the empty check below still means "chaptering hasn't landed".
+    section_ids = _leaf_section_ids(tree)
 
     if not section_ids:
         # Eventual-consistency: chaptering (build_sections) may not have landed
@@ -612,14 +778,14 @@ async def verify_clean_source(
     # Without this, N per-section jobs each "complete" as silent no-ops (the
     # skip note lives only in each job's result payload) — observed live as
     # 117 completed jobs, 0 cleaned_content, 0 insights, nothing visible in the
-    # UI. Skip the fan-out entirely and leave ONE visible verify_flag insight.
+    # UI. Skip the fan-out entirely and leave ONE visible warning on this job.
     #
     # "Unconfigured" and "configured but unresolvable" are NOT the same. Model.get
     # funnels every exception into NotFoundError (open_notebook/domain/base.py),
     # so a transient DB timeout used to surface here as "no vision model
     # configured" and skip the entire document — observed live: a 'timed out
     # during opening handshake' under queue load silently skipped a 472-section
-    # book and left a misleading verify_flag. Only an unset default is a real
+    # book and left a misleading skip warning. Only an unset default is a real
     # skip; a resolution failure raises so the job retries.
     defaults = await model_manager.get_defaults()
     if defaults.default_vision_model:
@@ -648,7 +814,11 @@ async def verify_clean_source(
         logger.warning(
             f"verify_clean_source: source {input_data.source_id}: {note}"
         )
-        await source.add_insight("verify_flag", note)
+        # Document-level, so there is no section to hang a verdict on. The fan-out
+        # job's own event log is the only place this can live — and it's the right
+        # one: this job is what the user opens in /activity when the book never
+        # got proofed.
+        await report_job_warning(job_id, note)
         # No verify jobs will exist, so nothing will chain the next phase — start
         # it here. Summaries fall back to raw `content` when there's no
         # `cleaned_content`, so the document still gets summarized.

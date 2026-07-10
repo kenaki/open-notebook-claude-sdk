@@ -22,6 +22,8 @@ from open_notebook.parsers.base import (
 )
 from open_notebook.parsers.docling_parser import (
     DoclingBlockParser,
+    _rebuild_code_lines,
+    _reflows_to,
     page_map_from_blocks,
     parser_version,
 )
@@ -163,6 +165,133 @@ def test_page_map_from_blocks_pure():
 def test_parser_version_is_config_derived():
     v = parser_version()
     assert v.startswith("docling-")
-    assert v.endswith("+tables+formula")
+    assert v.endswith("+tables+formula+codelines")
     # Deterministic for a given install.
     assert parser_version() == v
+
+
+# --------------------------------------------------------------------------- #
+# Code block re-lineation (pure geometry — no Docling, no PDF)
+# --------------------------------------------------------------------------- #
+
+PAGE_H = 100.0
+CHAR_W = 6.0
+
+
+class _Rect:
+    def __init__(self, x0, y, x1):
+        self.r_x0 = x0
+        self.r_x1 = x1
+        self.r_y0 = y
+        self.r_y2 = y
+
+
+class _Cell:
+    def __init__(self, x0, y, text):
+        self.text = text
+        self.rect = _Rect(x0, y, x0 + CHAR_W * len(text))
+
+
+class _ParsedPage:
+    def __init__(self, cells):
+        self.textline_cells = cells
+
+
+class _Page:
+    def __init__(self, cells):
+        self.parsed_page = _ParsedPage(cells)
+
+
+class _BBox:
+    """A BOTTOMLEFT-origin box covering the whole synthetic page."""
+
+    l = 0.0  # noqa: E741 - mirrors Docling's attribute name
+    r = 500.0
+    t = PAGE_H  # top edge, measured up from the bottom
+    b = 0.0
+
+
+def _rebuild(cells):
+    return _rebuild_code_lines(_Page(cells), _BBox(), PAGE_H)
+
+
+def test_rebuild_splits_lines_by_y_centre():
+    # `def f():` on one line, an indented `return 1` on the next.
+    cells = [_Cell(0.0, 10.0, "def f():"), _Cell(4 * CHAR_W, 22.0, "return 1")]
+    assert _rebuild(cells) == "def f():\n    return 1"
+
+
+def test_rebuild_converts_x_gaps_to_spaces():
+    # Two fragments on one line separated by a three-character gap.
+    cells = [
+        _Cell(0.0, 10.0, "a = 1"),
+        _Cell(5 * CHAR_W + 3 * CHAR_W, 10.0, "# set"),
+    ]
+    assert _rebuild(cells) == "a = 1   # set"
+
+
+def test_rebuild_orders_fragments_within_a_line_by_x():
+    # Cell order is arbitrary; output order must follow geometry, not input.
+    cells = [_Cell(2 * CHAR_W, 10.0, "world"), _Cell(0.0, 10.0, "hello ")]
+    assert _rebuild(cells) == "hello world"
+
+
+def test_rebuild_treats_cells_within_tolerance_as_one_line():
+    # A 2pt baseline jitter (subscript, mixed font) is the same visual line.
+    cells = [_Cell(0.0, 10.0, "value"), _Cell(5 * CHAR_W, 12.0, "= 3")]
+    assert _rebuild(cells) == "value= 3"
+
+
+def test_rebuild_returns_none_without_cells():
+    assert _rebuild([]) is None
+
+
+def test_reflows_to_accepts_whitespace_only_differences():
+    assert _reflows_to("def f():\n    return 1", "def f(): return 1")
+
+
+def test_reflows_to_rejects_changed_characters():
+    # The guard that keeps a bad rebuild (or a VLM-style re-transcription that
+    # invents or drops text) from replacing Docling's own characters.
+    assert not _reflows_to("def f():\n    return 2", "def f(): return 1")
+    assert not _reflows_to("extra def f(): return 1", "def f(): return 1")
+
+
+def test_code_text_falls_back_when_rebuild_is_not_a_reflow():
+    # Cells that don't match Docling's text (e.g. wrong page) must not win.
+    parser = DoclingBlockParser()
+
+    class _Prov:
+        page_no = 1
+        bbox = _BBox()
+
+    cells = [_Cell(0.0, 10.0, "totally"), _Cell(0.0, 22.0, "different")]
+    out = parser._code_text(
+        object(), _Prov(), {1: _Page(cells)}, PAGE_H, "def f(): return 1"
+    )
+    assert out == "def f(): return 1"
+
+
+def test_code_text_falls_back_without_a_backend_page():
+    parser = DoclingBlockParser()
+
+    class _Prov:
+        page_no = 7
+        bbox = _BBox()
+
+    out = parser._code_text(object(), _Prov(), {}, PAGE_H, "def f(): return 1")
+    assert out == "def f(): return 1"
+
+
+def test_code_text_uses_the_rebuild_when_it_reflows():
+    parser = DoclingBlockParser()
+
+    class _Prov:
+        page_no = 1
+        bbox = _BBox()
+
+    cells = [_Cell(0.0, 10.0, "def f():"), _Cell(4 * CHAR_W, 22.0, "return 1")]
+    out = parser._code_text(
+        object(), _Prov(), {1: _Page(cells)}, PAGE_H, "def f(): return 1"
+    )
+    assert out == "def f():\n    return 1"

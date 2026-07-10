@@ -29,6 +29,7 @@ import { LanguageToggle } from '@/components/common/LanguageToggle'
 import type { TFunction } from 'i18next'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import {
+  Activity,
   Book,
   Search,
   Mic,
@@ -59,6 +60,7 @@ const getNavigation = (t: TFunction) => [
   {
     title: t('navigation.system'),
     items: [
+      { name: t('navigation.activity'), href: '/activity', icon: Activity },
       { name: t('navigation.models'), href: '/settings/api-keys', icon: Bot },
       { name: t('navigation.transformations'), href: '/transformations', icon: Shuffle },
       { name: t('navigation.settings'), href: '/settings', icon: Settings },

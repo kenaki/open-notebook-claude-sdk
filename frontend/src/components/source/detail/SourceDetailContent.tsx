@@ -43,12 +43,16 @@ import { SourceInsightsTab } from './SourceInsightsTab'
 import { SourceDetailsTab } from './SourceDetailsTab'
 import { PDFViewer } from '@/components/common/PDFViewer'
 import { ReaderView } from '@/components/source/reader/ReaderView'
+import { useLastReadPage } from '@/lib/hooks/use-last-read-page'
 import type { Annotation, SourceDetailResponse, ParseStatusResponse } from '@/lib/types/api'
 
-// Which tabs the per-source tab preference may restore to (D8). PDF/Reader are
-// added only for a parsed PDF asset. Persisted under this localStorage prefix.
+// Which tabs the per-source tab preference may restore to (D8). The PDF tab is
+// added only for a PDF asset. Persisted under this localStorage prefix.
 const TAB_PREF_PREFIX = 'source-detail-tab-'
-const BASE_TABS = new Set(['content', 'insights', 'details'])
+const BASE_TABS = new Set(['reader', 'insights', 'details'])
+// The Content tab folded into Reader; a preference stored before that lands
+// would otherwise restore to a tab that no longer exists.
+const LEGACY_TAB_ALIASES: Record<string, string> = { content: 'reader' }
 
 /** Returns true when the source's uploaded file is a PDF. */
 const isPdfAsset = (source: SourceDetailResponse): boolean =>
@@ -194,21 +198,82 @@ export function SourceDetailContent({
 }: SourceDetailContentProps) {
   const { t } = useTranslation()
   // Controlled tab so a page citation can programmatically open the PDF tab.
-  const [activeTab, setActiveTab] = useState('content')
+  const [activeTab, setActiveTab] = useState('reader')
   // Lazy-mount-then-keep-alive: a tab's content mounts on first activation and
   // then stays mounted (hidden via CSS) so switching back is instant — the PDF
   // isn't re-downloaded/re-parsed and the chapter markdown isn't re-rendered.
-  const [mountedTabs, setMountedTabs] = useState(() => new Set(['content']))
-  const handleTabChange = useCallback((tab: string) => {
+  const [mountedTabs, setMountedTabs] = useState(() => new Set(['reader']))
+
+  // --- Reader ↔ PDF page sync ----------------------------------------------- //
+  // One "last page read" per source. Whichever tab is active reports the page
+  // it's on; entering the other tab jumps it there. Because the panels stay
+  // mounted, a hidden viewer's page reports are ignored (a hidden PDF's
+  // virtualizer can report page 1) — `activeTabRef` is the gate.
+  const { storedPage, lastPageRef, recordPage } = useLastReadPage(sourceId)
+  const activeTabRef = useRef(activeTab)
+  const readerPageRef = useRef<number | null>(null)
+  const pdfPageRef = useRef<number | null>(null)
+  const readerPageJumpRef = useRef<((page: number) => void) | null>(null)
+  const pdfPageJumpRef = useRef<((page: number) => void) | null>(null)
+  // Frozen at the PDF tab's first mount: <Viewer> reads `initialPage` once, and
+  // the panel is never unmounted afterwards, so every later sync is a jump.
+  const pdfOpenPageRef = useRef<number | null>(null)
+  const [pendingPageSync, setPendingPageSync] = useState<{
+    tab: 'pdf' | 'reader'
+    page: number
+    nonce: number
+  } | null>(null)
+
+  const recordReaderPage = useCallback((page: number) => {
+    readerPageRef.current = page
+    if (activeTabRef.current === 'reader') recordPage(page)
+  }, [recordPage])
+
+  const recordPdfPage = useCallback((page: number) => {
+    pdfPageRef.current = page
+    if (activeTabRef.current === 'pdf') recordPage(page)
+  }, [recordPage])
+
+  // `syncPage: false` for a switch that already carries its own scroll target —
+  // an annotation jump or a `#p=N` citation — so page sync can't fight it.
+  const handleTabChange = useCallback((tab: string, options?: { syncPage?: boolean }) => {
+    const target = lastPageRef.current
+    // The first PDF mount opens at `initialPage`; syncing it too would jump a
+    // document that hasn't loaded yet.
+    const pdfFirstMount = tab === 'pdf' && pdfOpenPageRef.current == null
+    if (pdfFirstMount) pdfOpenPageRef.current = initialPage ?? target ?? 1
+
     setActiveTab(tab)
+    activeTabRef.current = tab
     setMountedTabs((prev) => (prev.has(tab) ? prev : new Set(prev).add(tab)))
+
+    const syncPage = (options?.syncPage ?? true) && !pdfFirstMount
+    if (syncPage && target != null && (tab === 'pdf' || tab === 'reader')) {
+      setPendingPageSync({ tab, page: target, nonce: Date.now() })
+    }
+
     // D8: remember the active tab per source so it survives reload.
     try {
       window.localStorage.setItem(TAB_PREF_PREFIX + sourceId, tab)
     } catch {
       // localStorage unavailable (private mode) — non-persistent is fine.
     }
-  }, [sourceId])
+  }, [sourceId, initialPage, lastPageRef])
+
+  // Applied a frame after the switch: the incoming panel is `display: none`
+  // until React commits, and scrollIntoView/jumpToPage no-op on a hidden node.
+  useEffect(() => {
+    if (!pendingPageSync) return
+    const { tab, page } = pendingPageSync
+    const raf = requestAnimationFrame(() => {
+      const currentPage = tab === 'reader' ? readerPageRef.current : pdfPageRef.current
+      if (currentPage === page) return
+      const jump = tab === 'reader' ? readerPageJumpRef.current : pdfPageJumpRef.current
+      jump?.(page)
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [pendingPageSync])
+
   const {
     source,
     insights,
@@ -245,9 +310,12 @@ export function SourceDetailContent({
   // Only PDFs carry a block-parse lifecycle; disable the poll for other sources.
   const isPdf = source ? isPdfAsset(source) : false
   const parseStatus = useParseStatus(isPdf ? sourceId : undefined)
-  // Reader tab (pdf-block-ingestion D6) is only usable once the block
-  // substrate is parsed for this source's current generation.
-  const readerReady = parseStatus.isSuccess
+  // The Reader tab renders the block substrate only once it's parsed for this
+  // source's current generation; otherwise (non-PDF, unparsed, failed parse) it
+  // falls back to the regenerated markdown. `parseSettled` keeps it from
+  // flashing the fallback while the status poll is still in flight.
+  const readerReady = isPdf && parseStatus.isSuccess
+  const parseSettled = !isPdf || parseStatus.isSuccess || parseStatus.isError
   const reparseMutation = useMutation({
     mutationFn: () => sourcesApi.reparse(sourceId),
     onSuccess: () => {
@@ -296,7 +364,7 @@ export function SourceDetailContent({
         toast.info(t('sources.annotations.jumpLegacyPdf'))
       }
       const tab: 'pdf' | 'reader' = goReader ? 'reader' : 'pdf'
-      if (activeTab !== tab) handleTabChange(tab)
+      if (activeTab !== tab) handleTabChange(tab, { syncPage: false })
       setPendingJump({ annotation, tab, nonce: Date.now() })
     },
     [annotations, activeTab, handleTabChange, t]
@@ -333,20 +401,20 @@ export function SourceDetailContent({
       restoredRef.current = true
       return
     }
-    const parseSettled = !isPdf || parseStatus.isSuccess || parseStatus.isError
     if (!parseSettled) return
     restoredRef.current = true
     try {
       const stored = window.localStorage.getItem(TAB_PREF_PREFIX + sourceId)
       if (!stored) return
+      const tab = LEGACY_TAB_ALIASES[stored] ?? stored
       const valid = new Set(BASE_TABS)
       if (isPdf) valid.add('pdf')
-      if (isPdf && parseStatus.isSuccess) valid.add('reader')
-      if (valid.has(stored)) handleTabChange(stored)
+      // Each viewer restores its own page on mount, so no sync on this switch.
+      if (valid.has(tab)) handleTabChange(tab, { syncPage: false })
     } catch {
       // localStorage unavailable — keep the default tab.
     }
-  }, [source, isPdf, initialPage, sourceId, parseStatus.isSuccess, parseStatus.isError, handleTabChange])
+  }, [source, isPdf, initialPage, sourceId, parseSettled, handleTabChange])
 
   // Header controls for PDF sources: the parse-lifecycle chip + a Re-process
   // action (confirm-gated). Hidden entirely for non-PDF sources.
@@ -375,7 +443,7 @@ export function SourceDetailContent({
   // PDF tab (the PDFViewer itself opens at the page). Runs once the source loads.
   useEffect(() => {
     if (initialPage != null && source && isPdfAsset(source)) {
-      handleTabChange('pdf')
+      handleTabChange('pdf', { syncPage: false })
     }
   }, [initialPage, source, handleTabChange])
 
@@ -465,34 +533,18 @@ export function SourceDetailContent({
     </DropdownMenu>
   )
 
+  // Reader leads and is never disabled — it falls back to the regenerated
+  // markdown when there's no block substrate to render.
   const tabTriggers = (
     <>
-      <TabsTrigger value="content">{t('sources.content')}</TabsTrigger>
+      <TabsTrigger value="reader">{t('sources.reader.tab')}</TabsTrigger>
+      {isPdfAsset(source) && (
+        <TabsTrigger value="pdf">{t('sources.viewPdf')}</TabsTrigger>
+      )}
       <TabsTrigger value="insights">
         {t('common.insights')} {insights.length > 0 && `(${insights.length})`}
       </TabsTrigger>
       <TabsTrigger value="details">{t('sources.details')}</TabsTrigger>
-      {isPdfAsset(source) && (
-        <TabsTrigger value="pdf">{t('sources.viewPdf')}</TabsTrigger>
-      )}
-      {isPdfAsset(source) && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            {/* A disabled TabsTrigger gets pointer-events:none, so hover hit-
-                testing falls through to this wrapping span — give it a real
-                (flex) box, matching the trigger's own flex-1 sizing, so the
-                tooltip still shows over the disabled area. */}
-            <span className="flex flex-1">
-              <TabsTrigger value="reader" disabled={!readerReady}>
-                {t('sources.reader.tab')}
-              </TabsTrigger>
-            </span>
-          </TooltipTrigger>
-          {!readerReady && (
-            <TooltipContent className="max-w-56">{t('sources.reader.disabledTooltip')}</TooltipContent>
-          )}
-        </Tooltip>
-      )}
     </>
   )
 
@@ -501,8 +553,35 @@ export function SourceDetailContent({
   // tab is opened.
   const tabPanels = (
     <>
-      <TabsContent value="content" forceMount className="mt-3 min-h-0 flex-1 overflow-y-auto data-[state=inactive]:hidden">
-        {mountedTabs.has('content') && <SourceContentTab source={source} />}
+      {/* ReaderView scrolls its own block list; the markdown fallback is a plain
+          Card and needs this panel to be the scroller. */}
+      <TabsContent
+        value="reader"
+        forceMount
+        className={`mt-3 flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden ${
+          readerReady ? '' : 'overflow-y-auto'
+        }`}
+      >
+        {mountedTabs.has('reader') &&
+          (!parseSettled ? (
+            <div className="flex flex-1 items-center justify-center p-8">
+              <LoadingSpinner />
+            </div>
+          ) : readerReady ? (
+            <ReaderView
+              sourceId={source.id}
+              onChatAboutHighlight={onChatAboutHighlight}
+              onReprocess={() => setReparseOpen(true)}
+              jumpApiRef={readerJumpRef}
+              initialPage={storedPage}
+              onPageChange={recordReaderPage}
+              pageJumpApiRef={readerPageJumpRef}
+            />
+          ) : (
+            // No block substrate (URL, transcript, unparsed or failed PDF) —
+            // render the regenerated markdown instead.
+            <SourceContentTab source={source} title={t('sources.reader.tab')} />
+          ))}
       </TabsContent>
 
       <TabsContent value="insights" forceMount className="mt-3 min-h-0 flex-1 overflow-y-auto data-[state=inactive]:hidden">
@@ -541,29 +620,21 @@ export function SourceDetailContent({
 
       {isPdfAsset(source) && (
         <TabsContent value="pdf" forceMount className="mt-3 flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
-          {/* initialPage is 0-based; the citation page is 1-indexed physical.
-              key remounts the viewer when the cited page changes. */}
+          {/* The viewer's initialPage is 0-based; both sources here are 1-indexed
+              physical pages. A `#p=N` citation wins — `key` remounts the viewer
+              when it changes, and pdfOpenPageRef stays frozen at the page the
+              tab first opened on. key must NOT track the synced page: that would
+              remount (and re-lay-out) pdf.js on every tab switch. */}
           {mountedTabs.has('pdf') && (
             <PDFViewer
               key={`pdf-${initialPage ?? 'first'}`}
               sourceId={source.id}
-              initialPage={initialPage != null ? Math.max(0, initialPage - 1) : undefined}
+              initialPage={Math.max(0, (initialPage ?? pdfOpenPageRef.current ?? 1) - 1)}
               onChatAboutHighlight={onChatAboutHighlight}
               onChatAboutHighlights={onChatAboutHighlights}
               jumpApiRef={pdfJumpRef}
-            />
-          )}
-        </TabsContent>
-      )}
-
-      {isPdfAsset(source) && (
-        <TabsContent value="reader" forceMount className="mt-3 flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
-          {mountedTabs.has('reader') && readerReady && (
-            <ReaderView
-              sourceId={source.id}
-              onChatAboutHighlight={onChatAboutHighlight}
-              onReprocess={() => setReparseOpen(true)}
-              jumpApiRef={readerJumpRef}
+              onPageChange={recordPdfPage}
+              pageJumpApiRef={pdfPageJumpRef}
             />
           )}
         </TabsContent>
@@ -692,7 +763,7 @@ export function SourceDetailContent({
       {/* Tabs Content */}
       <div className="flex min-h-0 flex-1 flex-col px-2">
         <Tabs value={activeTab} onValueChange={handleTabChange} className="flex min-h-0 w-full flex-1 flex-col">
-          <TabsList className={`grid w-full ${isPdfAsset(source) ? 'grid-cols-5' : 'grid-cols-3'} flex-shrink-0`}>
+          <TabsList className={`grid w-full ${isPdfAsset(source) ? 'grid-cols-4' : 'grid-cols-3'} flex-shrink-0`}>
             {tabTriggers}
           </TabsList>
           {tabPanels}

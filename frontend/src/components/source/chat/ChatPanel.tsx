@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useCallback, type ReactNode } from 'react'
+import { useState, useRef, useCallback, useEffect, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -65,6 +65,13 @@ interface ChatPanelProps {
   // render and route their jump to the active PDF/Reader tab.
   sourceId?: string
   autoFocus?: boolean
+  /**
+   * Bump to focus the composer and drop the caret at the end of the draft.
+   * Used when "Ask AI" stages a prompt instead of sending it, so the user can
+   * keep typing. A counter rather than a boolean: staging the same prompt twice
+   * must still re-focus.
+   */
+  focusSignal?: number
   pending?: MediaItem[]
   onAddPending?: (item: MediaItem) => void
   onRemovePending?: (index: number) => void
@@ -102,6 +109,7 @@ export function ChatPanel({
   chatScopeId,
   sourceId,
   autoFocus = false,
+  focusSignal,
   pending,
   onAddPending,
   onRemovePending,
@@ -178,6 +186,17 @@ export function ChatPanel({
       toast.error(t('common.noResults'))
     }
   }, [])
+
+  // Focus the composer when a caller stages a draft into it. Runs after the new
+  // value has been committed to the textarea, so `value.length` is the end of
+  // the staged prompt rather than of whatever it replaced.
+  useEffect(() => {
+    if (!focusSignal) return
+    const el = textareaRef.current
+    if (!el) return
+    el.focus()
+    el.setSelectionRange(el.value.length, el.value.length)
+  }, [focusSignal])
 
   // Send is allowed with text OR ≥1 pending attachment.
   const canSend = (inputValue.trim().length > 0 || pendingMedia.length > 0) && !isStreaming

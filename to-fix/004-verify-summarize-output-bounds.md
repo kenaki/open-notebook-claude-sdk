@@ -3,14 +3,22 @@ id: 004
 title: Verify silently truncates large sections; summaries generated ~3x longer than consumed; verify re-proofs the book 2.6x over
 type: correctness + efficiency
 severity: high
-status: open
+status: partially superseded (2026-07-09 — all three findings built + tested, but Finding 2's guard is one-sided; see to-fix/005)
 area: commands/verify_commands.py (fan-out + cleaned_content persist), commands/summary_commands.py (prompt + target selection)
 created: 2026-07-09
 blocks: restarting the verify/summarize phases on source:bms5qu1xfaq9vvlpm11f (queue deliberately paused)
-related: 60363df (orphan-storm fix + phase sequencing), 003 (section content bounds)
+related: 60363df (orphan-storm fix + phase sequencing), 003 (section content bounds), 005 (page bleed + the other half of Finding 2's guard)
 ---
 
-> **⏸ QUEUE PAUSED.** 460 queued `verify_clean_section` jobs cancelled and 186 `summarize_section` jobs held, to stop active data loss (see Finding 2). Fully reversible via the re-trigger endpoints at the bottom. Do not restart the phase before Finding 2 is fixed.
+> **▶ RESUMED 2026-07-09 ~16:00.** All three fixes landed (see "What was built" below); worker restarted on the guarded code and `verify_clean_source` re-triggered — 382 leaf jobs fanned out. Note the pause had NOT fully held: a 14:56 fan-out had 5 old-code verify jobs actively running when the fix landed; they were interrupted by the worker restart and their rows cancelled. A post-hoc audit found **0** sections below the 0.8 shrink floor, so the old-code writes did no further damage.
+>
+> **What was built** (uncommitted on `feature/multipanelchat` at time of writing):
+> - **Finding 2**: `_output_truncation_reason` in `commands/verify_commands.py` — rejects a proof when the provider reports a length stop (`done_reason`/`finish_reason == 'length'`) or the reply is under `_MIN_CLEANED_RATIO = 0.8` of the raw parse; rejected proofs become a `verify_flag` insight, `cleaned_content` stays unset.
+> - **Finding 1**: `verify_clean_source` fans out over `_leaf_section_ids` only (382 vs 472 jobs on the test book). Measured caveat: **114 of 1,122 pages are covered only by parent sections** (chapter intros etc.) — those pages stay on the immutable raw parse, unproofed, by design.
+> - **Finding 3**: summaries prompt for a ≤300-char routing blurb (`_SUMMARY_INSTRUCTION`) with `max_tokens=1024` — not the doc's suggested ~150, because this model thinks inline before answering and a tight cap truncates mid-think into an empty summary (B1's failure mode); `_MIN_SUMMARY_CHARS = 2000` size bound applied consistently in the fan-out, the stamped per-section job, and BOTH abstract readiness gates (a one-sided bound would deadlock the abstract). A tree where nothing qualifies completes instead of retry-failing. 171 summary targets on the test book (was 207).
+> - Tests: `tests/test_output_bounds.py` (17 cases).
+>
+> **Finding 4 (discovered during restart validation, fixed 16:15):** many verify jobs returned *empty* content with `done_reason: 'length'` and `eval_count == max_tokens` — qwen3.6 intermittently spends the ENTIRE 8192-token output budget on its thinking prelude and never starts the answer (~3.5 GPU-minutes per no-op job; the runaway predates the 004 fixes — first observed 15:48 under old code). Two contributing defaults: Esperanto's ChatOllama wrapper sets `num_ctx=8192` unless configured, so prompt+output never even fit the window (and big summary inputs were silently input-truncated all along). Fixes: `apply_reasoning_flag(model, False)` (new helper in `open_notebook/ai/provision.py`, sends `think:false` — both local models declare the `thinking` capability) on verify, summarize, and abstract generations; `num_ctx=32768` on all three; `_MAX_SUMMARY_INPUT_CHARS` 300K → 120K chars so the explicit input cap actually matches the window.
 
 ## TL;DR
 
@@ -115,9 +123,23 @@ So a truncated proof silently shortens that chapter **everywhere** — chat cont
 - Check the model's `finish_reason` for a length stop, if Ollama exposes it — that catches the cap case directly.
 - Threshold used for the cleanup pass was `len(cleaned) < len(content) * 0.8`; treat that as a starting point, not a measured optimum.
 
+> **⚠ 2026-07-09, later:** it was the wrong *quantity*, not just the wrong number.
+> Raw character count includes table artifacts (dash rules, pipes, cell padding), and
+> deleting those is verify's job — so a perfect proof can land at 67% and be rejected.
+> `Code Examples` returned exactly `raw − artifact` chars and was thrown away; 7 of 30
+> rejections are false. Compare **alphanumeric** characters instead. See to-fix/005
+> Finding 4.
+
 ### Already remediated
 
 `cleaned_content` was cleared on the one truncated section (Preface). **3 sections retain cleaned content**, at 100% / 133% / 177% of raw. The expansions are plausible (repairing broken tables and hyphenation adds characters) but **nobody has read them** — worth an eyeball before trusting them.
+
+> **⚠ 2026-07-09, later: they were read, and they were not plausible.** Verify renders
+> *whole pages* for sections that occupy part of a page, so an expanded proof is
+> usually the section's **neighbours' text** appended to it — not repaired formatting.
+> The guard below is one-sided: it bounds shrinkage and never bounds growth, so page
+> bleed and model commentary write through unchallenged. See **to-fix/005**. Do not
+> treat this finding as closed.
 
 ---
 

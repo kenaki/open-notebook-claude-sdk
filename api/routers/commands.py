@@ -76,6 +76,21 @@ async def execute_command(request: CommandExecutionRequest):
         )
 
 
+# NOTE: declared before /commands/jobs/{job_id} — FastAPI matches routes in
+# declaration order, so the literal "counts" segment must win over {job_id}.
+@router.get("/commands/jobs/counts", response_model=Dict[str, int])
+async def count_command_jobs():
+    """Per-status job totals (plus an 'all' sum) for the activity board."""
+    try:
+        return await CommandService.count_command_jobs()
+
+    except Exception as e:
+        logger.error(f"Error counting command jobs: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail="Failed to count command jobs"
+        )
+
+
 @router.get("/commands/jobs/{job_id}", response_model=CommandJobStatusResponse)
 async def get_command_job_status(job_id: str):
     """Get the status of a specific command job"""
