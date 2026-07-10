@@ -102,6 +102,51 @@ class UsageInfo(BaseModel):
     )
 
 
+class RecallRef(BaseModel):
+    """A structured recall reference — a pointer to a prior chat exchange or
+    annotation, surfaced on an AI message (study-memory Track B, chunk B3).
+
+    Matches the coordinator's RecallRef contract exactly (11 fields); the same
+    shape as ``api.routers.source_chat.RecallRef`` for the source-chat surface
+    (kept as a separate model per this router's file ownership). Metadata
+    only: never carries the exchange gist, the annotation note, or any answer
+    text — that's the structural spoiler guard (see domain/recall.py). The
+    extra backend-only ``id`` key that ``recall_search`` attaches for
+    ``get_past_discussion`` addressing (coordinator decision X-recall-id-key)
+    is filtered out before this model is built.
+    """
+
+    kind: str = Field(..., description="'exchange' or 'annotation'")
+    title: Optional[str] = Field(
+        None, description="Session title (exchange) or source title (annotation)"
+    )
+    session_id: Optional[str] = Field(
+        None, description="Full chat_session id (exchange only)"
+    )
+    scope: Optional[str] = Field(
+        None, description="'source' or 'notebook' (exchange only)"
+    )
+    source_id: Optional[str] = Field(
+        None,
+        description="Owning source id (annotation always; exchange when scope=source)",
+    )
+    notebook_id: Optional[str] = Field(
+        None, description="Owning notebook id (exchange when scope=notebook)"
+    )
+    message_id: Optional[str] = Field(
+        None, description="AI message id of the prior exchange (unused in v1 UI)"
+    )
+    annotation_id: Optional[str] = Field(
+        None, description="Full source_annotation id (annotation only)"
+    )
+    page: Optional[int] = Field(None, description="1-indexed page (annotation only)")
+    quote: Optional[str] = Field(
+        None,
+        description="<=200 char snippet: question (exchange) or highlight quote (annotation)",
+    )
+    similarity: float = Field(..., description="Vector similarity score")
+
+
 class MediaItem(BaseModel):
     type: Literal["image", "video"] = Field(..., description="Attachment kind")
     url: str = Field(..., description="Fetchable URL served by GET /chat/media/{file}")
@@ -133,6 +178,10 @@ class ChatMessage(BaseModel):
     )
     thinking: Optional[str] = Field(
         None, description="Extracted <think> reasoning, if the model produced any"
+    )
+    recall_refs: Optional[List[RecallRef]] = Field(
+        None,
+        description="Structured recall references (past discussions/highlights) carried by this message",
     )
 
 

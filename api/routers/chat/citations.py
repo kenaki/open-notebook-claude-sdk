@@ -11,6 +11,7 @@ from api.routers.chat.schemas import (
     ChatMessage,
     Citation,
     MediaItem,
+    RecallRef,
     ToolUseDisclosure,
     UsageInfo,
 )
@@ -145,6 +146,22 @@ async def _resolve_citations(
     return clean, citations, followups
 
 
+def _parse_recall_refs(extra: Dict[str, Any]) -> Optional[List[RecallRef]]:
+    """Parse ``additional_kwargs.recall_refs`` into contract-shaped RecallRef
+    models (study-memory Track B, chunk B3 — symmetric with
+    ``api.routers.source_chat._parse_recall_refs``). Filters each raw ref dict
+    down to the known RecallRef fields, silently dropping the backend-only
+    ``id`` key (and any other unknown key) rather than raising. Absent/empty
+    (older sessions, human turns) -> None."""
+    raw_refs = extra.get("recall_refs") if isinstance(extra, dict) else None
+    if not raw_refs:
+        return None
+    return [
+        RecallRef(**{k: v for k, v in ref.items() if k in RecallRef.model_fields})
+        for ref in raw_refs
+    ]
+
+
 async def _build_chat_message(msg: Any, fallback_index: int) -> ChatMessage:
     """Convert a LangChain message into a ChatMessage, resolving AI citations."""
     mtype = msg.type if hasattr(msg, "type") else "unknown"
@@ -173,6 +190,11 @@ async def _build_chat_message(msg: Any, fallback_index: int) -> ChatMessage:
     # messages checkpointed before this change — degrade to None via .get().
     raw_thinking = extra.get("thinking") if isinstance(extra, dict) else None
     thinking = raw_thinking if isinstance(raw_thinking, str) and raw_thinking else None
+
+    # Structured recall references (study-memory, chunk B3): ride in the AI
+    # message's additional_kwargs, same seam as tool_uses/thinking; absent on
+    # human turns and on messages checkpointed before this change.
+    recall_refs = _parse_recall_refs(extra) if isinstance(extra, dict) else None
 
     # Per-turn token usage (Claude Agent path only; Esperanto messages carry no
     # "usage" key → stays None → serializes as usage: null). The context window
@@ -219,4 +241,5 @@ async def _build_chat_message(msg: Any, fallback_index: int) -> ChatMessage:
         media=media,
         usage=usage,
         thinking=thinking,
+        recall_refs=recall_refs,
     )

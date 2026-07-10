@@ -72,3 +72,70 @@ async def test_build_chat_message_empty_thinking_string_is_none():
     msg = _FakeMessage(additional_kwargs={"thinking": ""})
     result = await _build_chat_message(msg, 0)
     assert result.thinking is None
+
+
+# --- recall_refs (study-memory Track B, chunk B3) --------------------------
+
+
+_RAW_EXCHANGE_REF = {
+    "id": "chat_exchange:abc123",  # backend-only key — must be dropped
+    "kind": "exchange",
+    "title": "Kinematics discussion",
+    "session_id": "chat_session:xyz",
+    "scope": "notebook",
+    "source_id": None,
+    "notebook_id": "notebook:1",
+    "message_id": "ai-42",
+    "annotation_id": None,
+    "page": None,
+    "quote": "what is acceleration?",
+    "similarity": 0.82,
+}
+
+
+@pytest.mark.asyncio
+async def test_build_chat_message_with_recall_refs_serializes_contract_shape():
+    msg = _FakeMessage(
+        mtype="ai", additional_kwargs={"recall_refs": [_RAW_EXCHANGE_REF]}
+    )
+    result = await _build_chat_message(msg, 0)
+    assert result.recall_refs is not None
+    assert len(result.recall_refs) == 1
+    ref = result.recall_refs[0]
+    assert ref.kind == "exchange"
+    assert ref.title == "Kinematics discussion"
+    assert ref.session_id == "chat_session:xyz"
+    assert ref.scope == "notebook"
+    assert ref.notebook_id == "notebook:1"
+    assert ref.message_id == "ai-42"
+    assert ref.quote == "what is acceleration?"
+    assert ref.similarity == 0.82
+
+
+@pytest.mark.asyncio
+async def test_build_chat_message_recall_refs_drops_backend_only_id_key():
+    """recall_search emits an extra backend-only `id` key (X-recall-id-key);
+    the frontend contract is exactly 11 fields and must never see it."""
+    msg = _FakeMessage(
+        mtype="ai", additional_kwargs={"recall_refs": [_RAW_EXCHANGE_REF]}
+    )
+    result = await _build_chat_message(msg, 0)
+    ref = result.recall_refs[0]
+    assert not hasattr(ref, "id")
+    assert "id" not in ref.model_dump()
+
+
+@pytest.mark.asyncio
+async def test_build_chat_message_without_recall_refs_defaults_to_none():
+    """Older sessions / messages with no recall_refs key must deserialize
+    cleanly to None, never raise."""
+    msg = _FakeMessage(mtype="ai", additional_kwargs={})
+    result = await _build_chat_message(msg, 0)
+    assert result.recall_refs is None
+
+
+@pytest.mark.asyncio
+async def test_build_chat_message_human_turn_carries_no_recall_refs():
+    msg = _FakeMessage(mtype="human", additional_kwargs={}, content="hello")
+    result = await _build_chat_message(msg, 0)
+    assert result.recall_refs is None

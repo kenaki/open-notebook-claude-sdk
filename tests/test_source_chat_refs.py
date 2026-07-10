@@ -18,6 +18,8 @@ from open_notebook.graphs.source_chat import (
     build_annotation_context_section,
 )
 
+from api.routers.source_chat import RecallRef, _parse_recall_refs
+
 # --- annotation_block_content -------------------------------------------------
 
 
@@ -108,3 +110,57 @@ def test_chat_input_annotation_fields_default_to_empty():
     inp = ChatCompletionInput(session_id="chat_session:x", message="hello")
     assert inp.annotation_context is None
     assert inp.annotation_refs == []
+
+
+# --- recall_refs deserialization (study-memory Track B, chunk B3) -------------
+
+
+_RAW_ANNOTATION_REF = {
+    "id": "source_annotation:xyz",  # backend-only key — must be dropped
+    "kind": "annotation",
+    "title": "Chapter 2: Kinematics",
+    "session_id": None,
+    "scope": None,
+    "source_id": "source:s1",
+    "notebook_id": None,
+    "message_id": None,
+    "annotation_id": "source_annotation:xyz",
+    "page": 12,
+    "quote": "v = a t",
+    "similarity": 0.91,
+}
+
+
+def test_parse_recall_refs_serializes_contract_shape():
+    refs = _parse_recall_refs({"recall_refs": [_RAW_ANNOTATION_REF]})
+    assert refs is not None
+    assert len(refs) == 1
+    ref = refs[0]
+    assert isinstance(ref, RecallRef)
+    assert ref.kind == "annotation"
+    assert ref.title == "Chapter 2: Kinematics"
+    assert ref.source_id == "source:s1"
+    assert ref.annotation_id == "source_annotation:xyz"
+    assert ref.page == 12
+    assert ref.quote == "v = a t"
+    assert ref.similarity == 0.91
+
+
+def test_parse_recall_refs_drops_backend_only_id_key():
+    """recall_search emits an extra backend-only `id` key (X-recall-id-key);
+    the frontend contract is exactly 11 fields and must never see it."""
+    refs = _parse_recall_refs({"recall_refs": [_RAW_ANNOTATION_REF]})
+    ref = refs[0]
+    assert not hasattr(ref, "id")
+    assert "id" not in ref.model_dump()
+
+
+def test_parse_recall_refs_absent_key_yields_none():
+    """Older sessions / human turns with no recall_refs key must deserialize
+    cleanly to None, never raise."""
+    assert _parse_recall_refs({}) is None
+    assert _parse_recall_refs({"thinking": "unrelated"}) is None
+
+
+def test_parse_recall_refs_empty_list_yields_none():
+    assert _parse_recall_refs({"recall_refs": []}) is None
