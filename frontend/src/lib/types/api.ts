@@ -701,4 +701,8 @@ export interface WorkspaceChat {
   pending: MediaItem[] // uploaded attachments staged in the composer (Chunk 12)
   parentId: string | null // id of the chat this was spun off from (Plan D sub-chats)
   quote: string | null // the highlighted passage that seeded this sub-chat (Plan D)
+  // Staged annotation refs from a panel Ask-AI (cross-interface-study / Chunk
+  // A3): attaches to whatever the user next sends from this chat's composer,
+  // then clears on a successful send. Undefined/absent = nothing staged.
+  askRefs?: string[]
 }

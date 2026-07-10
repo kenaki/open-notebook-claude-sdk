@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo } from 'react'
+import { Quote, X } from 'lucide-react'
 import { ChatPanel } from '@/components/source/chat'
 import { ChatModelPicker } from './ChatModelPicker'
 import { ContextPreviewPopover } from './ContextPreview'
@@ -69,6 +70,10 @@ export function ChatDock({ notebookId, chat, contextStats }: ChatDockProps) {
   const addPending = useChatWorkspaceStore((s) => s.addPending)
   const removePending = useChatWorkspaceStore((s) => s.removePending)
   const clearPending = useChatWorkspaceStore((s) => s.clearPending)
+  // Panel Ask-AI staging (Chunk A3): `askRefs` on the active chat + the shared
+  // focus-signal counter bumped whenever a panel stages a draft in.
+  const setAskRefs = useChatWorkspaceStore((s) => s.setAskRefs)
+  const composerFocusSignal = useChatWorkspaceStore((s) => s.composerFocusSignal)
 
   // Per-notebook default model for side chats (annotative sub-chats), set via
   // the dock header's settings cog and applied at sub-chat creation time.
@@ -123,13 +128,24 @@ export function ChatDock({ notebookId, chat, contextStats }: ChatDockProps) {
       handleOpen(session.id)
     }
     const wasNew = sessions.find((s) => s.id === target)?.title === newChatLabel
+    // Attach any staged annotation refs (Chunk A3 — panel Ask-AI) to whatever
+    // the user actually sends; they may have edited the staged prompt first.
+    const askRefs = chats[target]?.askRefs ?? null
     // sendMessageTo submits the job (202) and returns immediately; isStreaming
     // (chat.getIsSending) derives from the jobs-store for the rest of the lifecycle.
-    const result = await chat.sendMessageTo(target, message, undefined, media)
-    // Only finalize on success: clearing pending media / renaming on a failed
-    // send would discard the user's staged attachments and draft (Track A / A2).
+    const result = await chat.sendMessageTo(
+      target,
+      message,
+      undefined,
+      media,
+      askRefs?.length ? { annotationIds: askRefs } : undefined
+    )
+    // Only finalize on success: clearing pending media / renaming / clearing
+    // askRefs on a failed send would discard the user's staged attachments,
+    // draft, and refs (Track A / A2/A3 — a failed send must be retryable).
     if (result.ok) {
       clearPending(target)
+      if (askRefs) setAskRefs(target, null)
       if (wasNew) chat.renameSession(target, deriveChatTitle(message, media, t))
     }
     return result
@@ -156,6 +172,30 @@ export function ChatDock({ notebookId, chat, contextStats }: ChatDockProps) {
   const draftProps = activeChat
     ? { draft: activeChat.draft, onDraftChange: (v: string) => setDraft(activeChat.id, v) }
     : {}
+
+  // Shown above the composer while a panel Ask-AI prompt is staged (Chunk A3):
+  // what's attached + an escape hatch. Mirrors the source page's header block
+  // (`sources/[id]/page.tsx`), minus the "new chat" affordance — the dock's
+  // active chat is already the target, there's no separate side-chat to spawn.
+  const askRefs = activeChat?.askRefs ?? null
+  const composerHeader = askRefs ? (
+    <div className="flex items-center gap-1.5 rounded-md border border-border bg-muted/40 px-2 py-1.5">
+      <Quote className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" aria-hidden="true" />
+      <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+        {askRefs.length > 0
+          ? t('chat.askDraft.attached').replace('{count}', String(askRefs.length))
+          : t('chat.askDraft.attachedQuote')}
+      </span>
+      <button
+        type="button"
+        onClick={() => activeMainId && setAskRefs(activeMainId, null)}
+        aria-label={t('chat.askDraft.dismiss')}
+        className="flex-shrink-0 rounded p-0.5 text-muted-foreground hover:bg-background"
+      >
+        <X className="h-3 w-3" aria-hidden="true" />
+      </button>
+    </div>
+  ) : undefined
 
   const dockControls = (
     <>
@@ -204,6 +244,8 @@ export function ChatDock({ notebookId, chat, contextStats }: ChatDockProps) {
           chatScopeId={activeMainId ?? undefined}
           composerMaxHeight={140}
           composerToolbar={dockControls}
+          composerHeader={composerHeader}
+          focusSignal={composerFocusSignal}
           emptyStateTitle={t('chat.emptyTitle')}
           emptyStateHelper={t('chat.emptyHelper')}
           suggestions={[

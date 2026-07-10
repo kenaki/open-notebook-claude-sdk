@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
 import {
   DndContext,
   PointerSensor,
@@ -26,6 +27,22 @@ import { useNotebookWorkspaceStrict } from './NotebookWorkspaceProvider'
 import { useTranslation } from '@/lib/hooks/use-translation'
 
 const DOCK = 'dock'
+
+// Cap on annotation ids sent with one tag-ask (mirrors Track C's
+// `sources/[id]/page.tsx` MAX_TAG_ANNOTATION_IDS — Q-tag-ask-limit).
+const MAX_TAG_ANNOTATION_IDS = 10
+
+// FALLBACK ONLY (mirrors sources/[id]/page.tsx's composeTagPrompt): quote-paste
+// for highlights that carry no annotation id (a fresh, un-saved selection).
+// Hardcoded English, matching the single-highlight prompt below (neither is
+// localized on the source page either).
+function composeTagPrompt(tag: string, quotes: string[]): string {
+  if (quotes.length === 0) {
+    return `Tell me about my highlights tagged "${tag}".`
+  }
+  const list = quotes.map((quote, i) => `${i + 1}. "${quote}"`).join('\n')
+  return `Here are my highlights tagged "${tag}":\n${list}\n\nHelp me understand these together.`
+}
 
 /**
  * Dual-Panel Deep Dive (tier 3 of the three-tier flow). Renders the active Main
@@ -70,6 +87,13 @@ export function DeepDiveWorkspace({ activeChatId }: { activeChatId: string }) {
   const setSourcePanelWidth = useChatWorkspaceStore((s) => s.setSourcePanelWidth)
   const sourcePanelFocusToken = useChatWorkspaceStore((s) => s.sourcePanelFocusToken)
   const clearSourcePanelFocus = useChatWorkspaceStore((s) => s.clearSourcePanelFocus)
+  // Panel Ask-AI staging (Chunk A3): stages into the DOCK's active chat —
+  // the store's `activeChatId` (renamed locally to avoid shadowing this
+  // component's routed `activeChatId` prop, which is a different thing).
+  const dockActiveChatId = useChatWorkspaceStore((s) => s.activeChatId)
+  const setDraft = useChatWorkspaceStore((s) => s.setDraft)
+  const setAskRefs = useChatWorkspaceStore((s) => s.setAskRefs)
+  const bumpComposerFocus = useChatWorkspaceStore((s) => s.bumpComposerFocus)
 
   // Freshly-spawned side chat that should grab focus / be popped once it lands.
   const [pendingFocusId, setPendingFocusId] = useState<string | null>(null)
@@ -168,6 +192,46 @@ export function DeepDiveWorkspace({ activeChatId }: { activeChatId: string }) {
   // A single visible panel (lone dock or a maximized panel) fills the canvas.
   const fillSingle = visibleTokens.length === 1
 
+  // Stage an Ask-AI prompt into the dock's active chat composer (Chunk A3):
+  // never auto-sends — mirrors the source page's `stageAsk`. No-ops if no
+  // main chat is currently docked (nothing to stage into).
+  const stagePanelAsk = useCallback(
+    (text: string, annotationIds: string[]) => {
+      if (!dockActiveChatId) return
+      setDraft(dockActiveChatId, text)
+      setAskRefs(dockActiveChatId, annotationIds.length ? annotationIds : null)
+      bumpComposerFocus()
+    },
+    [dockActiveChatId, setDraft, setAskRefs, bumpComposerFocus]
+  )
+
+  const handlePanelChatAboutHighlight = useCallback(
+    (quote: string, annotationId?: string) => {
+      if (annotationId) {
+        stagePanelAsk(t('chat.askAboutHighlight'), [annotationId])
+      } else {
+        stagePanelAsk(`Tell me about this highlighted passage: "${quote}"`, [])
+      }
+    },
+    [stagePanelAsk, t]
+  )
+
+  const handlePanelChatAboutHighlights = useCallback(
+    (quotes: string[], tag: string, annotationIds?: string[]) => {
+      const ids = annotationIds ?? []
+      if (ids.length > 0) {
+        const capped = ids.slice(0, MAX_TAG_ANNOTATION_IDS)
+        if (ids.length > MAX_TAG_ANNOTATION_IDS) {
+          toast.info(t('chat.tagAskTruncated').replace('{tag}', tag))
+        }
+        stagePanelAsk(t('chat.askAboutTag').replace('{tag}', tag), capped)
+      } else {
+        stagePanelAsk(composeTagPrompt(tag, quotes), [])
+      }
+    },
+    [stagePanelAsk, t]
+  )
+
   // Spawn a sub-chat from a selected passage → pop + focus once it lands.
   const handleCreateSubChat = async (parentId: string, quote: string) => {
     const session = await chat.createSubChat(parentId, quote)
@@ -249,7 +313,12 @@ export function DeepDiveWorkspace({ activeChatId }: { activeChatId: string }) {
           onToggleMaximize={() => toggleMaximized(token)}
           scrollIntoViewOnMount={pendingFocusId === token}
         >
-          <SourceReaderPanel sourceId={token} onClose={() => closeSourcePanel(token)} />
+          <SourceReaderPanel
+            sourceId={token}
+            onClose={() => closeSourcePanel(token)}
+            onChatAboutHighlight={handlePanelChatAboutHighlight}
+            onChatAboutHighlights={handlePanelChatAboutHighlights}
+          />
         </PanelCard>
       )
     }

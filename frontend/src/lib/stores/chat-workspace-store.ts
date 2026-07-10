@@ -71,6 +71,10 @@ interface ChatWorkspaceState {
   // Transient signal: a token that just (re)opened and should scroll into view.
   // DeepDiveWorkspace mirrors this into its local `pendingFocusId` and clears it.
   sourcePanelFocusToken: string | null
+  // Bumped whenever a panel Ask-AI stages a draft into the dock composer
+  // (Chunk A3) — ChatDock forwards it as `ChatPanel`'s `focusSignal` prop so
+  // the textarea grabs focus the same way the source page's staging does.
+  composerFocusSignal: number
   // Reconcile the workspace with the live session list: keep existing entries'
   // state, create CLOSED entries for new sessions (sidebar redesign — sessions
   // no longer auto-open), and, when nothing is open, open the most-recent main
@@ -87,6 +91,10 @@ interface ChatWorkspaceState {
   // sidebar, popped panels lose their track token. Chunk 3 wires the X to this.
   closeChat: (id: string) => void
   setDraft: (id: string, draft: string) => void
+  // Stage (or clear, with `null`) structured annotation refs on a chat's
+  // composer (Chunk A3 — panel Ask-AI). Attaches to the next send;
+  // cleared by the caller only once that send resolves ok.
+  setAskRefs: (id: string, refs: string[] | null) => void
   // Composer media staging (Plan D / Chunk 12): items already uploaded via
   // POST /chat/media, held until the next send moves them onto the message.
   addPending: (id: string, item: MediaItem) => void
@@ -102,6 +110,7 @@ interface ChatWorkspaceState {
   closeSourcePanel: (token: string) => void
   setSourcePanelWidth: (token: string, width: number) => void
   clearSourcePanelFocus: () => void
+  bumpComposerFocus: () => void
 }
 
 export const useChatWorkspaceStore = create<ChatWorkspaceState>()((set) => ({
@@ -111,6 +120,7 @@ export const useChatWorkspaceStore = create<ChatWorkspaceState>()((set) => ({
   activeChatId: null,
   sourcePanels: {},
   sourcePanelFocusToken: null,
+  composerFocusSignal: 0,
   syncChats: (sessions) =>
     set((state) => {
       const ids = sessions.map((s) => s.id)
@@ -239,6 +249,12 @@ export const useChatWorkspaceStore = create<ChatWorkspaceState>()((set) => ({
       if (!chat) return {}
       return { chats: { ...state.chats, [id]: { ...chat, draft } } }
     }),
+  setAskRefs: (id, refs) =>
+    set((state) => {
+      const chat = state.chats[id]
+      if (!chat) return {}
+      return { chats: { ...state.chats, [id]: { ...chat, askRefs: refs ?? undefined } } }
+    }),
   addPending: (id, item) =>
     set((state) => {
       const chat = state.chats[id]
@@ -308,4 +324,5 @@ export const useChatWorkspaceStore = create<ChatWorkspaceState>()((set) => ({
       return { sourcePanels: { ...state.sourcePanels, [token]: { ...panel, width } } }
     }),
   clearSourcePanelFocus: () => set({ sourcePanelFocusToken: null }),
+  bumpComposerFocus: () => set((state) => ({ composerFocusSignal: state.composerFocusSignal + 1 })),
 }))
